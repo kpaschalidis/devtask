@@ -10,6 +10,7 @@ import { createTask, getTask, initializeStore, listTasks } from "./task-store.js
 import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-inspection.js";
 import { attachTmuxSession, killTmuxSession, startTmuxSession, tmuxSessionName } from "./tmux.js";
 import { buildCodexCommand, readConfig, writeConfig } from "./config.js";
+import { assertCanMark, parseManualStatus } from "./lifecycle.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -310,6 +311,32 @@ export function createCli(): Command {
           updatedAt: new Date().toISOString()
         });
         console.log(`Updated command for task ${id}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("mark")
+    .description("Manually mark a stopped task as review, done, blocked, or cancelled.")
+    .argument("<id>")
+    .argument("<status>")
+    .action((id: string, statusValue: string) => {
+      try {
+        const paths = resolvePaths();
+        const meta = getTask(paths, id);
+        const status = parseManualStatus(statusValue);
+        assertCanMark(meta, status);
+
+        writeTaskMeta(taskMetaPath(paths, id), {
+          ...meta,
+          status,
+          supervisorPid: null,
+          childPid: null,
+          tmuxSession: status === "cancelled" ? null : meta.tmuxSession,
+          updatedAt: new Date().toISOString()
+        });
+        console.log(`Marked task ${id} as ${status}`);
       } catch (error) {
         printError(error);
       }

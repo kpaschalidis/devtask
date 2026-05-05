@@ -47,6 +47,15 @@ devtask review fix-login
 
 `devtask review` summarizes the task metadata, latest run record, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to test, merge, resume, or discard the task worktree.
 
+You can correct or record human decisions on stopped tasks:
+
+```bash
+devtask mark fix-login review
+devtask mark fix-login done
+devtask mark fix-login blocked
+devtask mark fix-login cancelled
+```
+
 Run a task inside tmux when you want an attachable terminal:
 
 ```bash
