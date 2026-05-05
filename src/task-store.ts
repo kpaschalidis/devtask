@@ -79,6 +79,7 @@ export async function createTask(
     command: options.command ?? defaultCommand,
     supervisorPid: null,
     childPid: null,
+    tmuxSession: null,
     failCount: 0,
     maxRetries,
     createdAt: now,

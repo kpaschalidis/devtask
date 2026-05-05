@@ -8,6 +8,7 @@ import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, listTasks } from "./task-store.js";
 import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-inspection.js";
+import { attachTmuxSession, killTmuxSession, startTmuxSession, tmuxSessionName } from "./tmux.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -187,6 +188,7 @@ export function createCli(): Command {
         console.log(`Command: ${meta.command}`);
         console.log(`Supervisor PID: ${meta.supervisorPid ?? "-"}`);
         console.log(`Child PID: ${meta.childPid ?? "-"}`);
+        console.log(`tmux: ${meta.tmuxSession ?? "-"}`);
         console.log(`Failures: ${meta.failCount}/${meta.maxRetries}`);
         console.log(`Updated: ${meta.updatedAt}`);
       } catch (error) {
@@ -198,12 +200,17 @@ export function createCli(): Command {
     .command("start")
     .description("Start or resume a task worker in the background.")
     .argument("<id>")
-    .action((id: string) => {
+    .option("--tmux", "Run the worker inside a tmux session")
+    .action((id: string, options: { tmux?: boolean }) => {
       try {
         const paths = resolvePaths();
-        const pid = startWorker(paths, id);
+        const started = startWorker(paths, id, { tmux: options.tmux === true });
         console.log(`Started task ${id}`);
-        console.log(`Supervisor PID: ${pid ?? "-"}`);
+        if (started.tmuxSession) {
+          console.log(`tmux: ${started.tmuxSession}`);
+          return;
+        }
+        console.log(`Supervisor PID: ${started.pid ?? "-"}`);
       } catch (error) {
         printError(error);
       }
@@ -243,9 +250,28 @@ export function createCli(): Command {
           throw new DevtaskError(`Task ${id} is ${meta.status}, not paused`);
         }
 
-        const pid = startWorker(paths, id);
+        const started = startWorker(paths, id, { tmux: meta.tmuxSession !== null });
         console.log(`Resumed task ${id}`);
-        console.log(`Supervisor PID: ${pid ?? "-"}`);
+        if (started.tmuxSession) {
+          console.log(`tmux: ${started.tmuxSession}`);
+          return;
+        }
+        console.log(`Supervisor PID: ${started.pid ?? "-"}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("attach")
+    .description("Attach to a task tmux session.")
+    .argument("<id>")
+    .action((id: string) => {
+      try {
+        const paths = resolvePaths();
+        const meta = getTask(paths, id);
+        const session = meta.tmuxSession ?? tmuxSessionName(paths, id);
+        attachTmuxSession(session);
       } catch (error) {
         printError(error);
       }
@@ -267,11 +293,15 @@ export function createCli(): Command {
           return;
         }
         terminateProcessGroup(meta.supervisorPid);
+        if (meta.tmuxSession) {
+          killTmuxSession(meta.tmuxSession);
+        }
         writeTaskMeta(taskMetaPath(paths, id), {
           ...meta,
           status: "cancelled",
           supervisorPid: null,
           childPid: null,
+          tmuxSession: null,
           updatedAt: new Date().toISOString()
         });
         console.log(`Cancelled task ${id}`);
@@ -283,7 +313,12 @@ export function createCli(): Command {
   return program;
 }
 
-function startWorker(paths: ReturnType<typeof resolvePaths>, id: string): number | null {
+interface StartedWorker {
+  pid: number | null;
+  tmuxSession: string | null;
+}
+
+function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options: { tmux?: boolean } = {}): StartedWorker {
   const meta = getTask(paths, id);
   if (isProcessAlive(meta.supervisorPid)) {
     throw new DevtaskError(`Task ${id} is already supervised by PID ${meta.supervisorPid}`);
@@ -297,12 +332,24 @@ function startWorker(paths: ReturnType<typeof resolvePaths>, id: string): number
     status: "running" as const,
     supervisorPid: null,
     childPid: null,
+    tmuxSession: options.tmux ? tmuxSessionName(paths, id) : null,
     failCount: 0,
     updatedAt: new Date().toISOString()
   };
   writeTaskMeta(taskMetaPath(paths, id), next);
 
   const workerPath = fileURLToPath(new URL("./bin/devtask-worker.js", import.meta.url));
+  const workerCommand = [process.execPath, workerPath, id, "--root", paths.root];
+
+  if (options.tmux) {
+    if (!next.tmuxSession) {
+      throw new DevtaskError("Unable to derive tmux session name");
+    }
+
+    startTmuxSession(next.tmuxSession, workerCommand, paths.root);
+    return { pid: null, tmuxSession: next.tmuxSession };
+  }
+
   const child = spawn(process.execPath, [workerPath, id, "--root", paths.root], {
     cwd: paths.root,
     detached: true,
@@ -313,10 +360,11 @@ function startWorker(paths: ReturnType<typeof resolvePaths>, id: string): number
   writeTaskMeta(taskMetaPath(paths, id), {
     ...next,
     supervisorPid: child.pid ?? null,
+    tmuxSession: null,
     updatedAt: new Date().toISOString()
   });
 
-  return child.pid ?? null;
+  return { pid: child.pid ?? null, tmuxSession: null };
 }
 
 function parsePositiveInteger(value: string): number {

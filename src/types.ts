@@ -21,6 +21,7 @@ export interface TaskMeta {
   command: string;
   supervisorPid: number | null;
   childPid: number | null;
+  tmuxSession: string | null;
   failCount: number;
   maxRetries: number;
   createdAt: string;

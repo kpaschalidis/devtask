@@ -11,6 +11,8 @@ Each task gets:
 
 The goal is to remove the friction of manually juggling multiple agent terminals while keeping each task isolated and inspectable.
 
+One installed `devtask` command can be used across all of your local repositories. State is intentionally repo-local: each target repository gets its own `.devtask` directory, tasks, worktrees, and branches.
+
 ## Install
 
 ```bash
@@ -33,6 +35,13 @@ devtask list
 devtask status fix-login
 devtask logs fix-login
 devtask review fix-login
+```
+
+Run a task inside tmux when you want an attachable terminal:
+
+```bash
+devtask start fix-login --tmux
+devtask attach fix-login
 ```
 
 Pause future runs without killing the current command:
