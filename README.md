@@ -56,8 +56,9 @@ devtask list
 devtask status fix-login
 devtask logs fix-login
 devtask logs -f fix-login
-devtask review fix-login
-devtask verify fix-login
+devtask inspect fix-login
+devtask check fix-login
+devtask review-agent fix-login
 devtask mark fix-login approved
 devtask pr fix-login
 devtask ci fix-login
@@ -66,10 +67,14 @@ devtask ci fix-login
 If a worker command exits successfully but does not write a terminal `result.json`, devtask moves the task to `review` instead of looping forever. Inspect it with:
 
 ```bash
-devtask review fix-login
+devtask inspect fix-login
 ```
 
-`devtask review` summarizes the task metadata, latest run record, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to test, merge, resume, or discard the task worktree.
+`devtask inspect` summarizes task metadata, the latest run, latest checks, latest review-agent artifact, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to check, review, merge, resume, or discard the task worktree.
+
+`devtask check` runs deterministic commands configured with `devtask config verify`, such as tests, typecheck, and lint.
+
+`devtask review-agent` runs a read-only Codex review pass and stores the artifact under `.devtask/tasks/<id>/reviews/`.
 
 You can correct or record human decisions on stopped tasks:
 
@@ -169,7 +174,7 @@ Configure verification commands per repository:
 
 ```bash
 devtask config verify 'npm test' 'npm run typecheck'
-devtask verify my-task
+devtask check my-task
 ```
 
 Open a draft PR after review/approval:

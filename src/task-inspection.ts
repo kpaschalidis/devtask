@@ -7,12 +7,14 @@ import type { TaskMeta } from "./types.js";
 import { isProcessAlive } from "./processes.js";
 import { runCommandOrThrow } from "./process-runner.js";
 import { readLatestVerification, type VerificationRecord } from "./verification.js";
+import { readLatestReviewAgent, type ReviewAgentRecord } from "./review-agent.js";
 
 export interface TaskReview {
   meta: TaskMeta;
   changedFiles: string[];
   latestRun: RunRecord | null;
   latestVerification: VerificationRecord | null;
+  latestReviewAgent: ReviewAgentRecord | null;
   result: unknown;
 }
 
@@ -27,6 +29,7 @@ export async function buildTaskReview(paths: DevtaskPaths, meta: TaskMeta): Prom
     changedFiles: await listChangedFiles(meta.worktreePath),
     latestRun: readLatestRun(paths, meta.id),
     latestVerification: readLatestVerification(paths, meta.id),
+    latestReviewAgent: readLatestReviewAgent(paths, meta.id),
     result: readJsonIfExists(meta.resultPath)
   };
 }

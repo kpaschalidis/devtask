@@ -13,6 +13,7 @@ import { buildCodexCommand, readConfig, writeConfig } from "./config.js";
 import { assertCanMark, parseManualStatus } from "./lifecycle.js";
 import { runVerification } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
+import { runReviewAgent } from "./review-agent.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -149,57 +150,82 @@ export function createCli(): Command {
       }
     });
 
+  const inspectAction = async (id: string): Promise<void> => {
+    const paths = resolvePaths();
+    const review = await buildTaskReview(paths, getTask(paths, id));
+    console.log(`Task: ${review.meta.id}`);
+    console.log(`Status: ${review.meta.status}`);
+    console.log(`Branch: ${review.meta.branch}`);
+    console.log(`Worktree: ${review.meta.worktreePath}`);
+    if (review.meta.prUrl) {
+      console.log(`PR: ${review.meta.prUrl}`);
+    }
+    console.log(`Failures: ${review.meta.failCount}/${review.meta.maxRetries}`);
+
+    if (review.latestRun) {
+      console.log("");
+      console.log("Latest run:");
+      console.log(`  Status: ${review.latestRun.status}`);
+      console.log(`  Exit code: ${review.latestRun.exitCode ?? "-"}`);
+      console.log(`  Started: ${review.latestRun.startedAt}`);
+      console.log(`  Finished: ${review.latestRun.finishedAt}`);
+      console.log(`  Log: ${review.latestRun.logPath}`);
+    }
+
+    if (review.latestVerification) {
+      console.log("");
+      console.log("Latest check:");
+      console.log(`  Status: ${review.latestVerification.status}`);
+      console.log(`  Started: ${review.latestVerification.startedAt}`);
+      console.log(`  Finished: ${review.latestVerification.finishedAt}`);
+      for (const step of review.latestVerification.steps) {
+        console.log(`  ${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
+      }
+    }
+
+    if (review.latestReviewAgent) {
+      console.log("");
+      console.log("Latest review agent:");
+      console.log(`  Status: ${review.latestReviewAgent.status}`);
+      console.log(`  Started: ${review.latestReviewAgent.startedAt}`);
+      console.log(`  Finished: ${review.latestReviewAgent.finishedAt}`);
+      console.log(`  Output: ${review.latestReviewAgent.outputPath}`);
+    }
+
+    console.log("");
+    console.log("Changed files:");
+    if (review.changedFiles.length === 0) {
+      console.log("  none");
+    } else {
+      for (const file of review.changedFiles) {
+        console.log(`  ${file}`);
+      }
+    }
+
+    console.log("");
+    console.log("Result:");
+    console.log(JSON.stringify(review.result, null, 2));
+  };
+
   program
-    .command("review")
-    .description("Summarize task state, latest run, result, and worktree changes.")
+    .command("inspect")
+    .description("Show task state, latest run/check/review artifacts, result, and worktree changes.")
     .argument("<id>")
     .action(async (id: string) => {
       try {
-        const paths = resolvePaths();
-        const review = await buildTaskReview(paths, getTask(paths, id));
-        console.log(`Task: ${review.meta.id}`);
-        console.log(`Status: ${review.meta.status}`);
-        console.log(`Branch: ${review.meta.branch}`);
-        console.log(`Worktree: ${review.meta.worktreePath}`);
-        if (review.meta.prUrl) {
-          console.log(`PR: ${review.meta.prUrl}`);
-        }
-        console.log(`Failures: ${review.meta.failCount}/${review.meta.maxRetries}`);
+        await inspectAction(id);
+      } catch (error) {
+        printError(error);
+      }
+    });
 
-        if (review.latestRun) {
-          console.log("");
-          console.log("Latest run:");
-          console.log(`  Status: ${review.latestRun.status}`);
-          console.log(`  Exit code: ${review.latestRun.exitCode ?? "-"}`);
-          console.log(`  Started: ${review.latestRun.startedAt}`);
-          console.log(`  Finished: ${review.latestRun.finishedAt}`);
-          console.log(`  Log: ${review.latestRun.logPath}`);
-        }
-
-        if (review.latestVerification) {
-          console.log("");
-          console.log("Latest verification:");
-          console.log(`  Status: ${review.latestVerification.status}`);
-          console.log(`  Started: ${review.latestVerification.startedAt}`);
-          console.log(`  Finished: ${review.latestVerification.finishedAt}`);
-          for (const step of review.latestVerification.steps) {
-            console.log(`  ${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
-          }
-        }
-
-        console.log("");
-        console.log("Changed files:");
-        if (review.changedFiles.length === 0) {
-          console.log("  none");
-        } else {
-          for (const file of review.changedFiles) {
-            console.log(`  ${file}`);
-          }
-        }
-
-        console.log("");
-        console.log("Result:");
-        console.log(JSON.stringify(review.result, null, 2));
+  program
+    .command("review")
+    .description("Compatibility alias for inspect. Use review-agent for code review.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        await inspectAction(id);
       } catch (error) {
         printError(error);
       }
@@ -392,32 +418,75 @@ export function createCli(): Command {
       }
     });
 
+  const checkAction = async (id: string): Promise<void> => {
+    const paths = resolvePaths();
+    const meta = getTask(paths, id);
+    if (meta.status === "running") {
+      throw new DevtaskError(`Task ${id} is running; stop it before checking`);
+    }
+
+    const config = readConfig(paths);
+    if (config.verify.length === 0) {
+      throw new DevtaskError("No check commands configured. Use devtask config verify <command...>");
+    }
+
+    const record = await runVerification(paths, meta, config.verify);
+    console.log(`Check: ${record.status}`);
+    for (const step of record.steps) {
+      console.log(`${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
+      if (step.exitCode !== 0) {
+        if (step.stdout.trim()) console.log(step.stdout.trim());
+        if (step.stderr.trim()) console.error(step.stderr.trim());
+        process.exit(1);
+      }
+    }
+  };
+
+  program
+    .command("check")
+    .description("Run configured deterministic check commands in the task worktree.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        await checkAction(id);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
   program
     .command("verify")
-    .description("Run configured verification commands in the task worktree.")
+    .description("Compatibility alias for check.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        await checkAction(id);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("review-agent")
+    .description("Run a read-only review agent and store its review artifact.")
     .argument("<id>")
     .action(async (id: string) => {
       try {
         const paths = resolvePaths();
         const meta = getTask(paths, id);
         if (meta.status === "running") {
-          throw new DevtaskError(`Task ${id} is running; stop it before verification`);
+          throw new DevtaskError(`Task ${id} is running; stop it before review-agent`);
         }
 
         const config = readConfig(paths);
-        if (config.verify.length === 0) {
-          throw new DevtaskError("No verification commands configured. Use devtask config verify <command...>");
-        }
-
-        const record = await runVerification(paths, meta, config.verify);
-        console.log(`Verification: ${record.status}`);
-        for (const step of record.steps) {
-          console.log(`${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
-          if (step.exitCode !== 0) {
-            if (step.stdout.trim()) console.log(step.stdout.trim());
-            if (step.stderr.trim()) console.error(step.stderr.trim());
-            process.exit(1);
-          }
+        const record = await runReviewAgent(paths, meta, {
+          model: meta.model ?? config.codex.model,
+          fullAuto: config.codex.fullAuto
+        });
+        console.log(`Review agent: ${record.status}`);
+        console.log(`Output: ${record.outputPath}`);
+        if (record.status !== "passed") {
+          process.exit(record.exitCode === 0 ? 2 : 1);
         }
       } catch (error) {
         printError(error);

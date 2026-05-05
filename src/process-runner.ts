@@ -7,10 +7,15 @@ export interface CommandResult {
   exitCode: number | null;
 }
 
-export async function runCommand(file: string, args: string[], options: { cwd: string }): Promise<CommandResult> {
+export async function runCommand(
+  file: string,
+  args: string[],
+  options: { cwd: string; env?: NodeJS.ProcessEnv }
+): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, {
       cwd: options.cwd,
+      env: options.env,
       stdio: ["ignore", "pipe", "pipe"]
     });
 
