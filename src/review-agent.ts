@@ -28,7 +28,13 @@ export interface ReviewAgentStart {
 export async function runReviewAgent(
   paths: DevtaskPaths,
   meta: TaskMeta,
-  options: { model?: string | null; fullAuto?: boolean; onStart?: (start: ReviewAgentStart) => void }
+  options: {
+    model?: string | null;
+    fullAuto?: boolean;
+    onStart?: (start: ReviewAgentStart) => void;
+    onStdout?: (chunk: string) => void;
+    onStderr?: (chunk: string) => void;
+  }
 ): Promise<ReviewAgentRecord> {
   const reviewId = newRunId();
   const reviewsDir = path.join(taskDir(paths, meta.id), "reviews");
@@ -47,25 +53,35 @@ export async function runReviewAgent(
   ].join("\n");
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
-  const command = `${buildCodexCommand({ model: options.model, fullAuto: options.fullAuto })} > ${shellQuote(outputPath)}`;
+  const command = buildCodexCommand({ model: options.model, fullAuto: options.fullAuto });
   options.onStart?.({ command, outputPath, promptPath });
   const startedAt = new Date().toISOString();
+  const output = fs.createWriteStream(outputPath, { flags: "w" });
   const result = await runCommand("sh", ["-c", command], {
     cwd: meta.worktreePath,
     env: {
       ...process.env,
       DEVTASK_TASK_DIR: taskDir(paths, meta.id),
       DEVTASK_TASK_PATH: promptPath
+    },
+    onStdout: (chunk) => {
+      output.write(chunk);
+      options.onStdout?.(chunk);
+    },
+    onStderr: (chunk) => {
+      output.write(chunk);
+      options.onStderr?.(chunk);
     }
   });
+  await closeStream(output);
   const finishedAt = new Date().toISOString();
-  const output = readOutput(outputPath);
+  const reviewOutput = readOutput(outputPath);
 
   const record: ReviewAgentRecord = {
     schemaVersion: 1,
     reviewId,
     taskId: meta.id,
-    status: result.exitCode === 0 && output.includes("REVIEW PASSED") ? "passed" : result.exitCode === 0 ? "findings" : "failed",
+    status: result.exitCode === 0 && reviewOutput.includes("REVIEW PASSED") ? "passed" : result.exitCode === 0 ? "findings" : "failed",
     command,
     outputPath,
     startedAt,
@@ -74,9 +90,6 @@ export async function runReviewAgent(
   };
 
   fs.writeFileSync(path.join(reviewsDir, `${reviewId}.json`), `${JSON.stringify(record, null, 2)}\n`);
-  if (!fs.existsSync(outputPath)) {
-    fs.writeFileSync(outputPath, `${result.stdout}${result.stderr}`);
-  }
   return record;
 }
 
@@ -107,6 +120,9 @@ function readOutput(outputPath: string): string {
   }
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
+function closeStream(stream: fs.WriteStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    stream.once("error", reject);
+    stream.end(resolve);
+  });
 }

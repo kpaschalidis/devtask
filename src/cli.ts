@@ -502,6 +502,12 @@ export function createCli(): Command {
         console.log(`Prompt: ${start.promptPath}`);
         console.log(`Output: ${start.outputPath}`);
         console.log(`Command: ${start.command}`);
+      },
+      onStdout: (chunk) => {
+        process.stdout.write(chunk);
+      },
+      onStderr: (chunk) => {
+        process.stderr.write(chunk);
       }
     });
     console.log(`Review agent: ${record.status}`);

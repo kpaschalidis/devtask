@@ -10,7 +10,7 @@ export interface CommandResult {
 export async function runCommand(
   file: string,
   args: string[],
-  options: { cwd: string; env?: NodeJS.ProcessEnv }
+  options: { cwd: string; env?: NodeJS.ProcessEnv; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void }
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, {
@@ -26,9 +26,11 @@ export async function runCommand(
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       stdout += chunk;
+      options.onStdout?.(chunk);
     });
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
+      options.onStderr?.(chunk);
     });
     child.once("error", reject);
     child.once("exit", (exitCode) => {
