@@ -20,6 +20,6 @@
 
 ## Slice 3: Developer Control Surface
 
-- [ ] Implement `logs`, `review`, and `doctor`.
-- [ ] Add readable command output and actionable failure messages.
-- [ ] Document local workflows in README.
+- [x] Implement `logs`, `review`, and `doctor`.
+- [x] Add readable command output and actionable failure messages.
+- [x] Document local workflows in README.

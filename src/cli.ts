@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DevtaskError } from "./errors.js";
@@ -6,6 +7,7 @@ import { resolvePaths, taskMetaPath } from "./paths.js";
 import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, listTasks } from "./task-store.js";
+import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-inspection.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -38,6 +40,91 @@ export function createCli(): Command {
     });
 
   program
+    .command("logs")
+    .description("Print the latest task log.")
+    .argument("<id>")
+    .option("-n, --lines <count>", "Number of trailing lines to print", parsePositiveInteger, 120)
+    .action((id: string, options: { lines: number }) => {
+      try {
+        const paths = resolvePaths();
+        getTask(paths, id);
+        const logPath = readLatestLogPath(paths, id);
+        if (!logPath) {
+          console.log(`No logs for task ${id}`);
+          return;
+        }
+
+        console.log(`Log: ${logPath}`);
+        console.log(tailFile(logPath, options.lines));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("review")
+    .description("Summarize task state, latest run, result, and worktree changes.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolvePaths();
+        const review = await buildTaskReview(paths, getTask(paths, id));
+        console.log(`Task: ${review.meta.id}`);
+        console.log(`Status: ${review.meta.status}`);
+        console.log(`Branch: ${review.meta.branch}`);
+        console.log(`Worktree: ${review.meta.worktreePath}`);
+        console.log(`Failures: ${review.meta.failCount}/${review.meta.maxRetries}`);
+
+        if (review.latestRun) {
+          console.log("");
+          console.log("Latest run:");
+          console.log(`  Status: ${review.latestRun.status}`);
+          console.log(`  Exit code: ${review.latestRun.exitCode ?? "-"}`);
+          console.log(`  Started: ${review.latestRun.startedAt}`);
+          console.log(`  Finished: ${review.latestRun.finishedAt}`);
+          console.log(`  Log: ${review.latestRun.logPath}`);
+        }
+
+        console.log("");
+        console.log("Changed files:");
+        if (review.changedFiles.length === 0) {
+          console.log("  none");
+        } else {
+          for (const file of review.changedFiles) {
+            console.log(`  ${file}`);
+          }
+        }
+
+        console.log("");
+        console.log("Result:");
+        console.log(JSON.stringify(review.result, null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("doctor")
+    .description("Inspect task metadata for stale process and filesystem state.")
+    .action(() => {
+      try {
+        const paths = resolvePaths();
+        const issues = listTasks(paths).flatMap((summary) => inspectTaskHealth(getTask(paths, summary.id)));
+
+        if (issues.length === 0) {
+          console.log("No issues found");
+          return;
+        }
+
+        for (const issue of issues) {
+          console.log(`${issue.taskId}: ${issue.message}`);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
     .command("create")
     .description("Create a task with its own durable state and git worktree.")
     .argument("<id>")
@@ -47,15 +134,15 @@ export function createCli(): Command {
     .option("--max-retries <count>", "Maximum worker retries", parsePositiveInteger)
     .action(
       async (id: string, options: { goal?: string; branch?: string; cmd?: string; maxRetries?: number }) => {
-      try {
-        const paths = resolvePaths();
-        const meta = await createTask(paths, id, { ...options, command: options.cmd });
-        console.log(`Created task ${meta.id}`);
-        console.log(`Branch: ${meta.branch}`);
-        console.log(`Worktree: ${meta.worktreePath}`);
-      } catch (error) {
-        printError(error);
-      }
+        try {
+          const paths = resolvePaths();
+          const meta = await createTask(paths, id, { ...options, command: options.cmd });
+          console.log(`Created task ${meta.id}`);
+          console.log(`Branch: ${meta.branch}`);
+          console.log(`Worktree: ${meta.worktreePath}`);
+        } catch (error) {
+          printError(error);
+        }
       }
     );
 
@@ -238,4 +325,9 @@ function parsePositiveInteger(value: string): number {
     throw new DevtaskError("Expected a positive integer");
   }
   return parsed;
+}
+
+function tailFile(filePath: string, lineCount: number): string {
+  const content = fs.readFileSync(filePath, "utf8");
+  return content.split("\n").slice(-lineCount).join("\n");
 }
