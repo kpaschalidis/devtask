@@ -197,6 +197,37 @@ export function createCli(): Command {
     });
 
   program
+    .command("command")
+    .description("Show or update a task worker command.")
+    .argument("<id>")
+    .argument("[command...]")
+    .action((id: string, commandParts: string[]) => {
+      try {
+        const paths = resolvePaths();
+        const meta = getTask(paths, id);
+        const command = commandParts.join(" ").trim();
+
+        if (!command) {
+          console.log(meta.command);
+          return;
+        }
+
+        if (meta.status === "running") {
+          throw new DevtaskError(`Task ${id} is running; pause or cancel it before changing the command`);
+        }
+
+        writeTaskMeta(taskMetaPath(paths, id), {
+          ...meta,
+          command,
+          updatedAt: new Date().toISOString()
+        });
+        console.log(`Updated command for task ${id}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
     .command("start")
     .description("Start or resume a task worker in the background.")
     .argument("<id>")

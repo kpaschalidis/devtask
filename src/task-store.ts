@@ -56,7 +56,7 @@ export async function createTask(
   const resultPath = resultJsonPath(paths, id);
   const targetWorktreePath = worktreePath(paths, id);
   const now = new Date().toISOString();
-  const defaultCommand = `codex run ${JSON.stringify(taskPath)}`;
+  const defaultCommand = `codex exec - < "$DEVTASK_TASK_PATH"`;
 
   fs.writeFileSync(
     taskPath,

@@ -85,13 +85,19 @@ devtask doctor
 By default, a task runs:
 
 ```bash
-codex run "<task.md path>"
+codex exec - < "$DEVTASK_TASK_PATH"
 ```
 
 You can override it at creation time:
 
 ```bash
 devtask create my-task --cmd "npm test"
+```
+
+You can also update an existing task command:
+
+```bash
+devtask command my-task 'npm test'
 ```
 
 The worker command runs from the task worktree and receives these environment variables:

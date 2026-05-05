@@ -30,6 +30,7 @@ describe("task store", () => {
       id: "fix-login",
       status: "created",
       branch: "task/fix-login",
+      command: 'codex exec - < "$DEVTASK_TASK_PATH"',
       supervisorPid: null,
       childPid: null,
       failCount: 0,
