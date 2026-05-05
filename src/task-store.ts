@@ -1,0 +1,112 @@
+import fs from "node:fs";
+import path from "node:path";
+import type { DevtaskPaths } from "./paths.js";
+import {
+  resultJsonPath,
+  stateMarkdownPath,
+  taskDir,
+  taskMarkdownPath,
+  taskMetaPath,
+  worktreePath
+} from "./paths.js";
+import { assertValidTaskId } from "./task-id.js";
+import { readTaskMeta, writeTaskMeta } from "./meta.js";
+import { createTaskWorktree } from "./git.js";
+import { DevtaskError } from "./errors.js";
+import type { TaskMeta, TaskSummary } from "./types.js";
+
+export interface CreateTaskOptions {
+  goal?: string;
+  branch?: string;
+  maxRetries?: number;
+}
+
+export function initializeStore(paths: DevtaskPaths): void {
+  fs.mkdirSync(paths.tasksDir, { recursive: true });
+  fs.mkdirSync(paths.worktreesDir, { recursive: true });
+}
+
+export async function createTask(
+  paths: DevtaskPaths,
+  id: string,
+  options: CreateTaskOptions = {}
+): Promise<TaskMeta> {
+  assertValidTaskId(id);
+  initializeStore(paths);
+
+  const dir = taskDir(paths, id);
+  const metaFile = taskMetaPath(paths, id);
+
+  if (fs.existsSync(metaFile)) {
+    throw new DevtaskError(`Task ${id} already exists`);
+  }
+
+  fs.mkdirSync(path.join(dir, "runs"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+
+  const branch = options.branch ?? `task/${id}`;
+  const taskPath = taskMarkdownPath(paths, id);
+  const statePath = stateMarkdownPath(paths, id);
+  const resultPath = resultJsonPath(paths, id);
+  const targetWorktreePath = worktreePath(paths, id);
+  const now = new Date().toISOString();
+
+  fs.writeFileSync(
+    taskPath,
+    `# Task ${id}\n\n## Goal\n${options.goal ?? ""}\n\n## Instructions\n- Keep this task stateful and update state.md as work progresses.\n`
+  );
+  fs.writeFileSync(statePath, `# State: ${id}\n\n## Progress\n- Created ${now}\n`);
+  fs.writeFileSync(resultPath, "{\n  \"status\": \"pending\"\n}\n");
+
+  await createTaskWorktree(paths.root, branch, targetWorktreePath);
+
+  const meta: TaskMeta = {
+    schemaVersion: 1,
+    id,
+    status: "created",
+    branch,
+    worktreePath: targetWorktreePath,
+    taskPath,
+    statePath,
+    resultPath,
+    supervisorPid: null,
+    childPid: null,
+    failCount: 0,
+    maxRetries: options.maxRetries ?? 5,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  writeTaskMeta(metaFile, meta);
+  return meta;
+}
+
+export function listTasks(paths: DevtaskPaths): TaskSummary[] {
+  if (!fs.existsSync(paths.tasksDir)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(paths.tasksDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => readTaskMeta(taskMetaPath(paths, entry.name)))
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((meta) => ({
+      id: meta.id,
+      status: meta.status,
+      branch: meta.branch,
+      worktreePath: meta.worktreePath,
+      failCount: meta.failCount,
+      maxRetries: meta.maxRetries,
+      updatedAt: meta.updatedAt
+    }));
+}
+
+export function getTask(paths: DevtaskPaths, id: string): TaskMeta {
+  assertValidTaskId(id);
+  const metaFile = taskMetaPath(paths, id);
+  if (!fs.existsSync(metaFile)) {
+    throw new DevtaskError(`Task ${id} does not exist`);
+  }
+  return readTaskMeta(metaFile);
+}

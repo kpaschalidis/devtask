@@ -1,0 +1,37 @@
+{
+  "name": "devtask",
+  "version": "1.0.0",
+  "description": "Local persistent task workers for agent-driven development.",
+  "type": "module",
+  "bin": {
+    "devtask": "./dist/bin/devtask.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/chmod-bin.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "agents",
+    "cli",
+    "developer-tools",
+    "orchestration",
+    "tasks"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^14.0.3",
+    "execa": "^9.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}
