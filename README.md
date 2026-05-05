@@ -15,6 +15,25 @@ One installed `devtask` command can be used across all of your local repositorie
 
 ## Install
 
+## Prerequisites
+
+- Git with worktree support.
+- Node.js 22.x recommended. Use one Node version consistently in every shell that runs `devtask`.
+- npm matching that Node installation.
+- Codex CLI installed and authenticated.
+- GitHub CLI (`gh`) installed and authenticated for `devtask pr` and `devtask ci`.
+- tmux installed only if you want attachable task sessions with `devtask start --tmux`.
+
+Recommended local setup:
+
+```bash
+nvm use 22
+nvm alias default 22
+node --version
+gh auth status
+codex --version
+```
+
 ```bash
 npm install
 npm run build
@@ -26,6 +45,7 @@ npm link
 ```bash
 devtask init
 devtask config model gpt-5.2
+devtask config verify 'npm test -w @converge/v0' 'npm run typecheck -w @converge/v0'
 
 devtask create fix-login \
   --goal "Fix login redirect loop and add regression coverage"
@@ -37,6 +57,10 @@ devtask status fix-login
 devtask logs fix-login
 devtask logs -f fix-login
 devtask review fix-login
+devtask verify fix-login
+devtask mark fix-login approved
+devtask pr fix-login
+devtask ci fix-login
 ```
 
 If a worker command exits successfully but does not write a terminal `result.json`, devtask moves the task to `review` instead of looping forever. Inspect it with:
@@ -51,10 +75,19 @@ You can correct or record human decisions on stopped tasks:
 
 ```bash
 devtask mark fix-login review
+devtask mark fix-login approved
 devtask mark fix-login done
 devtask mark fix-login blocked
 devtask mark fix-login cancelled
 ```
+
+Common states:
+
+- `review`: useful work exists and needs human inspection
+- `approved`: human accepted the local diff and it can be turned into a PR
+- `pr-open`: a GitHub PR exists
+- `ci-passed` / `ci-failed`: PR checks were inspected
+- `done`: accepted and complete
 
 Run a task inside tmux when you want an attachable terminal:
 
@@ -130,6 +163,21 @@ You can also update an existing task command:
 
 ```bash
 devtask command my-task 'npm test'
+```
+
+Configure verification commands per repository:
+
+```bash
+devtask config verify 'npm test' 'npm run typecheck'
+devtask verify my-task
+```
+
+Open a draft PR after review/approval:
+
+```bash
+devtask mark my-task approved
+devtask pr my-task
+devtask ci my-task
 ```
 
 The worker command runs from the task worktree and receives these environment variables:

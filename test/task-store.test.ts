@@ -21,7 +21,8 @@ describe("task store", () => {
       codex: {
         model: null,
         fullAuto: true
-      }
+      },
+      verify: []
     });
   });
 
@@ -62,7 +63,8 @@ describe("task store", () => {
       codex: {
         model: "gpt-5.2",
         fullAuto: true
-      }
+      },
+      verify: []
     });
 
     const meta = await createTask(paths, "model-task");

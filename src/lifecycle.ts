@@ -1,7 +1,7 @@
 import { DevtaskError } from "./errors.js";
 import type { TaskMeta, TaskStatus } from "./types.js";
 
-export const MANUAL_STATUSES = ["review", "done", "blocked", "cancelled"] as const;
+export const MANUAL_STATUSES = ["review", "approved", "done", "blocked", "cancelled"] as const;
 export type ManualStatus = (typeof MANUAL_STATUSES)[number];
 
 export function parseManualStatus(value: string): ManualStatus {

@@ -62,6 +62,7 @@ export function parseTaskMeta(value: unknown): TaskMeta {
     supervisorPid: requireNullableNumber(value, "supervisorPid"),
     childPid: requireNullableNumber(value, "childPid"),
     tmuxSession: value.tmuxSession === null ? null : requireString(value, "tmuxSession"),
+    prUrl: value.prUrl === undefined || value.prUrl === null ? null : requireString(value, "prUrl"),
     failCount: requireNonNegativeInteger(value, "failCount"),
     maxRetries: requireNonNegativeInteger(value, "maxRetries"),
     createdAt: requireString(value, "createdAt"),

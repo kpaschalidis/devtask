@@ -7,6 +7,7 @@ export interface DevtaskConfig {
     model: string | null;
     fullAuto: boolean;
   };
+  verify: string[];
 }
 
 export const DEFAULT_CONFIG: DevtaskConfig = {
@@ -14,7 +15,8 @@ export const DEFAULT_CONFIG: DevtaskConfig = {
   codex: {
     model: null,
     fullAuto: true
-  }
+  },
+  verify: []
 };
 
 export function readConfig(paths: DevtaskPaths): DevtaskConfig {
@@ -28,7 +30,8 @@ export function readConfig(paths: DevtaskPaths): DevtaskConfig {
     codex: {
       model: typeof value.codex?.model === "string" ? value.codex.model : null,
       fullAuto: typeof value.codex?.fullAuto === "boolean" ? value.codex.fullAuto : true
-    }
+    },
+    verify: Array.isArray(value.verify) ? value.verify.filter((item): item is string => typeof item === "string") : []
   };
 }
 

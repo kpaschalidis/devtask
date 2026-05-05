@@ -88,6 +88,7 @@ export async function createTask(
     supervisorPid: null,
     childPid: null,
     tmuxSession: null,
+    prUrl: null,
     failCount: 0,
     maxRetries,
     createdAt: now,

@@ -6,11 +6,13 @@ import type { RunRecord } from "./run-record.js";
 import type { TaskMeta } from "./types.js";
 import { isProcessAlive } from "./processes.js";
 import { runCommandOrThrow } from "./process-runner.js";
+import { readLatestVerification, type VerificationRecord } from "./verification.js";
 
 export interface TaskReview {
   meta: TaskMeta;
   changedFiles: string[];
   latestRun: RunRecord | null;
+  latestVerification: VerificationRecord | null;
   result: unknown;
 }
 
@@ -24,6 +26,7 @@ export async function buildTaskReview(paths: DevtaskPaths, meta: TaskMeta): Prom
     meta,
     changedFiles: await listChangedFiles(meta.worktreePath),
     latestRun: readLatestRun(paths, meta.id),
+    latestVerification: readLatestVerification(paths, meta.id),
     result: readJsonIfExists(meta.resultPath)
   };
 }

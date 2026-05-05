@@ -3,6 +3,11 @@ export const TASK_STATUSES = [
   "running",
   "paused",
   "review",
+  "approved",
+  "pr-open",
+  "ci-running",
+  "ci-failed",
+  "ci-passed",
   "blocked",
   "done",
   "failed",
@@ -25,6 +30,7 @@ export interface TaskMeta {
   supervisorPid: number | null;
   childPid: number | null;
   tmuxSession: string | null;
+  prUrl: string | null;
   failCount: number;
   maxRetries: number;
   createdAt: string;

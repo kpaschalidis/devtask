@@ -18,6 +18,7 @@ function meta(status: TaskMeta["status"]): TaskMeta {
     supervisorPid: null,
     childPid: null,
     tmuxSession: null,
+    prUrl: null,
     failCount: 0,
     maxRetries: 5,
     createdAt: "2026-01-01T00:00:00.000Z",

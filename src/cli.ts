@@ -11,6 +11,8 @@ import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-in
 import { attachTmuxSession, killTmuxSession, startTmuxSession, tmuxSessionName } from "./tmux.js";
 import { buildCodexCommand, readConfig, writeConfig } from "./config.js";
 import { assertCanMark, parseManualStatus } from "./lifecycle.js";
+import { runVerification } from "./verification.js";
+import { runCommand, runCommandOrThrow } from "./process-runner.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -52,6 +54,40 @@ export function createCli(): Command {
         const paths = resolvePaths();
         initializeStore(paths);
         console.log(JSON.stringify(readConfig(paths), null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  config
+    .command("verify")
+    .description("Show or replace repo-local verification commands.")
+    .argument("[commands...]")
+    .action((commands: string[]) => {
+      try {
+        const paths = resolvePaths();
+        initializeStore(paths);
+        const current = readConfig(paths);
+
+        if (commands.length === 0) {
+          if (current.verify.length === 0) {
+            console.log("No verification commands configured");
+            return;
+          }
+          for (const command of current.verify) {
+            console.log(command);
+          }
+          return;
+        }
+
+        writeConfig(paths, {
+          ...current,
+          verify: commands
+        });
+        console.log("Verification commands:");
+        for (const command of commands) {
+          console.log(`  ${command}`);
+        }
       } catch (error) {
         printError(error);
       }
@@ -125,6 +161,9 @@ export function createCli(): Command {
         console.log(`Status: ${review.meta.status}`);
         console.log(`Branch: ${review.meta.branch}`);
         console.log(`Worktree: ${review.meta.worktreePath}`);
+        if (review.meta.prUrl) {
+          console.log(`PR: ${review.meta.prUrl}`);
+        }
         console.log(`Failures: ${review.meta.failCount}/${review.meta.maxRetries}`);
 
         if (review.latestRun) {
@@ -135,6 +174,17 @@ export function createCli(): Command {
           console.log(`  Started: ${review.latestRun.startedAt}`);
           console.log(`  Finished: ${review.latestRun.finishedAt}`);
           console.log(`  Log: ${review.latestRun.logPath}`);
+        }
+
+        if (review.latestVerification) {
+          console.log("");
+          console.log("Latest verification:");
+          console.log(`  Status: ${review.latestVerification.status}`);
+          console.log(`  Started: ${review.latestVerification.startedAt}`);
+          console.log(`  Finished: ${review.latestVerification.finishedAt}`);
+          for (const step of review.latestVerification.steps) {
+            console.log(`  ${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
+          }
         }
 
         console.log("");
@@ -318,7 +368,7 @@ export function createCli(): Command {
 
   program
     .command("mark")
-    .description("Manually mark a stopped task as review, done, blocked, or cancelled.")
+    .description("Manually mark a stopped task as review, approved, done, blocked, or cancelled.")
     .argument("<id>")
     .argument("<status>")
     .action((id: string, statusValue: string) => {
@@ -337,6 +387,101 @@ export function createCli(): Command {
           updatedAt: new Date().toISOString()
         });
         console.log(`Marked task ${id} as ${status}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("verify")
+    .description("Run configured verification commands in the task worktree.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolvePaths();
+        const meta = getTask(paths, id);
+        if (meta.status === "running") {
+          throw new DevtaskError(`Task ${id} is running; stop it before verification`);
+        }
+
+        const config = readConfig(paths);
+        if (config.verify.length === 0) {
+          throw new DevtaskError("No verification commands configured. Use devtask config verify <command...>");
+        }
+
+        const record = await runVerification(paths, meta, config.verify);
+        console.log(`Verification: ${record.status}`);
+        for (const step of record.steps) {
+          console.log(`${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
+          if (step.exitCode !== 0) {
+            if (step.stdout.trim()) console.log(step.stdout.trim());
+            if (step.stderr.trim()) console.error(step.stderr.trim());
+            process.exit(1);
+          }
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("pr")
+    .description("Commit task worktree changes, push branch, and open a GitHub PR.")
+    .argument("<id>")
+    .option("--title <title>", "PR title")
+    .option("--body <body>", "PR body")
+    .option("--ready", "Create a ready-for-review PR instead of a draft")
+    .action(async (id: string, options: { title?: string; body?: string; ready?: boolean }) => {
+      try {
+        const paths = resolvePaths();
+        const meta = getTask(paths, id);
+        if (meta.status === "running") {
+          throw new DevtaskError(`Task ${id} is running; stop it before opening a PR`);
+        }
+        if (!["approved", "review", "done", "ci-failed"].includes(meta.status)) {
+          throw new DevtaskError(`Task ${id} is ${meta.status}; mark it review or approved before opening a PR`);
+        }
+
+        const prUrl = await createPullRequest(meta, {
+          title: options.title ?? meta.id,
+          body: options.body ?? defaultPrBody(meta),
+          draft: options.ready !== true
+        });
+
+        writeTaskMeta(taskMetaPath(paths, id), {
+          ...meta,
+          status: "pr-open",
+          prUrl,
+          updatedAt: new Date().toISOString()
+        });
+        console.log(prUrl);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("ci")
+    .description("Check GitHub PR CI status for a task.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolvePaths();
+        const meta = getTask(paths, id);
+        if (!meta.prUrl) {
+          throw new DevtaskError(`Task ${id} has no PR URL`);
+        }
+
+        const result = await runCommand("gh", ["pr", "checks", meta.prUrl], { cwd: meta.worktreePath });
+        process.stdout.write(result.stdout);
+        process.stderr.write(result.stderr);
+
+        const status = result.exitCode === 0 ? "ci-passed" : "ci-failed";
+        writeTaskMeta(taskMetaPath(paths, id), {
+          ...meta,
+          status,
+          updatedAt: new Date().toISOString()
+        });
       } catch (error) {
         printError(error);
       }
@@ -534,4 +679,44 @@ function followFile(filePath: string, lineCount: number): void {
   child.once("error", (error) => {
     printError(new DevtaskError(`Failed to follow log: ${error.message}`));
   });
+}
+
+async function createPullRequest(
+  meta: ReturnType<typeof getTask>,
+  options: { title: string; body: string; draft: boolean }
+): Promise<string> {
+  await runCommandOrThrow("gh", ["--version"], { cwd: meta.worktreePath });
+  await runCommandOrThrow("git", ["add", "-A"], { cwd: meta.worktreePath });
+
+  const staged = await runCommand("git", ["diff", "--cached", "--quiet"], { cwd: meta.worktreePath });
+  if (staged.exitCode !== 0) {
+    await runCommandOrThrow("git", ["commit", "-m", options.title], { cwd: meta.worktreePath });
+  }
+
+  await runCommandOrThrow("git", ["push", "-u", "origin", meta.branch], { cwd: meta.worktreePath });
+
+  const args = ["pr", "create", "--title", options.title, "--body", options.body];
+  if (options.draft) {
+    args.push("--draft");
+  }
+
+  const result = await runCommandOrThrow("gh", args, { cwd: meta.worktreePath });
+  const prUrl = result.stdout.trim().split("\n").at(-1);
+  if (!prUrl) {
+    throw new DevtaskError("gh did not return a PR URL");
+  }
+  return prUrl;
+}
+
+function defaultPrBody(meta: ReturnType<typeof getTask>): string {
+  return [
+    `Task: ${meta.id}`,
+    "",
+    `Branch: ${meta.branch}`,
+    `Worktree: ${meta.worktreePath}`,
+    "",
+    "Created by devtask. Review the task record locally with:",
+    "",
+    `    devtask review ${meta.id}`
+  ].join("\n");
 }
