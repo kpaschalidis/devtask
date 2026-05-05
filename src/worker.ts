@@ -24,24 +24,33 @@ export async function runWorker(id: string, options: WorkerOptions = {}): Promis
     updatedAt: new Date().toISOString()
   }));
 
-  while (true) {
-    const meta = readTaskMeta(taskMetaPath(paths, id));
-    if (meta.status !== "running") {
-      return;
-    }
+  try {
+    while (true) {
+      const meta = readTaskMeta(taskMetaPath(paths, id));
+      if (meta.status !== "running") {
+        return;
+      }
 
-    if (!acquireLock(lockPath)) {
-      await sleep(2_000);
-      continue;
-    }
+      if (!acquireLock(lockPath)) {
+        await sleep(2_000);
+        continue;
+      }
 
-    try {
-      await runOnce(paths, id);
-    } finally {
-      releaseLock(lockPath);
-    }
+      try {
+        await runOnce(paths, id);
+      } finally {
+        releaseLock(lockPath);
+      }
 
-    await sleep(intervalMs);
+      await sleep(intervalMs);
+    }
+  } finally {
+    updateMeta(paths, id, (meta) => ({
+      ...meta,
+      supervisorPid: meta.supervisorPid === process.pid ? null : meta.supervisorPid,
+      childPid: meta.supervisorPid === process.pid ? null : meta.childPid,
+      updatedAt: new Date().toISOString()
+    }));
   }
 }
 

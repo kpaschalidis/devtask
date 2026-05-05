@@ -30,6 +30,7 @@ describe("worker", () => {
 
     expect(updated.status).toBe("done");
     expect(updated.failCount).toBe(0);
+    expect(updated.supervisorPid).toBeNull();
     expect(updated.childPid).toBeNull();
     expect(runs).toHaveLength(1);
     expect(logs).toHaveLength(1);
@@ -54,5 +55,6 @@ describe("worker", () => {
     const updated = readTaskMeta(taskMetaPath(paths, meta.id));
     expect(updated.status).toBe("failed");
     expect(updated.failCount).toBe(1);
+    expect(updated.supervisorPid).toBeNull();
   });
 });
