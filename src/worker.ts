@@ -57,10 +57,13 @@ export async function runWorker(id: string, options: WorkerOptions = {}): Promis
 async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
   const meta = readTaskMeta(taskMetaPath(paths, id));
   const currentTaskDir = taskDir(paths, id);
+  const runtimeStatePath = path.join(meta.worktreePath, ".devtask_state.md");
+  const runtimeResultPath = path.join(meta.worktreePath, ".devtask_result.json");
   const runId = newRunId();
   const startedAt = new Date().toISOString();
   const logsDir = path.join(taskDir(paths, id), "logs");
   fs.mkdirSync(logsDir, { recursive: true });
+  prepareRuntimeFiles(meta.statePath, meta.resultPath, runtimeStatePath, runtimeResultPath);
 
   const logPath = path.join(logsDir, `${runId}.log`);
   const stdout = fs.openSync(logPath, "a");
@@ -78,8 +81,8 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
         DEVTASK_TASK_ID: id,
         DEVTASK_TASK_DIR: currentTaskDir,
         DEVTASK_TASK_PATH: meta.taskPath,
-        DEVTASK_STATE_PATH: meta.statePath,
-        DEVTASK_RESULT_PATH: meta.resultPath
+        DEVTASK_STATE_PATH: runtimeStatePath,
+        DEVTASK_RESULT_PATH: runtimeResultPath
       },
       stdio: ["ignore", stdout, stderr]
     });
@@ -99,6 +102,8 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
     fs.closeSync(stdout);
     fs.closeSync(stderr);
   }
+
+  harvestRuntimeFiles(runtimeStatePath, runtimeResultPath, meta.statePath, meta.resultPath);
 
   const finishedAt = new Date().toISOString();
   const latest = readTaskMeta(taskMetaPath(paths, id));
@@ -135,6 +140,34 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
     failCount: nextFailCount,
     updatedAt: finishedAt
   }));
+}
+
+function prepareRuntimeFiles(
+  statePath: string,
+  resultPath: string,
+  runtimeStatePath: string,
+  runtimeResultPath: string
+): void {
+  copyFileIfExists(statePath, runtimeStatePath);
+  copyFileIfExists(resultPath, runtimeResultPath);
+}
+
+function harvestRuntimeFiles(
+  runtimeStatePath: string,
+  runtimeResultPath: string,
+  statePath: string,
+  resultPath: string
+): void {
+  copyFileIfExists(runtimeStatePath, statePath);
+  copyFileIfExists(runtimeResultPath, resultPath);
+}
+
+function copyFileIfExists(source: string, destination: string): void {
+  if (!fs.existsSync(source)) {
+    return;
+  }
+
+  fs.copyFileSync(source, destination);
 }
 
 function updateMeta(paths: DevtaskPaths, id: string, update: (meta: ReturnType<typeof readTaskMeta>) => ReturnType<typeof readTaskMeta>): void {

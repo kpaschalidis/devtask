@@ -36,6 +36,30 @@ describe("worker", () => {
     expect(logs).toHaveLength(1);
   });
 
+  it("harvests worktree-local task state and result after a run", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(repo);
+    const meta = await createTask(paths, "runtime-files-task", {
+      command:
+        "node -e \"const fs=require('fs'); fs.appendFileSync(process.env.DEVTASK_STATE_PATH, '\\n- updated in worktree\\n'); fs.writeFileSync(process.env.DEVTASK_RESULT_PATH, JSON.stringify({status:'done'}, null, 2))\""
+    });
+
+    writeTaskMeta(taskMetaPath(paths, meta.id), {
+      ...meta,
+      status: "running",
+      updatedAt: new Date().toISOString()
+    });
+
+    await runWorker(meta.id, { root: repo, intervalMs: 10 });
+
+    const updated = readTaskMeta(taskMetaPath(paths, meta.id));
+    expect(updated.status).toBe("done");
+    expect(fs.readFileSync(meta.statePath, "utf8")).toContain("- updated in worktree");
+    expect(JSON.parse(fs.readFileSync(meta.resultPath, "utf8"))).toEqual({ status: "done" });
+    expect(fs.existsSync(path.join(meta.worktreePath, ".devtask_state.md"))).toBe(true);
+    expect(fs.existsSync(path.join(meta.worktreePath, ".devtask_result.json"))).toBe(true);
+  });
+
   it("marks a task failed after max retries", async () => {
     const repo = await makeTempRepo({ withCommit: true });
     const paths = resolvePaths(repo);

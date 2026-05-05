@@ -67,7 +67,7 @@ export async function createTask(
 
   fs.writeFileSync(
     taskPath,
-    `# Task ${id}\n\n## Goal\n${options.goal ?? ""}\n\n## Instructions\n- Work inside the task worktree.\n- Keep this task stateful and update $DEVTASK_STATE_PATH as work progresses.\n- When the task is complete, write {"status":"done"} to $DEVTASK_RESULT_PATH.\n- If the task is blocked or cannot be completed, write {"status":"blocked","reason":"..."} to $DEVTASK_RESULT_PATH.\n`
+    `# Task ${id}\n\n## Goal\n${options.goal ?? ""}\n\n## Instructions\n- Work inside the task worktree.\n- Keep this task stateful and update the file at $DEVTASK_STATE_PATH as work progresses.\n- When the task is complete, write {"status":"done"} to the file at $DEVTASK_RESULT_PATH.\n- If the task is blocked or cannot be completed, write {"status":"blocked","reason":"..."} to the file at $DEVTASK_RESULT_PATH.\n`
   );
   fs.writeFileSync(statePath, `# State: ${id}\n\n## Progress\n- Created ${now}\n`);
   fs.writeFileSync(resultPath, "{\n  \"status\": \"pending\"\n}\n");
