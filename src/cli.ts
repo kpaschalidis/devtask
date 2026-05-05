@@ -14,6 +14,7 @@ import { assertCanMark, parseManualStatus } from "./lifecycle.js";
 import { runVerification } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
 import { runReviewAgent } from "./review-agent.js";
+import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -291,6 +292,56 @@ export function createCli(): Command {
     });
 
   program
+    .command("board")
+    .description("Show all tasks with latest check/review/PR state and next command.")
+    .action(async () => {
+      try {
+        const paths = resolvePaths();
+        const config = readConfig(paths);
+        const tasks = listTasks(paths);
+        if (tasks.length === 0) {
+          console.log("No tasks");
+          return;
+        }
+
+        const rows = [];
+        for (const task of tasks) {
+          rows.push(buildBoardRow(await buildTaskReview(paths, getTask(paths, task.id)), config));
+        }
+
+        printTable(
+          ["ID", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
+          rows.map((row) => [row.id, row.status, row.check, row.review, row.pr, row.updated, row.next])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("next")
+    .description("Recommend the next workflow action for one task or all tasks.")
+    .argument("[id]")
+    .action(async (id?: string) => {
+      try {
+        const paths = resolvePaths();
+        const config = readConfig(paths);
+        const ids = id ? [id] : listTasks(paths).map((task) => task.id);
+        if (ids.length === 0) {
+          console.log("No tasks");
+          return;
+        }
+
+        for (const taskId of ids) {
+          const review = await buildTaskReview(paths, getTask(paths, taskId));
+          printNextAction(taskId, recommendNextAction(review, config));
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
     .command("status")
     .description("Show detailed task status.")
     .argument("<id>")
@@ -430,6 +481,72 @@ export function createCli(): Command {
     }
   };
 
+  const reviewAction = async (id: string): Promise<void> => {
+    const paths = resolvePaths();
+    const meta = getTask(paths, id);
+    if (meta.status === "running") {
+      throw new DevtaskError(`Task ${id} is running; stop it before review`);
+    }
+
+    const config = readConfig(paths);
+    const record = await runReviewAgent(paths, meta, {
+      model: meta.model ?? config.codex.model,
+      fullAuto: config.codex.fullAuto
+    });
+    console.log(`Review agent: ${record.status}`);
+    console.log(`Output: ${record.outputPath}`);
+    if (record.status !== "passed") {
+      process.exit(record.exitCode === 0 ? 2 : 1);
+    }
+  };
+
+  const prAction = async (
+    id: string,
+    options: { title?: string; body?: string; ready?: boolean }
+  ): Promise<void> => {
+    const paths = resolvePaths();
+    const meta = getTask(paths, id);
+    if (meta.status === "running") {
+      throw new DevtaskError(`Task ${id} is running; stop it before opening a PR`);
+    }
+    if (!["approved", "ci-failed"].includes(meta.status)) {
+      throw new DevtaskError(`Task ${id} is ${meta.status}; mark it approved before opening a PR`);
+    }
+
+    const prUrl = await createPullRequest(meta, {
+      title: options.title ?? meta.id,
+      body: options.body ?? defaultPrBody(meta),
+      draft: options.ready !== true
+    });
+
+    writeTaskMeta(taskMetaPath(paths, id), {
+      ...meta,
+      status: "pr-open",
+      prUrl,
+      updatedAt: new Date().toISOString()
+    });
+    console.log(prUrl);
+  };
+
+  const ciAction = async (id: string): Promise<void> => {
+    const paths = resolvePaths();
+    const meta = getTask(paths, id);
+    if (!meta.prUrl) {
+      throw new DevtaskError(`Task ${id} has no PR URL`);
+    }
+
+    const result = await runCommand("gh", ["pr", "checks", meta.prUrl], { cwd: meta.worktreePath });
+    process.stdout.write(result.stdout);
+    process.stderr.write(result.stderr);
+
+    const status = result.exitCode === 0 ? "ci-passed" : "ci-failed";
+    writeTaskMeta(taskMetaPath(paths, id), {
+      ...meta,
+      status,
+      updatedAt: new Date().toISOString()
+    });
+  };
+
   program
     .command("check")
     .description("Run configured deterministic check commands in the task worktree.")
@@ -448,22 +565,7 @@ export function createCli(): Command {
     .argument("<id>")
     .action(async (id: string) => {
       try {
-        const paths = resolvePaths();
-        const meta = getTask(paths, id);
-        if (meta.status === "running") {
-          throw new DevtaskError(`Task ${id} is running; stop it before review`);
-        }
-
-        const config = readConfig(paths);
-        const record = await runReviewAgent(paths, meta, {
-          model: meta.model ?? config.codex.model,
-          fullAuto: config.codex.fullAuto
-        });
-        console.log(`Review agent: ${record.status}`);
-        console.log(`Output: ${record.outputPath}`);
-        if (record.status !== "passed") {
-          process.exit(record.exitCode === 0 ? 2 : 1);
-        }
+        await reviewAction(id);
       } catch (error) {
         printError(error);
       }
@@ -478,28 +580,7 @@ export function createCli(): Command {
     .option("--ready", "Create a ready-for-review PR instead of a draft")
     .action(async (id: string, options: { title?: string; body?: string; ready?: boolean }) => {
       try {
-        const paths = resolvePaths();
-        const meta = getTask(paths, id);
-        if (meta.status === "running") {
-          throw new DevtaskError(`Task ${id} is running; stop it before opening a PR`);
-        }
-        if (!["approved", "ci-failed"].includes(meta.status)) {
-          throw new DevtaskError(`Task ${id} is ${meta.status}; mark it approved before opening a PR`);
-        }
-
-        const prUrl = await createPullRequest(meta, {
-          title: options.title ?? meta.id,
-          body: options.body ?? defaultPrBody(meta),
-          draft: options.ready !== true
-        });
-
-        writeTaskMeta(taskMetaPath(paths, id), {
-          ...meta,
-          status: "pr-open",
-          prUrl,
-          updatedAt: new Date().toISOString()
-        });
-        console.log(prUrl);
+        await prAction(id, options);
       } catch (error) {
         printError(error);
       }
@@ -511,22 +592,53 @@ export function createCli(): Command {
     .argument("<id>")
     .action(async (id: string) => {
       try {
+        await ciAction(id);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("advance")
+    .description("Run the next safe workflow step for a task, stopping at human approval.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
         const paths = resolvePaths();
-        const meta = getTask(paths, id);
-        if (!meta.prUrl) {
-          throw new DevtaskError(`Task ${id} has no PR URL`);
+        const config = readConfig(paths);
+        const review = await buildTaskReview(paths, getTask(paths, id));
+        const next = recommendNextAction(review, config);
+
+        if (!next.automatic) {
+          printNextAction(id, next);
+          return;
         }
 
-        const result = await runCommand("gh", ["pr", "checks", meta.prUrl], { cwd: meta.worktreePath });
-        process.stdout.write(result.stdout);
-        process.stderr.write(result.stderr);
-
-        const status = result.exitCode === 0 ? "ci-passed" : "ci-failed";
-        writeTaskMeta(taskMetaPath(paths, id), {
-          ...meta,
-          status,
-          updatedAt: new Date().toISOString()
-        });
+        switch (next.kind) {
+          case "run": {
+            printStartedWorker(id, startWorker(paths, id), "Running");
+            return;
+          }
+          case "continue": {
+            const meta = getTask(paths, id);
+            printStartedWorker(id, startWorker(paths, id, { tmux: meta.tmuxSession !== null }), "Continuing");
+            return;
+          }
+          case "check":
+            await checkAction(id);
+            return;
+          case "review":
+            await reviewAction(id);
+            return;
+          case "pr":
+            await prAction(id, {});
+            return;
+          case "ci":
+            await ciAction(id);
+            return;
+          default:
+            printNextAction(id, next);
+        }
       } catch (error) {
         printError(error);
       }
@@ -541,12 +653,7 @@ export function createCli(): Command {
       try {
         const paths = resolvePaths();
         const started = startWorker(paths, id, { tmux: options.tmux === true });
-        console.log(`Running task ${id}`);
-        if (started.tmuxSession) {
-          console.log(`tmux: ${started.tmuxSession}`);
-          return;
-        }
-        console.log(`Supervisor PID: ${started.pid ?? "-"}`);
+        printStartedWorker(id, started, "Running");
       } catch (error) {
         printError(error);
       }
@@ -590,12 +697,7 @@ export function createCli(): Command {
         }
 
         const started = startWorker(paths, id, { tmux: meta.tmuxSession !== null });
-        console.log(`Continuing task ${id}`);
-        if (started.tmuxSession) {
-          console.log(`tmux: ${started.tmuxSession}`);
-          return;
-        }
-        console.log(`Supervisor PID: ${started.pid ?? "-"}`);
+        printStartedWorker(id, started, "Continuing");
       } catch (error) {
         printError(error);
       }
@@ -657,13 +759,47 @@ interface StartedWorker {
   tmuxSession: string | null;
 }
 
+function printStartedWorker(id: string, started: StartedWorker, verb: "Running" | "Continuing"): void {
+  console.log(`${verb} task ${id}`);
+  if (started.tmuxSession) {
+    console.log(`tmux: ${started.tmuxSession}`);
+    return;
+  }
+  console.log(`Supervisor PID: ${started.pid ?? "-"}`);
+}
+
+function printNextAction(id: string, next: NextAction): void {
+  console.log(id);
+  console.log(`  ${next.reason}`);
+  if (next.command) {
+    console.log(`  Next: ${next.command}`);
+  } else {
+    console.log("  Next: -");
+  }
+}
+
+function printTable(headers: string[], rows: string[][]): void {
+  const widths = headers.map((header, index) =>
+    Math.max(header.length, ...rows.map((row) => displayWidth(row[index] ?? "")))
+  );
+
+  console.log(headers.map((header, index) => header.padEnd(widths[index])).join("  "));
+  for (const row of rows) {
+    console.log(row.map((value, index) => value.padEnd(widths[index])).join("  "));
+  }
+}
+
+function displayWidth(value: string): number {
+  return value.length;
+}
+
 function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options: { tmux?: boolean } = {}): StartedWorker {
   const meta = getTask(paths, id);
   if (isProcessAlive(meta.supervisorPid)) {
     throw new DevtaskError(`Task ${id} is already supervised by PID ${meta.supervisorPid}`);
   }
   if (meta.status === "done") {
-    throw new DevtaskError(`Task ${id} is ${meta.status} and cannot be started`);
+    throw new DevtaskError(`Task ${id} is ${meta.status} and cannot be run`);
   }
 
   const next = {

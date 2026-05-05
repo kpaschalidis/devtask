@@ -53,6 +53,9 @@ devtask create fix-login \
 devtask run fix-login
 
 devtask list
+devtask board
+devtask next fix-login
+devtask advance fix-login
 devtask status fix-login
 devtask logs fix-login
 devtask logs -f fix-login
@@ -75,6 +78,12 @@ devtask inspect fix-login
 `devtask check` runs deterministic commands configured with `devtask config check`, such as tests, typecheck, and lint.
 
 `devtask review` runs a read-only Codex review pass and stores the artifact under `.devtask/tasks/<id>/reviews/`.
+
+`devtask board` shows every task as a cockpit view: task status, latest check, latest review, PR state, and the next recommended command.
+
+`devtask next <id>` explains the next action for one task. Without an id, it prints recommendations for all tasks.
+
+`devtask advance <id>` runs the next safe step automatically. It can start or continue a worker, run checks, run the review agent, open an approved PR, or check CI. It stops at human approval and prints the command to run after you inspect the work.
 
 You can correct or record human decisions on stopped tasks:
 
@@ -170,7 +179,7 @@ You can also update an existing task command:
 devtask command my-task 'npm test'
 ```
 
-Configure verification commands per repository:
+Configure check commands per repository:
 
 ```bash
 devtask config check 'npm test' 'npm run typecheck'
