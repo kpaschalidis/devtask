@@ -35,6 +35,7 @@ devtask start fix-login
 devtask list
 devtask status fix-login
 devtask logs fix-login
+devtask logs -f fix-login
 devtask review fix-login
 ```
 
@@ -43,6 +44,8 @@ If a worker command exits successfully but does not write a terminal `result.jso
 ```bash
 devtask review fix-login
 ```
+
+`devtask review` summarizes the task metadata, latest run record, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to test, merge, resume, or discard the task worktree.
 
 Run a task inside tmux when you want an attachable terminal:
 

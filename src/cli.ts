@@ -86,10 +86,11 @@ export function createCli(): Command {
 
   program
     .command("logs")
-    .description("Print the latest task log.")
+    .description("Print or follow the latest task log.")
     .argument("<id>")
     .option("-n, --lines <count>", "Number of trailing lines to print", parsePositiveInteger, 120)
-    .action((id: string, options: { lines: number }) => {
+    .option("-f, --follow", "Follow the latest task log")
+    .action((id: string, options: { lines: number; follow?: boolean }) => {
       try {
         const paths = resolvePaths();
         getTask(paths, id);
@@ -100,6 +101,11 @@ export function createCli(): Command {
         }
 
         console.log(`Log: ${logPath}`);
+        if (options.follow) {
+          followFile(logPath, options.lines);
+          return;
+        }
+
         console.log(tailFile(logPath, options.lines));
       } catch (error) {
         printError(error);
@@ -491,4 +497,14 @@ function parsePositiveInteger(value: string): number {
 function tailFile(filePath: string, lineCount: number): string {
   const content = fs.readFileSync(filePath, "utf8");
   return content.split("\n").slice(-lineCount).join("\n");
+}
+
+function followFile(filePath: string, lineCount: number): void {
+  const child = spawn("tail", ["-n", String(lineCount), "-f", filePath], {
+    stdio: "inherit"
+  });
+
+  child.once("error", (error) => {
+    printError(new DevtaskError(`Failed to follow log: ${error.message}`));
+  });
 }
