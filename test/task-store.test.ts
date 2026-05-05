@@ -6,6 +6,7 @@ import { resolvePaths } from "../src/paths.js";
 import { createTask, getTask, initializeStore, listTasks } from "../src/task-store.js";
 import { makeTempRepo } from "./helpers.js";
 import { readConfig, writeConfig } from "../src/config.js";
+import { runCommandOrThrow } from "../src/process-runner.js";
 
 describe("task store", () => {
   it("initializes storage directories", async () => {
@@ -52,6 +53,12 @@ describe("task store", () => {
     expect(fs.existsSync(meta.worktreePath)).toBe(true);
     expect(fs.existsSync(path.join(meta.worktreePath, ".git"))).toBe(true);
     expect(fs.readFileSync(meta.taskPath, "utf8")).toContain("Fix login redirect loop");
+
+    fs.writeFileSync(path.join(meta.worktreePath, ".devtask_state.md"), "state\n");
+    fs.writeFileSync(path.join(meta.worktreePath, ".devtask_result.json"), "{}\n");
+    const status = await runCommandOrThrow("git", ["status", "--short"], { cwd: meta.worktreePath });
+    expect(status.stdout).not.toContain(".devtask_state.md");
+    expect(status.stdout).not.toContain(".devtask_result.json");
   });
 
   it("uses the repo default model when creating managed Codex commands", async () => {

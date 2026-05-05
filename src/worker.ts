@@ -6,6 +6,7 @@ import { resolvePaths, taskDir, taskMetaPath } from "./paths.js";
 import { readTaskMeta, writeTaskMeta } from "./meta.js";
 import { acquireLock, releaseLock } from "./lock.js";
 import { newRunId, writeRunRecord, type RunStatus } from "./run-record.js";
+import { excludeDevtaskRuntimeFiles } from "./git.js";
 
 export interface WorkerOptions {
   root?: string;
@@ -63,6 +64,7 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
   const startedAt = new Date().toISOString();
   const logsDir = path.join(taskDir(paths, id), "logs");
   fs.mkdirSync(logsDir, { recursive: true });
+  await excludeDevtaskRuntimeFiles(meta.worktreePath);
   prepareRuntimeFiles(meta.statePath, meta.resultPath, runtimeStatePath, runtimeResultPath);
 
   const logPath = path.join(logsDir, `${runId}.log`);

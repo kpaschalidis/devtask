@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { readTaskMeta, writeTaskMeta } from "../src/meta.js";
 import { resolvePaths, taskMetaPath } from "../src/paths.js";
+import { runCommandOrThrow } from "../src/process-runner.js";
 import { createTask } from "../src/task-store.js";
 import { runWorker } from "../src/worker.js";
 import { makeTempRepo } from "./helpers.js";
@@ -58,6 +59,10 @@ describe("worker", () => {
     expect(JSON.parse(fs.readFileSync(meta.resultPath, "utf8"))).toEqual({ status: "done" });
     expect(fs.existsSync(path.join(meta.worktreePath, ".devtask_state.md"))).toBe(true);
     expect(fs.existsSync(path.join(meta.worktreePath, ".devtask_result.json"))).toBe(true);
+
+    const status = await runCommandOrThrow("git", ["status", "--short"], { cwd: meta.worktreePath });
+    expect(status.stdout).not.toContain(".devtask_state.md");
+    expect(status.stdout).not.toContain(".devtask_result.json");
   });
 
   it("marks a task failed after max retries", async () => {
