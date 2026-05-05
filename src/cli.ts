@@ -438,8 +438,8 @@ export function createCli(): Command {
         if (meta.status === "running") {
           throw new DevtaskError(`Task ${id} is running; stop it before opening a PR`);
         }
-        if (!["approved", "review", "done", "ci-failed"].includes(meta.status)) {
-          throw new DevtaskError(`Task ${id} is ${meta.status}; mark it review or approved before opening a PR`);
+        if (!["approved", "ci-failed"].includes(meta.status)) {
+          throw new DevtaskError(`Task ${id} is ${meta.status}; mark it approved before opening a PR`);
         }
 
         const prUrl = await createPullRequest(meta, {
