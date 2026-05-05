@@ -38,6 +38,12 @@ devtask logs fix-login
 devtask review fix-login
 ```
 
+If a worker command exits successfully but does not write a terminal `result.json`, devtask moves the task to `review` instead of looping forever. Inspect it with:
+
+```bash
+devtask review fix-login
+```
+
 Run a task inside tmux when you want an attachable terminal:
 
 ```bash

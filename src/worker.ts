@@ -109,6 +109,10 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
       ? "failed"
       : status === "success" && resultStatus === "done"
         ? "done"
+        : status === "success" && resultStatus === "blocked"
+          ? "blocked"
+          : status === "success"
+            ? "review"
         : latest.status;
 
   writeRunRecord(path.join(taskDir(paths, id), "runs"), {

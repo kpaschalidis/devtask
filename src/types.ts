@@ -2,6 +2,8 @@ export const TASK_STATUSES = [
   "created",
   "running",
   "paused",
+  "review",
+  "blocked",
   "done",
   "failed",
   "cancelled"

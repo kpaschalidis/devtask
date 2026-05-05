@@ -57,4 +57,47 @@ describe("worker", () => {
     expect(updated.failCount).toBe(1);
     expect(updated.supervisorPid).toBeNull();
   });
+
+  it("stops for review when a successful command does not write a terminal result", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(repo);
+    const meta = await createTask(paths, "review-task", {
+      command: "node -e \"process.exit(0)\""
+    });
+
+    writeTaskMeta(taskMetaPath(paths, meta.id), {
+      ...meta,
+      status: "running",
+      updatedAt: new Date().toISOString()
+    });
+
+    await runWorker(meta.id, { root: repo, intervalMs: 10 });
+
+    const updated = readTaskMeta(taskMetaPath(paths, meta.id));
+    expect(updated.status).toBe("review");
+    expect(updated.failCount).toBe(0);
+    expect(updated.supervisorPid).toBeNull();
+  });
+
+  it("marks a task blocked when result.json reports blocked", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(repo);
+    const meta = await createTask(paths, "blocked-task", {
+      command:
+        "node -e \"require('fs').writeFileSync(process.env.DEVTASK_RESULT_PATH, JSON.stringify({status:'blocked', reason:'missing input'}, null, 2))\""
+    });
+
+    writeTaskMeta(taskMetaPath(paths, meta.id), {
+      ...meta,
+      status: "running",
+      updatedAt: new Date().toISOString()
+    });
+
+    await runWorker(meta.id, { root: repo, intervalMs: 10 });
+
+    const updated = readTaskMeta(taskMetaPath(paths, meta.id));
+    expect(updated.status).toBe("blocked");
+    expect(updated.failCount).toBe(0);
+    expect(updated.supervisorPid).toBeNull();
+  });
 });
