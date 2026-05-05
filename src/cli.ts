@@ -220,18 +220,6 @@ export function createCli(): Command {
     });
 
   program
-    .command("review")
-    .description("Compatibility alias for inspect. Use review-agent for code review.")
-    .argument("<id>")
-    .action(async (id: string) => {
-      try {
-        await inspectAction(id);
-      } catch (error) {
-        printError(error);
-      }
-    });
-
-  program
     .command("doctor")
     .description("Inspect task metadata for stale process and filesystem state.")
     .action(() => {
@@ -455,19 +443,7 @@ export function createCli(): Command {
     });
 
   program
-    .command("verify")
-    .description("Compatibility alias for check.")
-    .argument("<id>")
-    .action(async (id: string) => {
-      try {
-        await checkAction(id);
-      } catch (error) {
-        printError(error);
-      }
-    });
-
-  program
-    .command("review-agent")
+    .command("review")
     .description("Run a read-only review agent and store its review artifact.")
     .argument("<id>")
     .action(async (id: string) => {
@@ -475,7 +451,7 @@ export function createCli(): Command {
         const paths = resolvePaths();
         const meta = getTask(paths, id);
         if (meta.status === "running") {
-          throw new DevtaskError(`Task ${id} is running; stop it before review-agent`);
+          throw new DevtaskError(`Task ${id} is running; stop it before review`);
         }
 
         const config = readConfig(paths);
@@ -786,6 +762,6 @@ function defaultPrBody(meta: ReturnType<typeof getTask>): string {
     "",
     "Created by devtask. Review the task record locally with:",
     "",
-    `    devtask review ${meta.id}`
+    `    devtask inspect ${meta.id}`
   ].join("\n");
 }

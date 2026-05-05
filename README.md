@@ -58,7 +58,7 @@ devtask logs fix-login
 devtask logs -f fix-login
 devtask inspect fix-login
 devtask check fix-login
-devtask review-agent fix-login
+devtask review fix-login
 devtask mark fix-login approved
 devtask pr fix-login
 devtask ci fix-login
@@ -70,11 +70,11 @@ If a worker command exits successfully but does not write a terminal `result.jso
 devtask inspect fix-login
 ```
 
-`devtask inspect` summarizes task metadata, the latest run, latest checks, latest review-agent artifact, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to check, review, merge, resume, or discard the task worktree.
+`devtask inspect` summarizes task metadata, the latest run, latest checks, latest review artifact, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to check, review, merge, resume, or discard the task worktree.
 
 `devtask check` runs deterministic commands configured with `devtask config verify`, such as tests, typecheck, and lint.
 
-`devtask review-agent` runs a read-only Codex review pass and stores the artifact under `.devtask/tasks/<id>/reviews/`.
+`devtask review` runs a read-only Codex review pass and stores the artifact under `.devtask/tasks/<id>/reviews/`.
 
 You can correct or record human decisions on stopped tasks:
 
