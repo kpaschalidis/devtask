@@ -27,12 +27,14 @@ export interface VerificationRecord {
 export async function runVerification(
   paths: DevtaskPaths,
   meta: TaskMeta,
-  commands: string[]
+  commands: string[],
+  options: { onStepStart?: (command: string, index: number, total: number) => void } = {}
 ): Promise<VerificationRecord> {
   const startedAt = new Date().toISOString();
   const steps: VerifyStepRecord[] = [];
 
-  for (const command of commands) {
+  for (const [index, command] of commands.entries()) {
+    options.onStepStart?.(command, index + 1, commands.length);
     const result = await runCommand("sh", ["-c", command], { cwd: meta.worktreePath });
     steps.push({
       command,

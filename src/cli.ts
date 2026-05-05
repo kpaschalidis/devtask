@@ -469,7 +469,12 @@ export function createCli(): Command {
       throw new DevtaskError("No check commands configured. Use devtask config check <command...>");
     }
 
-    const record = await runVerification(paths, meta, config.verify);
+    console.log(`Running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"} in ${meta.worktreePath}`);
+    const record = await runVerification(paths, meta, config.verify, {
+      onStepStart: (command, index, total) => {
+        console.log(`[${index}/${total}] ${command}`);
+      }
+    });
     console.log(`Check: ${record.status}`);
     for (const step of record.steps) {
       console.log(`${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
@@ -489,9 +494,15 @@ export function createCli(): Command {
     }
 
     const config = readConfig(paths);
+    console.log(`Running review agent in ${meta.worktreePath}`);
     const record = await runReviewAgent(paths, meta, {
       model: meta.model ?? config.codex.model,
-      fullAuto: config.codex.fullAuto
+      fullAuto: config.codex.fullAuto,
+      onStart: (start) => {
+        console.log(`Prompt: ${start.promptPath}`);
+        console.log(`Output: ${start.outputPath}`);
+        console.log(`Command: ${start.command}`);
+      }
     });
     console.log(`Review agent: ${record.status}`);
     console.log(`Output: ${record.outputPath}`);

@@ -19,10 +19,16 @@ export interface ReviewAgentRecord {
   exitCode: number | null;
 }
 
+export interface ReviewAgentStart {
+  command: string;
+  outputPath: string;
+  promptPath: string;
+}
+
 export async function runReviewAgent(
   paths: DevtaskPaths,
   meta: TaskMeta,
-  options: { model?: string | null; fullAuto?: boolean }
+  options: { model?: string | null; fullAuto?: boolean; onStart?: (start: ReviewAgentStart) => void }
 ): Promise<ReviewAgentRecord> {
   const reviewId = newRunId();
   const reviewsDir = path.join(taskDir(paths, meta.id), "reviews");
@@ -42,6 +48,7 @@ export async function runReviewAgent(
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const command = `${buildCodexCommand({ model: options.model, fullAuto: options.fullAuto })} > ${shellQuote(outputPath)}`;
+  options.onStart?.({ command, outputPath, promptPath });
   const startedAt = new Date().toISOString();
   const result = await runCommand("sh", ["-c", command], {
     cwd: meta.worktreePath,
