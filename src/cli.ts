@@ -15,6 +15,7 @@ import { runVerification } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
 import { runReviewAgent } from "./review-agent.js";
 import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
+import { addRepoToGroup, createGroup, getGroup, listGroups } from "./group-store.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -341,6 +342,195 @@ export function createCli(): Command {
       }
     });
 
+  const group = program.command("group").description("Coordinate multiple repo-local tasks as one feature group.");
+
+  group
+    .command("create")
+    .description("Create a multi-repo task group in the current repository.")
+    .argument("<id>")
+    .option("--goal <goal>", "Group goal")
+    .action((id: string, options: { goal?: string }) => {
+      try {
+        const paths = resolvePaths();
+        initializeStore(paths);
+        const created = createGroup(paths, id, options);
+        console.log(`Created group ${created.id}`);
+        console.log(`Goal: ${created.goal ?? "-"}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("add")
+    .description("Add a repository to a group and create its repo-local task.")
+    .argument("<id>")
+    .argument("<repo-name>")
+    .argument("<repo-path>")
+    .requiredOption("--task <task-id>", "Task id to create in the target repository")
+    .option("--goal <goal>", "Repo-local task goal")
+    .action(async (id: string, repoName: string, repoPath: string, options: { task: string; goal?: string }) => {
+      try {
+        const paths = resolvePaths();
+        initializeStore(paths);
+        const existingGroup = getGroup(paths, id);
+        if (existingGroup.repos.some((repo) => repo.name === repoName)) {
+          throw new DevtaskError(`Group ${id} already has repo ${repoName}`);
+        }
+        const repoPaths = resolvePaths(repoPath);
+        if (existingGroup.repos.some((repo) => repo.path === repoPaths.root)) {
+          throw new DevtaskError(`Group ${id} already has repo path ${repoPaths.root}`);
+        }
+        initializeStore(repoPaths);
+        const meta = await createTask(repoPaths, options.task, {
+          goal: options.goal ?? `Group ${id}: ${repoName}`
+        });
+        const updated = addRepoToGroup(paths, id, {
+          name: repoName,
+          repoPath: repoPaths.root,
+          taskId: meta.id
+        });
+        console.log(`Added ${repoName} to group ${updated.id}`);
+        console.log(`Repo: ${repoPaths.root}`);
+        console.log(`Task: ${meta.id}`);
+        console.log(`Worktree: ${meta.worktreePath}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("list")
+    .description("List task groups in the current repository.")
+    .action(() => {
+      try {
+        const paths = resolvePaths();
+        const groups = listGroups(paths);
+        if (groups.length === 0) {
+          console.log("No groups");
+          return;
+        }
+
+        printTable(
+          ["ID", "REPOS", "UPDATED", "GOAL"],
+          groups.map((item) => [item.id, String(item.repos.length), item.updatedAt, item.goal ?? "-"])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("show")
+    .description("Show group metadata.")
+    .argument("<id>")
+    .action((id: string) => {
+      try {
+        const paths = resolvePaths();
+        console.log(JSON.stringify(getGroup(paths, id), null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("board")
+    .description("Show all repo tasks in a group with next commands.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolvePaths();
+        const rows = await buildGroupBoardRows(paths, id);
+        if (rows.length === 0) {
+          console.log("No repos in group");
+          return;
+        }
+
+        printTable(
+          ["REPO", "TASK", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
+          rows.map((row) => [row.repo, row.task, row.status, row.check, row.review, row.pr, row.updated, row.next])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("next")
+    .description("Recommend next workflow actions across a group.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolvePaths();
+        const groupData = getGroup(paths, id);
+        if (groupData.repos.length === 0) {
+          console.log("No repos in group");
+          return;
+        }
+
+        for (const repo of groupData.repos) {
+          const repoPaths = resolvePaths(repo.path);
+          const config = readConfig(repoPaths);
+          const review = await buildTaskReview(repoPaths, getTask(repoPaths, repo.taskId));
+          const next = withRepoCommand(recommendNextAction(review, config), repo.name, repo.path);
+          printNextAction(`${repo.name}/${repo.taskId}`, next);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("run")
+    .description("Run created or paused repo tasks in a group.")
+    .argument("<id>")
+    .action((id: string) => {
+      try {
+        const paths = resolvePaths();
+        const groupData = getGroup(paths, id);
+        for (const repo of groupData.repos) {
+          const repoPaths = resolvePaths(repo.path);
+          const meta = getTask(repoPaths, repo.taskId);
+          if (!["created", "paused"].includes(meta.status)) {
+            console.log(`${repo.name}/${repo.taskId}: skipped (${meta.status})`);
+            continue;
+          }
+          printStartedWorker(`${repo.name}/${repo.taskId}`, startWorker(repoPaths, repo.taskId), "Running");
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("advance")
+    .description("Run safe next workflow steps across a group.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolvePaths();
+        const groupData = getGroup(paths, id);
+        for (const repo of groupData.repos) {
+          const repoPaths = resolvePaths(repo.path);
+          const config = readConfig(repoPaths);
+          const review = await buildTaskReview(repoPaths, getTask(repoPaths, repo.taskId));
+          const next = recommendNextAction(review, config);
+          console.log(`${repo.name}/${repo.taskId}`);
+
+          if (!next.automatic) {
+            const recommended = withRepoCommand(next, repo.name, repo.path);
+            console.log(`  ${recommended.reason}`);
+            console.log(`  Next: ${recommended.command ?? "-"}`);
+            continue;
+          }
+
+          await advanceTask(repoPaths, repo.taskId, next);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
   program
     .command("status")
     .description("Show detailed task status.")
@@ -459,62 +649,12 @@ export function createCli(): Command {
 
   const checkAction = async (id: string): Promise<void> => {
     const paths = resolvePaths();
-    const meta = getTask(paths, id);
-    if (meta.status === "running") {
-      throw new DevtaskError(`Task ${id} is running; stop it before checking`);
-    }
-
-    const config = readConfig(paths);
-    if (config.verify.length === 0) {
-      throw new DevtaskError("No check commands configured. Use devtask config check <command...>");
-    }
-
-    console.log(`Running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"} in ${meta.worktreePath}`);
-    const record = await runVerification(paths, meta, config.verify, {
-      onStepStart: (command, index, total) => {
-        console.log(`[${index}/${total}] ${command}`);
-      }
-    });
-    console.log(`Check: ${record.status}`);
-    for (const step of record.steps) {
-      console.log(`${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
-      if (step.exitCode !== 0) {
-        if (step.stdout.trim()) console.log(step.stdout.trim());
-        if (step.stderr.trim()) console.error(step.stderr.trim());
-        process.exit(1);
-      }
-    }
+    await checkTask(paths, id, { exitOnFailure: true });
   };
 
   const reviewAction = async (id: string): Promise<void> => {
     const paths = resolvePaths();
-    const meta = getTask(paths, id);
-    if (meta.status === "running") {
-      throw new DevtaskError(`Task ${id} is running; stop it before review`);
-    }
-
-    const config = readConfig(paths);
-    console.log(`Running review agent in ${meta.worktreePath}`);
-    const record = await runReviewAgent(paths, meta, {
-      model: meta.model ?? config.codex.model,
-      fullAuto: config.codex.fullAuto,
-      onStart: (start) => {
-        console.log(`Prompt: ${start.promptPath}`);
-        console.log(`Output: ${start.outputPath}`);
-        console.log(`Command: ${start.command}`);
-      },
-      onStdout: (chunk) => {
-        process.stdout.write(chunk);
-      },
-      onStderr: (chunk) => {
-        process.stderr.write(chunk);
-      }
-    });
-    console.log(`Review agent: ${record.status}`);
-    console.log(`Output: ${record.outputPath}`);
-    if (record.status !== "passed") {
-      process.exit(record.exitCode === 0 ? 2 : 1);
-    }
+    await reviewTask(paths, id, { exitOnFindings: true });
   };
 
   const prAction = async (
@@ -522,46 +662,12 @@ export function createCli(): Command {
     options: { title?: string; body?: string; ready?: boolean }
   ): Promise<void> => {
     const paths = resolvePaths();
-    const meta = getTask(paths, id);
-    if (meta.status === "running") {
-      throw new DevtaskError(`Task ${id} is running; stop it before opening a PR`);
-    }
-    if (!["approved", "ci-failed"].includes(meta.status)) {
-      throw new DevtaskError(`Task ${id} is ${meta.status}; mark it approved before opening a PR`);
-    }
-
-    const prUrl = await createPullRequest(meta, {
-      title: options.title ?? meta.id,
-      body: options.body ?? defaultPrBody(meta),
-      draft: options.ready !== true
-    });
-
-    writeTaskMeta(taskMetaPath(paths, id), {
-      ...meta,
-      status: "pr-open",
-      prUrl,
-      updatedAt: new Date().toISOString()
-    });
-    console.log(prUrl);
+    await openPrForTask(paths, id, options);
   };
 
   const ciAction = async (id: string): Promise<void> => {
     const paths = resolvePaths();
-    const meta = getTask(paths, id);
-    if (!meta.prUrl) {
-      throw new DevtaskError(`Task ${id} has no PR URL`);
-    }
-
-    const result = await runCommand("gh", ["pr", "checks", meta.prUrl], { cwd: meta.worktreePath });
-    process.stdout.write(result.stdout);
-    process.stderr.write(result.stderr);
-
-    const status = result.exitCode === 0 ? "ci-passed" : "ci-failed";
-    writeTaskMeta(taskMetaPath(paths, id), {
-      ...meta,
-      status,
-      updatedAt: new Date().toISOString()
-    });
+    await checkCiForTask(paths, id);
   };
 
   program
@@ -810,6 +916,197 @@ function displayWidth(value: string): number {
   return value.length;
 }
 
+interface GroupBoardRow {
+  repo: string;
+  task: string;
+  status: string;
+  check: string;
+  review: string;
+  pr: string;
+  updated: string;
+  next: string;
+}
+
+async function buildGroupBoardRows(paths: ReturnType<typeof resolvePaths>, id: string): Promise<GroupBoardRow[]> {
+  const group = getGroup(paths, id);
+  const rows: GroupBoardRow[] = [];
+
+  for (const repo of group.repos) {
+    const repoPaths = resolvePaths(repo.path);
+    const config = readConfig(repoPaths);
+    const row = buildBoardRow(await buildTaskReview(repoPaths, getTask(repoPaths, repo.taskId)), config);
+    rows.push({
+      repo: repo.name,
+      task: row.id,
+      status: row.status,
+      check: row.check,
+      review: row.review,
+      pr: row.pr,
+      updated: row.updated,
+      next: rewriteCommandForRepo(row.next, repo.path)
+    });
+  }
+
+  return rows;
+}
+
+function withRepoCommand(next: NextAction, repoName: string, repoPath: string): NextAction {
+  return {
+    ...next,
+    command: next.command ? rewriteCommandForRepo(next.command, repoPath) : null,
+    reason: `${repoName}: ${next.reason}`
+  };
+}
+
+function rewriteCommandForRepo(command: string, repoPath: string): string {
+  if (!command.startsWith("devtask ")) {
+    return command;
+  }
+
+  return `(cd ${shellQuote(repoPath)} && ${command})`;
+}
+
+async function advanceTask(paths: ReturnType<typeof resolvePaths>, id: string, next: NextAction): Promise<void> {
+  switch (next.kind) {
+    case "run":
+      printStartedWorker(id, startWorker(paths, id), "Running");
+      return;
+    case "continue": {
+      const meta = getTask(paths, id);
+      printStartedWorker(id, startWorker(paths, id, { tmux: meta.tmuxSession !== null }), "Continuing");
+      return;
+    }
+    case "check":
+      await checkTask(paths, id, { exitOnFailure: false });
+      return;
+    case "review":
+      await reviewTask(paths, id, { exitOnFindings: false });
+      return;
+    case "pr":
+      await openPrForTask(paths, id, {});
+      return;
+    case "ci":
+      await checkCiForTask(paths, id);
+      return;
+    default:
+      printNextAction(id, next);
+  }
+}
+
+async function checkTask(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  options: { exitOnFailure: boolean }
+): Promise<void> {
+  const meta = getTask(paths, id);
+  if (meta.status === "running") {
+    throw new DevtaskError(`Task ${id} is running; stop it before checking`);
+  }
+
+  const config = readConfig(paths);
+  if (config.verify.length === 0) {
+    throw new DevtaskError("No check commands configured. Use devtask config check <command...>");
+  }
+
+  console.log(`Running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"} in ${meta.worktreePath}`);
+  const record = await runVerification(paths, meta, config.verify, {
+    onStepStart: (command, index, total) => {
+      console.log(`[${index}/${total}] ${command}`);
+    }
+  });
+  console.log(`Check: ${record.status}`);
+  for (const step of record.steps) {
+    console.log(`${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
+    if (step.exitCode !== 0) {
+      if (step.stdout.trim()) console.log(step.stdout.trim());
+      if (step.stderr.trim()) console.error(step.stderr.trim());
+      if (options.exitOnFailure) {
+        process.exit(1);
+      }
+    }
+  }
+}
+
+async function reviewTask(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  options: { exitOnFindings: boolean }
+): Promise<void> {
+  const meta = getTask(paths, id);
+  if (meta.status === "running") {
+    throw new DevtaskError(`Task ${id} is running; stop it before review`);
+  }
+
+  const config = readConfig(paths);
+  console.log(`Running review agent in ${meta.worktreePath}`);
+  const record = await runReviewAgent(paths, meta, {
+    model: meta.model ?? config.codex.model,
+    fullAuto: config.codex.fullAuto,
+    onStart: (start) => {
+      console.log(`Prompt: ${start.promptPath}`);
+      console.log(`Output: ${start.outputPath}`);
+      console.log(`Command: ${start.command}`);
+    },
+    onStdout: (chunk) => {
+      process.stdout.write(chunk);
+    },
+    onStderr: (chunk) => {
+      process.stderr.write(chunk);
+    }
+  });
+  console.log(`Review agent: ${record.status}`);
+  console.log(`Output: ${record.outputPath}`);
+  if (record.status !== "passed" && options.exitOnFindings) {
+    process.exit(record.exitCode === 0 ? 2 : 1);
+  }
+}
+
+async function openPrForTask(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  options: { title?: string; body?: string; ready?: boolean }
+): Promise<void> {
+  const meta = getTask(paths, id);
+  if (meta.status === "running") {
+    throw new DevtaskError(`Task ${id} is running; stop it before opening a PR`);
+  }
+  if (!["approved", "ci-failed"].includes(meta.status)) {
+    throw new DevtaskError(`Task ${id} is ${meta.status}; mark it approved before opening a PR`);
+  }
+
+  const prUrl = await createPullRequest(meta, {
+    title: options.title ?? meta.id,
+    body: options.body ?? defaultPrBody(meta),
+    draft: options.ready !== true
+  });
+
+  writeTaskMeta(taskMetaPath(paths, id), {
+    ...meta,
+    status: "pr-open",
+    prUrl,
+    updatedAt: new Date().toISOString()
+  });
+  console.log(prUrl);
+}
+
+async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string): Promise<void> {
+  const meta = getTask(paths, id);
+  if (!meta.prUrl) {
+    throw new DevtaskError(`Task ${id} has no PR URL`);
+  }
+
+  const result = await runCommand("gh", ["pr", "checks", meta.prUrl], { cwd: meta.worktreePath });
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+
+  const status = result.exitCode === 0 ? "ci-passed" : "ci-failed";
+  writeTaskMeta(taskMetaPath(paths, id), {
+    ...meta,
+    status,
+    updatedAt: new Date().toISOString()
+  });
+}
+
 function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options: { tmux?: boolean } = {}): StartedWorker {
   const meta = getTask(paths, id);
   if (isProcessAlive(meta.supervisorPid)) {
@@ -920,4 +1217,12 @@ function defaultPrBody(meta: ReturnType<typeof getTask>): string {
     "",
     `    devtask inspect ${meta.id}`
   ].join("\n");
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9._/:@+-]+$/.test(value)) {
+    return value;
+  }
+
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

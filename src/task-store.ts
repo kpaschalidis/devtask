@@ -27,6 +27,7 @@ export interface CreateTaskOptions {
 export function initializeStore(paths: DevtaskPaths): void {
   fs.mkdirSync(paths.tasksDir, { recursive: true });
   fs.mkdirSync(paths.worktreesDir, { recursive: true });
+  fs.mkdirSync(paths.groupsDir, { recursive: true });
   if (!fs.existsSync(paths.configPath)) {
     writeConfig(paths, DEFAULT_CONFIG);
   }

@@ -8,6 +8,7 @@ export interface DevtaskPaths {
   configPath: string;
   tasksDir: string;
   worktreesDir: string;
+  groupsDir: string;
 }
 
 export function findRepoRoot(start = process.cwd()): string {
@@ -36,7 +37,8 @@ export function resolvePaths(start = process.cwd()): DevtaskPaths {
     baseDir,
     configPath: path.join(baseDir, "config.json"),
     tasksDir: path.join(baseDir, "tasks"),
-    worktreesDir: path.join(baseDir, "worktrees")
+    worktreesDir: path.join(baseDir, "worktrees"),
+    groupsDir: path.join(baseDir, "groups")
   };
 }
 

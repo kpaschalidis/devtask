@@ -139,10 +139,47 @@ Inspect stale process metadata or missing worktrees:
 devtask doctor
 ```
 
+## Multi-Repo Groups
+
+A group coordinates multiple repo-local tasks from one control repository. Each repo still owns its own `.devtask` state, task worktree, checks, review, PR, and CI lifecycle. The group stores only cross-repo coordination metadata.
+
+```bash
+devtask group create billing-export \
+  --goal "Add billing export across frontend and backend"
+
+devtask group add billing-export backend ~/projects/api \
+  --task billing-export-api \
+  --goal "Add the billing export API"
+
+devtask group add billing-export frontend ~/projects/web \
+  --task billing-export-ui \
+  --goal "Add the billing export UI"
+```
+
+Use the group cockpit:
+
+```bash
+devtask group list
+devtask group show billing-export
+devtask group board billing-export
+devtask group next billing-export
+devtask group run billing-export
+devtask group advance billing-export
+```
+
+`devtask group board` shows every repo task with status, latest check, latest review, PR state, and next command. `devtask group advance` runs safe next steps across repos, using the same single-repo task lifecycle. It still stops at human approval, review findings, failed checks, and ambiguous states.
+
+V1 groups do not do cross-repo handoff generation, dependency ordering, grouped PR creation, or grouped CI fixing. Those belong above the basic coordination layer.
+
 ## Task Layout
 
 ```text
 .devtask/
+  groups/
+    <id>/
+      group.json
+      state.md
+      plan.md
   tasks/
     <id>/
       task.md

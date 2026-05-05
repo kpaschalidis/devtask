@@ -33,7 +33,8 @@ describe("paths", () => {
       baseDir: path.join(repo, ".devtask"),
       configPath: path.join(repo, ".devtask", "config.json"),
       tasksDir: path.join(repo, ".devtask", "tasks"),
-      worktreesDir: path.join(repo, ".devtask", "worktrees")
+      worktreesDir: path.join(repo, ".devtask", "worktrees"),
+      groupsDir: path.join(repo, ".devtask", "groups")
     });
   });
 });
