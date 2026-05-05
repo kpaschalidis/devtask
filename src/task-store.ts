@@ -14,17 +14,22 @@ import { readTaskMeta, writeTaskMeta } from "./meta.js";
 import { createTaskWorktree } from "./git.js";
 import { DevtaskError } from "./errors.js";
 import type { TaskMeta, TaskSummary } from "./types.js";
+import { buildCodexCommand, readConfig, writeConfig, DEFAULT_CONFIG } from "./config.js";
 
 export interface CreateTaskOptions {
   goal?: string;
   branch?: string;
   maxRetries?: number;
   command?: string;
+  model?: string;
 }
 
 export function initializeStore(paths: DevtaskPaths): void {
   fs.mkdirSync(paths.tasksDir, { recursive: true });
   fs.mkdirSync(paths.worktreesDir, { recursive: true });
+  if (!fs.existsSync(paths.configPath)) {
+    writeConfig(paths, DEFAULT_CONFIG);
+  }
 }
 
 export async function createTask(
@@ -56,11 +61,13 @@ export async function createTask(
   const resultPath = resultJsonPath(paths, id);
   const targetWorktreePath = worktreePath(paths, id);
   const now = new Date().toISOString();
-  const defaultCommand = `codex exec - < "$DEVTASK_TASK_PATH"`;
+  const config = readConfig(paths);
+  const model = options.model ?? config.codex.model;
+  const defaultCommand = buildCodexCommand({ model, fullAuto: config.codex.fullAuto });
 
   fs.writeFileSync(
     taskPath,
-    `# Task ${id}\n\n## Goal\n${options.goal ?? ""}\n\n## Instructions\n- Keep this task stateful and update state.md as work progresses.\n`
+    `# Task ${id}\n\n## Goal\n${options.goal ?? ""}\n\n## Instructions\n- Work inside the task worktree.\n- Keep this task stateful and update $DEVTASK_STATE_PATH as work progresses.\n- When the task is complete, write {"status":"done"} to $DEVTASK_RESULT_PATH.\n- If the task is blocked or cannot be completed, write {"status":"blocked","reason":"..."} to $DEVTASK_RESULT_PATH.\n`
   );
   fs.writeFileSync(statePath, `# State: ${id}\n\n## Progress\n- Created ${now}\n`);
   fs.writeFileSync(resultPath, "{\n  \"status\": \"pending\"\n}\n");
@@ -76,6 +83,7 @@ export async function createTask(
     taskPath,
     statePath,
     resultPath,
+    model,
     command: options.command ?? defaultCommand,
     supervisorPid: null,
     childPid: null,

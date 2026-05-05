@@ -18,6 +18,7 @@ export interface TaskMeta {
   taskPath: string;
   statePath: string;
   resultPath: string;
+  model: string | null;
   command: string;
   supervisorPid: number | null;
   childPid: number | null;

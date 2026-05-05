@@ -31,6 +31,7 @@ describe("paths", () => {
     expect(resolvePaths(repo)).toEqual({
       root: repo,
       baseDir: path.join(repo, ".devtask"),
+      configPath: path.join(repo, ".devtask", "config.json"),
       tasksDir: path.join(repo, ".devtask", "tasks"),
       worktreesDir: path.join(repo, ".devtask", "worktrees")
     });

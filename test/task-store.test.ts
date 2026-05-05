@@ -5,6 +5,7 @@ import { DevtaskError } from "../src/errors.js";
 import { resolvePaths } from "../src/paths.js";
 import { createTask, getTask, initializeStore, listTasks } from "../src/task-store.js";
 import { makeTempRepo } from "./helpers.js";
+import { readConfig, writeConfig } from "../src/config.js";
 
 describe("task store", () => {
   it("initializes storage directories", async () => {
@@ -15,6 +16,13 @@ describe("task store", () => {
 
     expect(fs.existsSync(paths.tasksDir)).toBe(true);
     expect(fs.existsSync(paths.worktreesDir)).toBe(true);
+    expect(readConfig(paths)).toEqual({
+      schemaVersion: 1,
+      codex: {
+        model: null,
+        fullAuto: true
+      }
+    });
   });
 
   it("creates a task with durable files and an isolated worktree", async () => {
@@ -30,7 +38,8 @@ describe("task store", () => {
       id: "fix-login",
       status: "created",
       branch: "task/fix-login",
-      command: 'codex exec - < "$DEVTASK_TASK_PATH"',
+      model: null,
+      command: 'codex exec --full-auto --add-dir "$DEVTASK_TASK_DIR" - < "$DEVTASK_TASK_PATH"',
       supervisorPid: null,
       childPid: null,
       failCount: 0,
@@ -42,6 +51,24 @@ describe("task store", () => {
     expect(fs.existsSync(meta.worktreePath)).toBe(true);
     expect(fs.existsSync(path.join(meta.worktreePath, ".git"))).toBe(true);
     expect(fs.readFileSync(meta.taskPath, "utf8")).toContain("Fix login redirect loop");
+  });
+
+  it("uses the repo default model when creating managed Codex commands", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(repo);
+    initializeStore(paths);
+    writeConfig(paths, {
+      schemaVersion: 1,
+      codex: {
+        model: "gpt-5.2",
+        fullAuto: true
+      }
+    });
+
+    const meta = await createTask(paths, "model-task");
+
+    expect(meta.model).toBe("gpt-5.2");
+    expect(meta.command).toBe('codex exec --full-auto --add-dir "$DEVTASK_TASK_DIR" -m gpt-5.2 - < "$DEVTASK_TASK_PATH"');
   });
 
   it("lists task summaries in stable id order", async () => {

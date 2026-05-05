@@ -5,6 +5,7 @@ import { DevtaskError } from "./errors.js";
 export interface DevtaskPaths {
   root: string;
   baseDir: string;
+  configPath: string;
   tasksDir: string;
   worktreesDir: string;
 }
@@ -33,6 +34,7 @@ export function resolvePaths(start = process.cwd()): DevtaskPaths {
   return {
     root,
     baseDir,
+    configPath: path.join(baseDir, "config.json"),
     tasksDir: path.join(baseDir, "tasks"),
     worktreesDir: path.join(baseDir, "worktrees")
   };

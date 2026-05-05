@@ -9,6 +9,7 @@ import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, listTasks } from "./task-store.js";
 import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-inspection.js";
 import { attachTmuxSession, killTmuxSession, startTmuxSession, tmuxSessionName } from "./tmux.js";
+import { buildCodexCommand, readConfig, writeConfig } from "./config.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -35,6 +36,49 @@ export function createCli(): Command {
         const paths = resolvePaths();
         initializeStore(paths);
         console.log(`Initialized ${paths.baseDir}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  const config = program.command("config").description("Show or update repo-local devtask configuration.");
+
+  config
+    .command("show")
+    .description("Show repo-local devtask configuration.")
+    .action(() => {
+      try {
+        const paths = resolvePaths();
+        initializeStore(paths);
+        console.log(JSON.stringify(readConfig(paths), null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  config
+    .command("model")
+    .description("Show or update the default Codex model for new tasks.")
+    .argument("[model]")
+    .action((model?: string) => {
+      try {
+        const paths = resolvePaths();
+        initializeStore(paths);
+        const current = readConfig(paths);
+
+        if (!model) {
+          console.log(current.codex.model ?? "-");
+          return;
+        }
+
+        writeConfig(paths, {
+          ...current,
+          codex: {
+            ...current.codex,
+            model
+          }
+        });
+        console.log(`Default Codex model: ${model}`);
       } catch (error) {
         printError(error);
       }
@@ -131,16 +175,21 @@ export function createCli(): Command {
     .argument("<id>")
     .option("--goal <goal>", "Initial task goal")
     .option("--branch <branch>", "Branch name to create for this task")
+    .option("--model <model>", "Codex model for this task")
     .option("--cmd <command>", "Worker command to run from the task worktree")
     .option("--max-retries <count>", "Maximum worker retries", parsePositiveInteger)
     .action(
-      async (id: string, options: { goal?: string; branch?: string; cmd?: string; maxRetries?: number }) => {
+      async (
+        id: string,
+        options: { goal?: string; branch?: string; model?: string; cmd?: string; maxRetries?: number }
+      ) => {
         try {
           const paths = resolvePaths();
           const meta = await createTask(paths, id, { ...options, command: options.cmd });
           console.log(`Created task ${meta.id}`);
           console.log(`Branch: ${meta.branch}`);
           console.log(`Worktree: ${meta.worktreePath}`);
+          console.log(`Model: ${meta.model ?? "-"}`);
         } catch (error) {
           printError(error);
         }
@@ -185,12 +234,45 @@ export function createCli(): Command {
         console.log(`Task file: ${meta.taskPath}`);
         console.log(`State file: ${meta.statePath}`);
         console.log(`Result file: ${meta.resultPath}`);
+        console.log(`Model: ${meta.model ?? "-"}`);
         console.log(`Command: ${meta.command}`);
         console.log(`Supervisor PID: ${meta.supervisorPid ?? "-"}`);
         console.log(`Child PID: ${meta.childPid ?? "-"}`);
         console.log(`tmux: ${meta.tmuxSession ?? "-"}`);
         console.log(`Failures: ${meta.failCount}/${meta.maxRetries}`);
         console.log(`Updated: ${meta.updatedAt}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("model")
+    .description("Show or update a task Codex model and managed command.")
+    .argument("<id>")
+    .argument("[model]")
+    .action((id: string, model?: string) => {
+      try {
+        const paths = resolvePaths();
+        const meta = getTask(paths, id);
+
+        if (!model) {
+          console.log(meta.model ?? "-");
+          return;
+        }
+
+        if (meta.status === "running") {
+          throw new DevtaskError(`Task ${id} is running; pause or cancel it before changing the model`);
+        }
+
+        const config = readConfig(paths);
+        writeTaskMeta(taskMetaPath(paths, id), {
+          ...meta,
+          model,
+          command: buildCodexCommand({ model, fullAuto: config.codex.fullAuto }),
+          updatedAt: new Date().toISOString()
+        });
+        console.log(`Updated model for task ${id}: ${model}`);
       } catch (error) {
         printError(error);
       }
@@ -354,7 +436,7 @@ function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options
   if (isProcessAlive(meta.supervisorPid)) {
     throw new DevtaskError(`Task ${id} is already supervised by PID ${meta.supervisorPid}`);
   }
-  if (["done", "cancelled"].includes(meta.status)) {
+  if (meta.status === "done") {
     throw new DevtaskError(`Task ${id} is ${meta.status} and cannot be started`);
   }
 

@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execa } from "execa";
 import type { DevtaskPaths } from "./paths.js";
 import { taskDir } from "./paths.js";
 import type { RunRecord } from "./run-record.js";
 import type { TaskMeta } from "./types.js";
 import { isProcessAlive } from "./processes.js";
+import { runCommandOrThrow } from "./process-runner.js";
 
 export interface TaskReview {
   meta: TaskMeta;
@@ -91,7 +91,7 @@ export function inspectTaskHealth(meta: TaskMeta): DoctorIssue[] {
 
 async function listChangedFiles(worktreePath: string): Promise<string[]> {
   try {
-    const result = await execa("git", ["status", "--short"], { cwd: worktreePath });
+    const result = await runCommandOrThrow("git", ["status", "--short"], { cwd: worktreePath });
     return result.stdout.split("\n").filter(Boolean);
   } catch {
     return [];

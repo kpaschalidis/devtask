@@ -7,6 +7,7 @@ describe("tmux", () => {
       {
         root: "/tmp/one/project",
         baseDir: "/tmp/one/project/.devtask",
+        configPath: "/tmp/one/project/.devtask/config.json",
         tasksDir: "/tmp/one/project/.devtask/tasks",
         worktreesDir: "/tmp/one/project/.devtask/worktrees"
       },
@@ -16,6 +17,7 @@ describe("tmux", () => {
       {
         root: "/tmp/two/project",
         baseDir: "/tmp/two/project/.devtask",
+        configPath: "/tmp/two/project/.devtask/config.json",
         tasksDir: "/tmp/two/project/.devtask/tasks",
         worktreesDir: "/tmp/two/project/.devtask/worktrees"
       },

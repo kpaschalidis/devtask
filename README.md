@@ -25,6 +25,7 @@ npm link
 
 ```bash
 devtask init
+devtask config model gpt-5.2
 
 devtask create fix-login \
   --goal "Fix login redirect loop and add regression coverage"
@@ -85,13 +86,26 @@ devtask doctor
 By default, a task runs:
 
 ```bash
-codex exec - < "$DEVTASK_TASK_PATH"
+codex exec --full-auto --add-dir "$DEVTASK_TASK_DIR" - < "$DEVTASK_TASK_PATH"
 ```
 
 You can override it at creation time:
 
 ```bash
 devtask create my-task --cmd "npm test"
+```
+
+Set the default Codex model per repository:
+
+```bash
+devtask config model gpt-5.2
+```
+
+Override one task:
+
+```bash
+devtask create my-task --model gpt-5.2
+devtask model my-task gpt-5.2
 ```
 
 You can also update an existing task command:
