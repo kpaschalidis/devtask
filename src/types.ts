@@ -18,6 +18,7 @@ export interface TaskMeta {
   taskPath: string;
   statePath: string;
   resultPath: string;
+  command: string;
   supervisorPid: number | null;
   childPid: number | null;
   failCount: number;
@@ -31,6 +32,8 @@ export interface TaskSummary {
   status: TaskStatus;
   branch: string;
   worktreePath: string;
+  supervisorPid: number | null;
+  childPid: number | null;
   failCount: number;
   maxRetries: number;
   updatedAt: string;

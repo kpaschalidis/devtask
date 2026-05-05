@@ -12,11 +12,11 @@
 
 ## Slice 2: Worker Lifecycle
 
-- [ ] Add atomic lock acquisition with stale lock recovery.
-- [ ] Add supervisor loop with structured run records.
-- [ ] Track supervisor and child process identifiers.
-- [ ] Implement `start`, `pause`, `resume`, and `cancel`.
-- [ ] Add tests for lifecycle transitions and lock behavior.
+- [x] Add atomic lock acquisition with stale lock recovery.
+- [x] Add supervisor loop with structured run records.
+- [x] Track supervisor and child process identifiers.
+- [x] Implement `start`, `pause`, `resume`, and `cancel`.
+- [x] Add tests for lifecycle transitions and lock behavior.
 
 ## Slice 3: Developer Control Surface
 

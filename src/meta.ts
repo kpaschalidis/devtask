@@ -57,6 +57,7 @@ export function parseTaskMeta(value: unknown): TaskMeta {
     taskPath: requireString(value, "taskPath"),
     statePath: requireString(value, "statePath"),
     resultPath: requireString(value, "resultPath"),
+    command: requireString(value, "command"),
     supervisorPid: requireNullableNumber(value, "supervisorPid"),
     childPid: requireNullableNumber(value, "childPid"),
     failCount: requireNonNegativeInteger(value, "failCount"),

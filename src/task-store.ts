@@ -19,6 +19,7 @@ export interface CreateTaskOptions {
   goal?: string;
   branch?: string;
   maxRetries?: number;
+  command?: string;
 }
 
 export function initializeStore(paths: DevtaskPaths): void {
@@ -45,11 +46,17 @@ export async function createTask(
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
 
   const branch = options.branch ?? `task/${id}`;
+  const maxRetries = options.maxRetries ?? 5;
+  if (!Number.isInteger(maxRetries) || maxRetries < 1) {
+    throw new DevtaskError("maxRetries must be a positive integer");
+  }
+
   const taskPath = taskMarkdownPath(paths, id);
   const statePath = stateMarkdownPath(paths, id);
   const resultPath = resultJsonPath(paths, id);
   const targetWorktreePath = worktreePath(paths, id);
   const now = new Date().toISOString();
+  const defaultCommand = `codex run ${JSON.stringify(taskPath)}`;
 
   fs.writeFileSync(
     taskPath,
@@ -69,10 +76,11 @@ export async function createTask(
     taskPath,
     statePath,
     resultPath,
+    command: options.command ?? defaultCommand,
     supervisorPid: null,
     childPid: null,
     failCount: 0,
-    maxRetries: options.maxRetries ?? 5,
+    maxRetries,
     createdAt: now,
     updatedAt: now
   };
@@ -96,6 +104,8 @@ export function listTasks(paths: DevtaskPaths): TaskSummary[] {
       status: meta.status,
       branch: meta.branch,
       worktreePath: meta.worktreePath,
+      supervisorPid: meta.supervisorPid,
+      childPid: meta.childPid,
       failCount: meta.failCount,
       maxRetries: meta.maxRetries,
       updatedAt: meta.updatedAt
