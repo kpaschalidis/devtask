@@ -67,10 +67,20 @@ devtask pr fix-login
 devtask ci fix-login
 ```
 
-If a worker command exits successfully but does not write a terminal `result.json`, devtask moves the task to `review` instead of looping forever. Inspect it with:
+If a worker command exits successfully but does not write a terminal `result.json`, devtask moves the task to `review` instead of looping forever. If the worker writes `{"status":"done"}`, devtask marks the worker run as `done`.
 
 ```bash
 devtask inspect fix-login
+```
+
+`done` means the coding worker believes the task is complete. It does not mean the diff was reviewed, accepted, merged, or shipped. After `done`, inspect the diff, run checks, run review, then mark the task approved when you accept it:
+
+```bash
+devtask inspect fix-login
+devtask check fix-login
+devtask review fix-login
+devtask mark fix-login approved
+devtask pr fix-login
 ```
 
 `devtask inspect` summarizes task metadata, the latest run, latest checks, latest review artifact, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to check, review, merge, continue, or discard the task worktree.
@@ -98,10 +108,10 @@ devtask mark fix-login cancelled
 Common states:
 
 - `review`: useful work exists and needs human inspection
+- `done`: the worker reported completion; human review and approval may still be required
 - `approved`: human accepted the local diff and it can be turned into a PR
 - `pr-open`: a GitHub PR exists
 - `ci-passed` / `ci-failed`: PR checks were inspected
-- `done`: accepted and complete
 
 Run a task inside tmux when you want an attachable terminal:
 
