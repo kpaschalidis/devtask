@@ -61,8 +61,8 @@ export function createCli(): Command {
     });
 
   config
-    .command("verify")
-    .description("Show or replace repo-local verification commands.")
+    .command("check")
+    .description("Show or replace repo-local check commands.")
     .argument("[commands...]")
     .action((commands: string[]) => {
       try {
@@ -72,7 +72,7 @@ export function createCli(): Command {
 
         if (commands.length === 0) {
           if (current.verify.length === 0) {
-            console.log("No verification commands configured");
+            console.log("No check commands configured");
             return;
           }
           for (const command of current.verify) {
@@ -85,7 +85,7 @@ export function createCli(): Command {
           ...current,
           verify: commands
         });
-        console.log("Verification commands:");
+        console.log("Check commands:");
         for (const command of commands) {
           console.log(`  ${command}`);
         }
@@ -415,7 +415,7 @@ export function createCli(): Command {
 
     const config = readConfig(paths);
     if (config.verify.length === 0) {
-      throw new DevtaskError("No check commands configured. Use devtask config verify <command...>");
+      throw new DevtaskError("No check commands configured. Use devtask config check <command...>");
     }
 
     const record = await runVerification(paths, meta, config.verify);
@@ -533,15 +533,15 @@ export function createCli(): Command {
     });
 
   program
-    .command("start")
-    .description("Start or resume a task worker in the background.")
+    .command("run")
+    .description("Run or continue a task worker in the background.")
     .argument("<id>")
     .option("--tmux", "Run the worker inside a tmux session")
     .action((id: string, options: { tmux?: boolean }) => {
       try {
         const paths = resolvePaths();
         const started = startWorker(paths, id, { tmux: options.tmux === true });
-        console.log(`Started task ${id}`);
+        console.log(`Running task ${id}`);
         if (started.tmuxSession) {
           console.log(`tmux: ${started.tmuxSession}`);
           return;
@@ -575,19 +575,22 @@ export function createCli(): Command {
     });
 
   program
-    .command("resume")
-    .description("Resume a paused task worker.")
+    .command("continue")
+    .description("Continue a paused or stopped task worker.")
     .argument("<id>")
     .action((id: string) => {
       try {
         const paths = resolvePaths();
         const meta = getTask(paths, id);
-        if (meta.status !== "paused") {
-          throw new DevtaskError(`Task ${id} is ${meta.status}, not paused`);
+        if (meta.status === "running") {
+          throw new DevtaskError(`Task ${id} is already running`);
+        }
+        if (meta.status === "done") {
+          throw new DevtaskError(`Task ${id} is done and cannot be continued`);
         }
 
         const started = startWorker(paths, id, { tmux: meta.tmuxSession !== null });
-        console.log(`Resumed task ${id}`);
+        console.log(`Continuing task ${id}`);
         if (started.tmuxSession) {
           console.log(`tmux: ${started.tmuxSession}`);
           return;
