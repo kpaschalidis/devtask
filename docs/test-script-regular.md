@@ -135,23 +135,23 @@ devtask ci readme-smoke
 
 ## 9. Cleanup Notes
 
-There is no full cleanup command yet. For manual cleanup, inspect first:
+Inspect before cleanup:
 
 ```bash
 devtask status readme-smoke
 git worktree list
 ```
 
-If you want to remove the task worktree manually:
+Preview cleanup:
 
 ```bash
-git worktree remove .devtask/worktrees/readme-smoke
+devtask cleanup readme-smoke --dry-run
 ```
 
-Then remove task metadata if you no longer need the record:
+Remove the task worktree and metadata:
 
 ```bash
-rm -rf .devtask/tasks/readme-smoke
+devtask cleanup readme-smoke
 ```
 
-Do not remove task metadata if you still want logs, run records, review artifacts, or task history.
+Cleanup refuses running tasks and dirty worktrees unless you pass `--force`.

@@ -15,7 +15,8 @@ import { runVerification } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
 import { runReviewAgent } from "./review-agent.js";
 import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
-import { addRepoToGroup, createGroup, getGroup, listGroups, removeRepoFromGroup } from "./group-store.js";
+import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroups, removeRepoFromGroup } from "./group-store.js";
+import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -425,6 +426,59 @@ export function createCli(): Command {
         console.log(`Removed ${repoName} from group ${updated.id}`);
         if (options.deleteTask) {
           console.log("Deleted repo-local task metadata");
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("cleanup")
+    .description("Remove every repo task worktree/metadata in a group, then remove group metadata.")
+    .argument("<id>")
+    .option("--dry-run", "Print cleanup plan without deleting anything")
+    .option("--force", "Clean up even when a task is running or worktree is dirty")
+    .option("--keep-worktrees", "Keep repo task worktrees")
+    .option("--keep-metadata", "Keep repo task metadata directories")
+    .option("--keep-group", "Keep group metadata")
+    .action(async (id: string, options: CleanupOptions & { keepGroup?: boolean; keepWorktrees?: boolean; keepMetadata?: boolean }) => {
+      try {
+        const paths = resolvePaths();
+        const groupData = getGroup(paths, id);
+        const cleanupOptions = normalizeCleanupOptions(options);
+        const plans: Array<{ repo: string; plan: CleanupPlan }> = [];
+
+        for (const repo of groupData.repos) {
+          const repoPaths = resolvePaths(repo.path);
+          const plan = await planTaskCleanup(repoPaths, repo.taskId, cleanupOptions);
+          plans.push({ repo: repo.name, plan });
+        }
+
+        const blockers = plans.flatMap(({ repo, plan }) =>
+          plan.blockers.map((blocker) => `${repo}/${plan.taskId}: ${blocker}`)
+        );
+        for (const { repo, plan } of plans) {
+          printCleanupPlan(`${repo}/${plan.taskId}`, plan);
+        }
+
+        const groupAction = `remove group metadata ${groupDir(paths, id)}`;
+        console.log(`${id}`);
+        console.log(`  ${options.keepGroup ? "SKIP" : "PLAN"} ${groupAction}`);
+
+        if (blockers.length > 0 && !options.force) {
+          throw new DevtaskError(`Group cleanup refused:\n${blockers.map((blocker) => `  - ${blocker}`).join("\n")}\nUse --force to override.`);
+        }
+
+        if (options.dryRun) {
+          return;
+        }
+
+        for (const repo of groupData.repos) {
+          const repoPaths = resolvePaths(repo.path);
+          await cleanupTask(repoPaths, repo.taskId, cleanupOptions);
+        }
+        if (!options.keepGroup) {
+          deleteGroup(paths, id);
         }
       } catch (error) {
         printError(error);
@@ -891,6 +945,27 @@ export function createCli(): Command {
     });
 
   program
+    .command("cleanup")
+    .description("Remove a task worktree and metadata.")
+    .argument("<id>")
+    .option("--dry-run", "Print cleanup plan without deleting anything")
+    .option("--force", "Clean up even when the task is running or worktree is dirty")
+    .option("--keep-worktree", "Keep the task worktree")
+    .option("--keep-metadata", "Keep the task metadata directory")
+    .action(async (id: string, options: CleanupOptions) => {
+      try {
+        const paths = resolvePaths();
+        const cleanupOptions = normalizeCleanupOptions(options);
+        const plan = options.dryRun
+          ? await planTaskCleanup(paths, id, cleanupOptions)
+          : await cleanupTask(paths, id, cleanupOptions);
+        printCleanupPlan(id, plan);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
     .command("advance")
     .description("Run the next safe workflow step for a task, stopping at human approval.")
     .argument("<id>")
@@ -1135,6 +1210,27 @@ function selectGroupRepos(
     throw new DevtaskError(repoName ? `Group ${id} does not have repo ${repoName}` : "No repos in group");
   }
   return repos;
+}
+
+function normalizeCleanupOptions(
+  options: CleanupOptions & { keepWorktrees?: boolean; keepMetadata?: boolean }
+): CleanupOptions {
+  return {
+    dryRun: options.dryRun === true,
+    force: options.force === true,
+    keepWorktree: options.keepWorktree === true || options.keepWorktrees === true,
+    keepMetadata: options.keepMetadata === true
+  };
+}
+
+function printCleanupPlan(label: string, plan: CleanupPlan): void {
+  console.log(label);
+  for (const action of plan.actions) {
+    console.log(`  PLAN ${action}`);
+  }
+  for (const blocker of plan.blockers) {
+    console.log(`  BLOCKED ${blocker}`);
+  }
 }
 
 interface GroupBoardRow {

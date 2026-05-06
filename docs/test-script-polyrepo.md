@@ -238,10 +238,24 @@ devtask ci docs-smoke-backend
 
 ## 11. Cleanup Notes
 
-Remove a repo from the group only:
+Preview full group cleanup:
 
 ```bash
 cd /path/to/control/repo
+devtask group cleanup docs-polyrepo-smoke --dry-run
+```
+
+Remove every member task worktree, every member task metadata directory, and the group metadata:
+
+```bash
+devtask group cleanup docs-polyrepo-smoke
+```
+
+Cleanup refuses running tasks and dirty worktrees unless you pass `--force`.
+
+Remove a repo from the group only:
+
+```bash
 devtask group remove docs-polyrepo-smoke frontend
 ```
 
@@ -251,7 +265,7 @@ Remove a repo from the group and delete its repo-local task metadata:
 devtask group remove docs-polyrepo-smoke backend --delete-task
 ```
 
-This does not remove task worktrees or revert code changes. Remove worktrees manually from each member repo if needed:
+`group remove` does not remove task worktrees or revert code changes. Remove worktrees manually from each member repo if needed:
 
 ```bash
 git -C "$FRONTEND_REPO" worktree remove "$FRONTEND_REPO/.devtask/worktrees/docs-smoke-frontend"

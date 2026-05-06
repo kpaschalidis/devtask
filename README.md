@@ -65,6 +65,7 @@ devtask review fix-login
 devtask mark fix-login approved
 devtask pr fix-login
 devtask ci fix-login
+devtask cleanup fix-login --dry-run
 ```
 
 If a worker command exits successfully but does not write a terminal `result.json`, devtask moves the task to `review` instead of looping forever. If the worker writes `{"status":"done"}`, devtask marks the worker run as `done`.
@@ -139,6 +140,15 @@ Inspect stale process metadata or missing worktrees:
 devtask doctor
 ```
 
+Remove a task worktree and metadata when you no longer need the local task record:
+
+```bash
+devtask cleanup fix-login --dry-run
+devtask cleanup fix-login
+```
+
+Cleanup refuses running tasks and dirty worktrees unless you pass `--force`.
+
 ## Multi-Repo Groups
 
 A group coordinates multiple repo-local tasks from one control repository. Each repo still owns its own `.devtask` state, task worktree, checks, review, PR, and CI lifecycle. The group stores only cross-repo coordination metadata.
@@ -171,6 +181,7 @@ devtask group review billing-export
 devtask group run billing-export
 devtask group advance billing-export
 devtask group remove billing-export frontend
+devtask group cleanup billing-export --dry-run
 ```
 
 `devtask group board` shows every repo task with status, latest check, latest review, PR state, and next command. `devtask group advance` runs safe next steps across repos, using the same single-repo task lifecycle. It still stops at human approval, review findings, failed checks, and ambiguous states.
@@ -178,6 +189,8 @@ devtask group remove billing-export frontend
 `devtask group check <id>` and `devtask group review <id>` run the same repo-local lifecycle across every repo in the group. Use `--repo <name>` to run only one member.
 
 `devtask group remove <id> <repo-name>` only removes the repo from the group. Pass `--delete-task` to also delete that repo task's `.devtask/tasks/<task-id>` metadata directory. It does not remove the task worktree or revert code changes.
+
+`devtask group cleanup <id>` removes every member task worktree and metadata directory, then removes the group metadata. Use `--dry-run` first. It refuses running tasks and dirty worktrees unless you pass `--force`.
 
 V1 groups do not do cross-repo handoff generation, dependency ordering, grouped PR creation, or grouped CI fixing. Those belong above the basic coordination layer.
 

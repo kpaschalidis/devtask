@@ -144,6 +144,15 @@ export function groupDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.groupsDir, id);
 }
 
+export function deleteGroup(paths: DevtaskPaths, id: string): void {
+  const dir = groupDir(paths, id);
+  if (!fs.existsSync(dir)) {
+    return;
+  }
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function groupJsonPath(paths: DevtaskPaths, id: string): string {
   return path.join(groupDir(paths, id), "group.json");
 }
