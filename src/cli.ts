@@ -26,6 +26,15 @@ function printError(error: unknown): never {
   throw error;
 }
 
+function printNonFatalError(error: unknown): void {
+  if (error instanceof DevtaskError) {
+    console.error(`devtask: ${error.message}`);
+    return;
+  }
+
+  throw error;
+}
+
 export function createCli(): Command {
   const program = new Command();
 
@@ -507,6 +516,82 @@ export function createCli(): Command {
             console.log("");
           }
           printGroupLog(repo.name, repo.path, repo.taskId, { lines: options.lines, follow: options.follow === true });
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("check")
+    .description("Run configured checks for every repo task in a group.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only check one repo")
+    .action(async (id: string, options: { repo?: string }) => {
+      try {
+        const paths = resolvePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        let failed = false;
+
+        for (const [index, repo] of repos.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${repo.name}/${repo.taskId}`);
+          const repoPaths = resolvePaths(repo.path);
+          try {
+            await checkTask(repoPaths, repo.taskId, { exitOnFailure: false });
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+            continue;
+          }
+          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, repo.taskId));
+          if (latest.latestVerification?.status === "failed") {
+            failed = true;
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("review")
+    .description("Run review agents for every repo task in a group.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only review one repo")
+    .action(async (id: string, options: { repo?: string }) => {
+      try {
+        const paths = resolvePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        let failed = false;
+
+        for (const [index, repo] of repos.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${repo.name}/${repo.taskId}`);
+          const repoPaths = resolvePaths(repo.path);
+          try {
+            await reviewTask(repoPaths, repo.taskId, { exitOnFindings: false });
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+            continue;
+          }
+          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, repo.taskId));
+          if (latest.latestReviewAgent?.status !== "passed") {
+            failed = true;
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
         }
       } catch (error) {
         printError(error);
@@ -1037,6 +1122,19 @@ function printGroupLog(
   }
 
   console.log(tailFile(logPath, options.lines));
+}
+
+function selectGroupRepos(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  repoName?: string
+): ReturnType<typeof getGroup>["repos"] {
+  const group = getGroup(paths, id);
+  const repos = repoName ? group.repos.filter((repo) => repo.name === repoName) : group.repos;
+  if (repos.length === 0) {
+    throw new DevtaskError(repoName ? `Group ${id} does not have repo ${repoName}` : "No repos in group");
+  }
+  return repos;
 }
 
 interface GroupBoardRow {
