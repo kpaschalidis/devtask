@@ -2,6 +2,14 @@
 
 Use this script to test `devtask group` with multiple repositories. It is designed for safe README-only tasks.
 
+Runnable helper:
+
+```bash
+/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration/scripts/smoke-polyrepo.sh help
+```
+
+You can either follow this document manually or edit/pass constants to the helper script.
+
 ## 0. Use The Latest Local CLI
 
 Run this from the `devtask-orchestration` repo:

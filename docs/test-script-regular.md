@@ -2,6 +2,14 @@
 
 Use this script to test the single-repo `devtask` lifecycle in a safe way. It is designed for docs-only changes.
 
+Runnable helper:
+
+```bash
+/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration/scripts/smoke-regular.sh help
+```
+
+You can either follow this document manually or edit/pass constants to the helper script.
+
 ## 0. Use The Latest Local CLI
 
 Run this from the `devtask-orchestration` repo:
