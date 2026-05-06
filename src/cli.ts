@@ -15,7 +15,7 @@ import { runVerification } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
 import { runReviewAgent } from "./review-agent.js";
 import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
-import { addRepoToGroup, createGroup, getGroup, listGroups } from "./group-store.js";
+import { addRepoToGroup, createGroup, getGroup, listGroups, removeRepoFromGroup } from "./group-store.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -155,6 +155,10 @@ export function createCli(): Command {
   const inspectAction = async (id: string): Promise<void> => {
     const paths = resolvePaths();
     const review = await buildTaskReview(paths, getTask(paths, id));
+    printTaskReview(review);
+  };
+
+  const printTaskReview = (review: Awaited<ReturnType<typeof buildTaskReview>>): void => {
     console.log(`Task: ${review.meta.id}`);
     console.log(`Status: ${review.meta.status}`);
     console.log(`Branch: ${review.meta.branch}`);
@@ -377,7 +381,7 @@ export function createCli(): Command {
         if (existingGroup.repos.some((repo) => repo.name === repoName)) {
           throw new DevtaskError(`Group ${id} already has repo ${repoName}`);
         }
-        const repoPaths = resolvePaths(repoPath);
+        const repoPaths = resolveRepoPathForGroup(repoPath);
         if (existingGroup.repos.some((repo) => repo.path === repoPaths.root)) {
           throw new DevtaskError(`Group ${id} already has repo path ${repoPaths.root}`);
         }
@@ -394,6 +398,25 @@ export function createCli(): Command {
         console.log(`Repo: ${repoPaths.root}`);
         console.log(`Task: ${meta.id}`);
         console.log(`Worktree: ${meta.worktreePath}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("remove")
+    .description("Remove a repository from a group.")
+    .argument("<id>")
+    .argument("<repo-name>")
+    .option("--delete-task", "Also delete the repo-local task metadata directory")
+    .action((id: string, repoName: string, options: { deleteTask?: boolean }) => {
+      try {
+        const paths = resolvePaths();
+        const updated = removeRepoFromGroup(paths, id, repoName, { deleteTask: options.deleteTask === true });
+        console.log(`Removed ${repoName} from group ${updated.id}`);
+        if (options.deleteTask) {
+          console.log("Deleted repo-local task metadata");
+        }
       } catch (error) {
         printError(error);
       }
@@ -428,6 +451,63 @@ export function createCli(): Command {
       try {
         const paths = resolvePaths();
         console.log(JSON.stringify(getGroup(paths, id), null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("inspect")
+    .description("Inspect every repo task in a group.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolvePaths();
+        const groupData = getGroup(paths, id);
+        if (groupData.repos.length === 0) {
+          console.log("No repos in group");
+          return;
+        }
+
+        for (const [index, repo] of groupData.repos.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${repo.name}/${repo.taskId}`);
+          const repoPaths = resolvePaths(repo.path);
+          const review = await buildTaskReview(repoPaths, getTask(repoPaths, repo.taskId));
+          printTaskReview(review);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("logs")
+    .description("Print or follow logs for repo tasks in a group.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only show logs for one repo")
+    .option("-n, --lines <count>", "Number of trailing lines to print", parsePositiveInteger, 120)
+    .option("-f, --follow", "Follow one repo task log")
+    .action((id: string, options: { repo?: string; lines: number; follow?: boolean }) => {
+      try {
+        const paths = resolvePaths();
+        const groupData = getGroup(paths, id);
+        const repos = options.repo ? groupData.repos.filter((repo) => repo.name === options.repo) : groupData.repos;
+        if (repos.length === 0) {
+          throw new DevtaskError(options.repo ? `Group ${id} does not have repo ${options.repo}` : "No repos in group");
+        }
+        if (options.follow && repos.length !== 1) {
+          throw new DevtaskError("Use --repo when following group logs");
+        }
+
+        for (const [index, repo] of repos.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          printGroupLog(repo.name, repo.path, repo.taskId, { lines: options.lines, follow: options.follow === true });
+        }
       } catch (error) {
         printError(error);
       }
@@ -515,15 +595,19 @@ export function createCli(): Command {
           const config = readConfig(repoPaths);
           const review = await buildTaskReview(repoPaths, getTask(repoPaths, repo.taskId));
           const next = recommendNextAction(review, config);
+          console.log("");
           console.log(`${repo.name}/${repo.taskId}`);
+          console.log(`  Status: ${review.meta.status}`);
 
           if (!next.automatic) {
             const recommended = withRepoCommand(next, repo.name, repo.path);
-            console.log(`  ${recommended.reason}`);
+            console.log(`  Action: skipped`);
+            console.log(`  Reason: ${recommended.reason}`);
             console.log(`  Next: ${recommended.command ?? "-"}`);
             continue;
           }
 
+          console.log(`  Action: ${next.kind}`);
           await advanceTask(repoPaths, repo.taskId, next);
         }
       } catch (error) {
@@ -914,6 +998,45 @@ function printTable(headers: string[], rows: string[][]): void {
 
 function displayWidth(value: string): number {
   return value.length;
+}
+
+function resolveRepoPathForGroup(repoPath: string): ReturnType<typeof resolvePaths> {
+  try {
+    return resolvePaths(repoPath);
+  } catch (error) {
+    const resolved = fs.existsSync(repoPath) ? fs.realpathSync(repoPath) : repoPath;
+    if (!fs.existsSync(repoPath)) {
+      throw new DevtaskError(`Repo path does not exist: ${resolved}`);
+    }
+    if (error instanceof DevtaskError) {
+      throw new DevtaskError(`Repo path is not inside a git repository: ${resolved}`);
+    }
+    throw error;
+  }
+}
+
+function printGroupLog(
+  repoName: string,
+  repoPath: string,
+  taskId: string,
+  options: { lines: number; follow: boolean }
+): void {
+  const repoPaths = resolvePaths(repoPath);
+  getTask(repoPaths, taskId);
+  const logPath = readLatestLogPath(repoPaths, taskId);
+  if (!logPath) {
+    console.log(`${repoName}/${taskId}: no logs`);
+    return;
+  }
+
+  console.log(`${repoName}/${taskId}`);
+  console.log(`Log: ${logPath}`);
+  if (options.follow) {
+    followFile(logPath, options.lines);
+    return;
+  }
+
+  console.log(tailFile(logPath, options.lines));
 }
 
 interface GroupBoardRow {

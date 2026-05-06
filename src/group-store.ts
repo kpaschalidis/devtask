@@ -29,6 +29,10 @@ export interface AddGroupRepoOptions {
   taskId: string;
 }
 
+export interface RemoveGroupRepoOptions {
+  deleteTask?: boolean;
+}
+
 export function createGroup(paths: DevtaskPaths, id: string, options: CreateGroupOptions = {}): TaskGroup {
   assertValidTaskId(id);
   fs.mkdirSync(paths.groupsDir, { recursive: true });
@@ -83,6 +87,31 @@ export function addRepoToGroup(paths: DevtaskPaths, id: string, options: AddGrou
         taskId: options.taskId
       }
     ],
+    updatedAt: new Date().toISOString()
+  };
+  writeGroup(paths, next);
+  return next;
+}
+
+export function removeRepoFromGroup(
+  paths: DevtaskPaths,
+  id: string,
+  repoName: string,
+  options: RemoveGroupRepoOptions = {}
+): TaskGroup {
+  const group = getGroup(paths, id);
+  const repo = group.repos.find((item) => item.name === repoName);
+  if (!repo) {
+    throw new DevtaskError(`Group ${id} does not have repo ${repoName}`);
+  }
+
+  if (options.deleteTask) {
+    deleteRepoTask(repo.path, repo.taskId);
+  }
+
+  const next = {
+    ...group,
+    repos: group.repos.filter((item) => item.name !== repoName),
     updatedAt: new Date().toISOString()
   };
   writeGroup(paths, next);
@@ -173,4 +202,13 @@ function assertValidRepoName(name: string): void {
   if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
     throw new DevtaskError("Repo name may only contain letters, numbers, dots, underscores, and dashes");
   }
+}
+
+function deleteRepoTask(repoPath: string, taskId: string): void {
+  const taskDir = path.join(repoPath, ".devtask", "tasks", taskId);
+  if (!fs.existsSync(taskDir)) {
+    return;
+  }
+
+  fs.rmSync(taskDir, { recursive: true, force: true });
 }

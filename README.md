@@ -161,13 +161,19 @@ Use the group cockpit:
 ```bash
 devtask group list
 devtask group show billing-export
+devtask group inspect billing-export
 devtask group board billing-export
 devtask group next billing-export
+devtask group logs billing-export
+devtask group logs billing-export --repo backend -f
 devtask group run billing-export
 devtask group advance billing-export
+devtask group remove billing-export frontend
 ```
 
 `devtask group board` shows every repo task with status, latest check, latest review, PR state, and next command. `devtask group advance` runs safe next steps across repos, using the same single-repo task lifecycle. It still stops at human approval, review findings, failed checks, and ambiguous states.
+
+`devtask group remove <id> <repo-name>` only removes the repo from the group. Pass `--delete-task` to also delete that repo task's `.devtask/tasks/<task-id>` metadata directory. It does not remove the task worktree or revert code changes.
 
 V1 groups do not do cross-repo handoff generation, dependency ordering, grouped PR creation, or grouped CI fixing. Those belong above the basic coordination layer.
 
