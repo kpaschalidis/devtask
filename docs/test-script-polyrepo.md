@@ -150,21 +150,19 @@ cd /path/to/control/workspace
 ## 4. Create A Group
 
 ```bash
+cat > docs-polyrepo-smoke-goal.md <<'EOF'
+Test multi-repo group workflow with README-only changes.
+
+Each repo task should inspect its own repository first, make one tiny README wording improvement only, and keep changes docs-only and scoped to README.md.
+EOF
+
 devtask group create docs-polyrepo-smoke \
-  --goal "Test multi-repo group workflow with README-only changes"
+  --goal-file docs-polyrepo-smoke-goal.md \
+  --repo "frontend=$FRONTEND_REPO:docs-smoke-frontend" \
+  --repo "backend=$BACKEND_REPO:docs-smoke-backend"
 ```
 
-Add each repo. This creates repo-local tasks in the target repos:
-
-```bash
-devtask group add docs-polyrepo-smoke frontend "$FRONTEND_REPO" \
-  --task docs-smoke-frontend \
-  --goal "Make one tiny README wording improvement only. Keep changes docs-only and scoped to README.md."
-
-devtask group add docs-polyrepo-smoke backend "$BACKEND_REPO" \
-  --task docs-smoke-backend \
-  --goal "Make one tiny README wording improvement only. Keep changes docs-only and scoped to README.md."
-```
+Each `--repo` value is `name=repo-path:task-id`. The command creates the group and the repo-local tasks in one step.
 
 ## 5. Inspect Group State
 

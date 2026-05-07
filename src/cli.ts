@@ -18,6 +18,7 @@ import { runReviewAgent } from "./review-agent.js";
 import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
 import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroups, removeRepoFromGroup } from "./group-store.js";
 import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
+import { assertValidTaskId } from "./task-id.js";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -445,13 +446,38 @@ export function createCli(): Command {
     .description("Create a multi-repo task group in the current repository or workspace.")
     .argument("<id>")
     .option("--goal <goal>", "Group goal")
-    .action((id: string, options: { goal?: string }) => {
+    .option("--goal-file <path>", "Read the group goal from a Markdown/text file")
+    .option("--repo <spec>", "Create and add a repo task as name=path:task-id", collectOption, [])
+    .action(async (id: string, options: { goal?: string; goalFile?: string; repo: string[] }) => {
       try {
         const paths = resolveWorkspacePaths();
         initializeWorkspace(paths);
-        const created = createGroup(paths, id, options);
+        const goal = readGroupGoal(paths, options);
+        const repoSpecs = parseGroupCreateRepoSpecs(options.repo);
+        const plannedRepos = preflightGroupCreateRepos(paths, id, repoSpecs);
+        const created = createGroup(paths, id, { goal });
         console.log(`Created group ${created.id}`);
         console.log(`Goal: ${created.goal ?? "-"}`);
+
+        if (repoSpecs.length === 0) {
+          return;
+        }
+
+        for (const repo of plannedRepos) {
+          initializeStore(repo.paths);
+          const meta = await createTask(repo.paths, repo.taskId, {
+            goal: buildGroupRepoGoal(id, goal, repo.name)
+          });
+          const updated = addRepoToGroup(paths, id, {
+            name: repo.name,
+            repoPath: repo.paths.root,
+            taskId: meta.id
+          });
+          console.log(`Added ${repo.name} to group ${updated.id}`);
+          console.log(`Repo: ${repo.paths.root}`);
+          console.log(`Task: ${meta.id}`);
+          console.log(`Worktree: ${meta.worktreePath}`);
+        }
       } catch (error) {
         printError(error);
       }
@@ -1298,6 +1324,117 @@ function assertKnownScriptName(name: string): void {
   if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
     throw new DevtaskError("Script name may only contain letters, numbers, dots, underscores, and dashes");
   }
+}
+
+interface GroupCreateRepoSpec {
+  name: string;
+  repoPath: string;
+  taskId: string;
+}
+
+interface PlannedGroupCreateRepo {
+  name: string;
+  paths: ReturnType<typeof resolvePaths>;
+  taskId: string;
+}
+
+function collectOption(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+function readGroupGoal(
+  paths: ReturnType<typeof resolvePaths>,
+  options: { goal?: string; goalFile?: string }
+): string | undefined {
+  if (options.goal && options.goalFile) {
+    throw new DevtaskError("Use either --goal or --goal-file, not both");
+  }
+  if (!options.goalFile) {
+    return options.goal;
+  }
+
+  const filePath = path.resolve(paths.root, options.goalFile);
+  if (!fs.existsSync(filePath)) {
+    throw new DevtaskError(`Goal file does not exist: ${filePath}`);
+  }
+  const goal = fs.readFileSync(filePath, "utf8").trim();
+  if (!goal) {
+    throw new DevtaskError(`Goal file is empty: ${filePath}`);
+  }
+  return goal;
+}
+
+function parseGroupCreateRepoSpecs(values: string[]): GroupCreateRepoSpec[] {
+  return values.map((value) => {
+    const equalsIndex = value.indexOf("=");
+    const colonIndex = value.lastIndexOf(":");
+    if (equalsIndex <= 0 || colonIndex <= equalsIndex + 1 || colonIndex === value.length - 1) {
+      throw new DevtaskError(`Invalid --repo spec ${value}. Expected name=path:task-id`);
+    }
+
+    return {
+      name: value.slice(0, equalsIndex),
+      repoPath: value.slice(equalsIndex + 1, colonIndex),
+      taskId: value.slice(colonIndex + 1)
+    };
+  });
+}
+
+function preflightGroupCreateRepos(
+  paths: ReturnType<typeof resolvePaths>,
+  groupId: string,
+  specs: GroupCreateRepoSpec[]
+): PlannedGroupCreateRepo[] {
+  const names = new Set<string>();
+  const repoPaths = new Set<string>();
+  const taskIds = new Set<string>();
+  const planned = specs.map((spec) => {
+    assertValidGroupRepoName(spec.name);
+    assertValidTaskId(spec.taskId);
+
+    if (names.has(spec.name)) {
+      throw new DevtaskError(`Duplicate repo name in group ${groupId}: ${spec.name}`);
+    }
+    names.add(spec.name);
+
+    const repoPathsForSpec = resolveRepoPathForGroup(spec.repoPath);
+    if (repoPaths.has(repoPathsForSpec.root)) {
+      throw new DevtaskError(`Duplicate repo path in group ${groupId}: ${repoPathsForSpec.root}`);
+    }
+    repoPaths.add(repoPathsForSpec.root);
+
+    if (taskIds.has(spec.taskId)) {
+      throw new DevtaskError(`Duplicate task id in group ${groupId}: ${spec.taskId}`);
+    }
+    taskIds.add(spec.taskId);
+
+    if (fs.existsSync(taskMetaPath(repoPathsForSpec, spec.taskId))) {
+      throw new DevtaskError(`Task ${spec.taskId} already exists in repo ${repoPathsForSpec.root}`);
+    }
+
+    return {
+      name: spec.name,
+      paths: repoPathsForSpec,
+      taskId: spec.taskId
+    };
+  });
+
+  if (planned.length > 0 && fs.existsSync(path.join(paths.groupsDir, groupId, "group.json"))) {
+    throw new DevtaskError(`Group ${groupId} already exists`);
+  }
+
+  return planned;
+}
+
+function assertValidGroupRepoName(name: string): void {
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+    throw new DevtaskError("Repo name may only contain letters, numbers, dots, underscores, and dashes");
+  }
+}
+
+function buildGroupRepoGoal(groupId: string, groupGoal: string | undefined, repoName: string): string {
+  const goal = groupGoal?.trim() ? groupGoal.trim() : `Complete the repo-local part of group ${groupId}.`;
+  return `${goal}\n\nRepository: ${repoName}\nWork only on this repository's scoped part of the group task.`;
 }
 
 function resolveRepoPathForGroup(repoPath: string): ReturnType<typeof resolvePaths> {

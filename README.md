@@ -185,6 +185,21 @@ Then add member repos by path:
 
 ```bash
 devtask group create billing-export \
+  --goal-file billing-export-goal.md \
+  --repo backend=~/projects/api:billing-export-api \
+  --repo frontend=~/projects/web:billing-export-ui
+```
+
+This creates the group and the repo-local tasks in one step. Each `--repo` value uses:
+
+```text
+name=repo-path:task-id
+```
+
+You can also add repos incrementally:
+
+```bash
+devtask group create billing-export \
   --goal "Add billing export across frontend and backend"
 
 devtask group add billing-export backend ~/projects/api \
