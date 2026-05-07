@@ -881,14 +881,16 @@ export function createCli(): Command {
         const preflights = await Promise.all(
           repos.map(async (repo) => {
             const repoPaths = resolvePaths(repo.path);
+            const meta = getTask(repoPaths, repo.taskId);
             return {
               repo,
-              preflight: await preflightScmForPullRequest(getTask(repoPaths, repo.taskId).worktreePath, { draft })
+              meta,
+              preflight: await preflightScmForPullRequest(meta.worktreePath, { draft })
             };
           })
         );
         printGroupPrPreflight(preflights, draft ? "draft" : "ready");
-        if (preflights.some(({ preflight }) => !isPrPreflightReady(preflight, draft))) {
+        if (preflights.some(({ meta, preflight }) => !isPrPreflightReady(meta, preflight, draft))) {
           process.exit(1);
         }
 
@@ -897,6 +899,11 @@ export function createCli(): Command {
 
         for (const repo of repos) {
           const repoPaths = resolvePaths(repo.path);
+          const meta = getTask(repoPaths, repo.taskId);
+          if (meta.status === "pr-open" && meta.prUrl) {
+            results.push({ repo: repo.name, task: repo.taskId, status: "already-open", pr: meta.prUrl });
+            continue;
+          }
           try {
             const prUrl = await openPrForTask(repoPaths, repo.taskId, options);
             results.push({ repo: repo.name, task: repo.taskId, status: "opened", pr: prUrl });
@@ -1752,20 +1759,22 @@ interface GroupBoardRow {
 }
 
 function printGroupPrPreflight(
-  rows: Array<{ repo: ReturnType<typeof getGroup>["repos"][number]; preflight: ScmPreflight }>,
+  rows: Array<{ repo: ReturnType<typeof getGroup>["repos"][number]; meta: ReturnType<typeof getTask>; preflight: ScmPreflight }>,
   mode: string
 ): void {
   console.log("Preflight:");
   printTable(
-    ["REPO", "TASK", "PROVIDER", "AUTH", "CLEAN", "COMMITS", "MODE"],
-    rows.map(({ repo, preflight }) => [
+    ["REPO", "TASK", "STATUS", "PROVIDER", "AUTH", "CLEAN", "COMMITS", "MODE", "PR"],
+    rows.map(({ repo, meta, preflight }) => [
       repo.name,
       repo.taskId,
+      meta.status,
       preflight.provider,
       preflight.auth,
       preflight.clean ? "ok" : "dirty",
       preflight.commits > 0 ? "yes" : "no",
-      mode === "draft" && !preflight.draftSupported ? "unsupported" : mode
+      mode === "draft" && !preflight.draftSupported ? "unsupported" : mode,
+      meta.prUrl ? "open" : "-"
     ])
   );
   const details = rows.filter(({ preflight }) => preflight.authDetail);
@@ -1779,7 +1788,10 @@ function printGroupPrPreflight(
   console.log("");
 }
 
-function isPrPreflightReady(preflight: ScmPreflight, draft: boolean): boolean {
+function isPrPreflightReady(meta: ReturnType<typeof getTask>, preflight: ScmPreflight, draft: boolean): boolean {
+  if (meta.status === "pr-open" && meta.prUrl) {
+    return true;
+  }
   return preflight.auth === "ok" && preflight.clean && preflight.commits > 0 && (!draft || preflight.draftSupported);
 }
 
