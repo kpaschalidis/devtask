@@ -297,6 +297,14 @@ Create draft PRs across the group:
 devtask group pr docs-polyrepo-smoke --draft
 ```
 
+For Bitbucket Cloud repos, draft PRs are not supported. Use ready PRs and provide API credentials:
+
+```bash
+export BITBUCKET_USERNAME="<username>"
+export BITBUCKET_APP_PASSWORD="<app-password>"
+devtask group pr docs-polyrepo-smoke --ready
+```
+
 Narrow to one repo when iterating:
 
 ```bash

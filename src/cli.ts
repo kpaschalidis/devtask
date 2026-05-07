@@ -19,6 +19,7 @@ import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.
 import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroups, removeRepoFromGroup } from "./group-store.js";
 import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
 import { assertValidTaskId } from "./task-id.js";
+import { countBranchCommits, createProviderPullRequest, hasUncommittedChanges } from "./scm.js";
 
 interface PrOptions {
   title?: string;
@@ -1949,20 +1950,10 @@ async function createPullRequest(
   meta: ReturnType<typeof getTask>,
   options: { title: string; body: string; draft: boolean }
 ): Promise<string> {
-  await runCommandOrThrow("gh", ["--version"], { cwd: meta.worktreePath });
-  await runCommandOrThrow("git", ["push", "-u", "origin", meta.branch], { cwd: meta.worktreePath });
-
-  const args = ["pr", "create", "--title", options.title, "--body", options.body];
-  if (options.draft) {
-    args.push("--draft");
-  }
-
-  const result = await runCommandOrThrow("gh", args, { cwd: meta.worktreePath });
-  const prUrl = result.stdout.trim().split("\n").at(-1);
-  if (!prUrl) {
-    throw new DevtaskError("gh did not return a PR URL");
-  }
-  return prUrl;
+  return createProviderPullRequest(meta.worktreePath, {
+    ...options,
+    branch: meta.branch
+  });
 }
 
 function resolvePrDraftMode(options: PrOptions): boolean {
@@ -1970,31 +1961,6 @@ function resolvePrDraftMode(options: PrOptions): boolean {
     throw new DevtaskError("Use either --ready or --draft, not both");
   }
   return options.ready !== true;
-}
-
-async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
-  const result = await runCommandOrThrow("git", ["status", "--porcelain"], { cwd: worktreePath });
-  return result.stdout.trim().length > 0;
-}
-
-async function countBranchCommits(worktreePath: string): Promise<number> {
-  const baseRef = await findPublishBaseRef(worktreePath);
-  const mergeBase = await runCommandOrThrow("git", ["merge-base", "HEAD", baseRef], { cwd: worktreePath });
-  const result = await runCommandOrThrow("git", ["rev-list", "--count", `${mergeBase.stdout.trim()}..HEAD`], {
-    cwd: worktreePath
-  });
-  return Number.parseInt(result.stdout.trim(), 10);
-}
-
-async function findPublishBaseRef(worktreePath: string): Promise<string> {
-  const candidates = ["origin/HEAD", "origin/main", "origin/master", "main", "master"];
-  for (const candidate of candidates) {
-    const result = await runCommand("git", ["rev-parse", "--verify", candidate], { cwd: worktreePath });
-    if (result.exitCode === 0) {
-      return candidate;
-    }
-  }
-  throw new DevtaskError("Cannot determine the base branch for PR publishing");
 }
 
 function defaultPrBody(meta: ReturnType<typeof getTask>): string {

@@ -21,7 +21,9 @@ One installed `devtask` command can be used across all of your local repositorie
 - Node.js 22.x recommended. Use one Node version consistently in every shell that runs `devtask`.
 - npm matching that Node installation.
 - Codex CLI installed and authenticated.
-- GitHub CLI (`gh`) installed and authenticated for `devtask pr` and `devtask ci`.
+- GitHub CLI (`gh`) installed and authenticated for GitHub `devtask pr` and `devtask ci`.
+- Bitbucket Cloud PR creation requires `BITBUCKET_USERNAME` and `BITBUCKET_APP_PASSWORD`.
+- GitLab PR creation requires GitLab CLI (`glab`) installed and authenticated.
 - tmux installed only if you want attachable task sessions with `devtask run --tmux`.
 
 Recommended local setup:
@@ -98,7 +100,9 @@ devtask pr fix-login
 
 `devtask commit <id>` commits current task worktree changes without pushing. Workers are instructed to commit completed work themselves, so this is mainly a manual recovery command.
 
-`devtask pr <id>` pushes existing task branch commits and opens a GitHub PR. It does not commit uncommitted work. If the task worktree is dirty or the branch has no commits to publish, it stops with a clear error.
+`devtask pr <id>` pushes existing task branch commits and opens a provider PR/MR. It detects GitHub, Bitbucket Cloud, or GitLab from `origin`. It does not commit uncommitted work. If the task worktree is dirty or the branch has no commits to publish, it stops with a clear error.
+
+Bitbucket Cloud does not support draft pull requests in devtask. Use `--ready` for Bitbucket repos. Passing `--draft` to a Bitbucket repo fails before creating the PR.
 
 `devtask advance <id>` runs the next safe step automatically. It can start or continue a worker, run checks, run the review agent, open an approved PR, or check CI. It stops at human approval and prints the command to run after you inspect the work.
 
