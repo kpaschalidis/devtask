@@ -140,6 +140,17 @@ Inspect stale process metadata or missing worktrees:
 devtask doctor
 ```
 
+Install editable helper scripts into the current repo:
+
+```bash
+devtask scripts list
+devtask scripts install
+devtask scripts run smoke-regular help
+devtask scripts run smoke-polyrepo help
+```
+
+Installed scripts live under `.devtask/scripts/`. Edit their constants per repo, or pass environment overrides when running them.
+
 Remove a task worktree and metadata when you no longer need the local task record:
 
 ```bash

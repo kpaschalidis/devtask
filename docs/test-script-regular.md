@@ -2,10 +2,11 @@
 
 Use this script to test the single-repo `devtask` lifecycle in a safe way. It is designed for docs-only changes.
 
-Runnable helper:
+Runnable helper after installing scripts into a target repo:
 
 ```bash
-/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration/scripts/smoke-regular.sh help
+devtask scripts install
+devtask scripts run smoke-regular help
 ```
 
 You can either follow this document manually or edit/pass constants to the helper script.

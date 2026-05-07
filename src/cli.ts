@@ -2,8 +2,9 @@ import { Command } from "commander";
 import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { DevtaskError } from "./errors.js";
-import { resolvePaths, taskMetaPath } from "./paths.js";
+import { resolvePaths, scriptsDir, taskMetaPath } from "./paths.js";
 import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, listTasks } from "./task-store.js";
@@ -129,6 +130,79 @@ export function createCli(): Command {
           }
         });
         console.log(`Default Codex model: ${model}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  const scripts = program.command("scripts").description("Install and run packaged devtask helper scripts.");
+
+  scripts
+    .command("list")
+    .description("List packaged helper scripts.")
+    .action(() => {
+      try {
+        for (const script of listTemplateScripts()) {
+          console.log(script);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  scripts
+    .command("install")
+    .description("Install packaged helper scripts into .devtask/scripts.")
+    .option("--force", "Overwrite existing installed scripts")
+    .action((options: { force?: boolean }) => {
+      try {
+        const paths = resolvePaths();
+        initializeStore(paths);
+        const installed = installTemplateScripts(paths, { force: options.force === true });
+        for (const filePath of installed) {
+          console.log(filePath);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  scripts
+    .command("show")
+    .description("Print a packaged helper script.")
+    .argument("<name>")
+    .action((name: string) => {
+      try {
+        process.stdout.write(fs.readFileSync(templateScriptPath(name), "utf8"));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  scripts
+    .command("run")
+    .description("Run an installed helper script from .devtask/scripts.")
+    .argument("<name>")
+    .argument("[args...]")
+    .allowUnknownOption(true)
+    .action((name: string, args: string[]) => {
+      try {
+        const paths = resolvePaths();
+        const scriptPath = installedScriptPath(paths, name);
+        if (!fs.existsSync(scriptPath)) {
+          throw new DevtaskError(`Script ${name} is not installed. Run devtask scripts install first.`);
+        }
+        const child = spawn(scriptPath, args, {
+          cwd: paths.root,
+          stdio: "inherit",
+          env: process.env
+        });
+        child.once("error", (error) => {
+          printError(new DevtaskError(`Failed to run script ${name}: ${error.message}`));
+        });
+        child.once("exit", (code) => {
+          process.exit(code ?? 1);
+        });
       } catch (error) {
         printError(error);
       }
@@ -1158,6 +1232,64 @@ function printTable(headers: string[], rows: string[][]): void {
 
 function displayWidth(value: string): number {
   return value.length;
+}
+
+function listTemplateScripts(): string[] {
+  const dir = templateScriptsDir();
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(dir)
+    .filter((file) => file.endsWith(".sh"))
+    .map((file) => file.replace(/\.sh$/, ""))
+    .sort();
+}
+
+function installTemplateScripts(paths: ReturnType<typeof resolvePaths>, options: { force: boolean }): string[] {
+  const targetDir = scriptsDir(paths);
+  fs.mkdirSync(targetDir, { recursive: true });
+  const installed: string[] = [];
+
+  for (const name of listTemplateScripts()) {
+    const source = templateScriptPath(name);
+    const target = installedScriptPath(paths, name);
+    if (fs.existsSync(target) && !options.force) {
+      continue;
+    }
+
+    fs.copyFileSync(source, target);
+    fs.chmodSync(target, 0o755);
+    installed.push(target);
+  }
+
+  return installed;
+}
+
+function templateScriptPath(name: string): string {
+  assertKnownScriptName(name);
+  const filePath = path.join(templateScriptsDir(), `${name}.sh`);
+  if (!fs.existsSync(filePath)) {
+    throw new DevtaskError(`Unknown script ${name}`);
+  }
+
+  return filePath;
+}
+
+function installedScriptPath(paths: ReturnType<typeof resolvePaths>, name: string): string {
+  assertKnownScriptName(name);
+  return path.join(scriptsDir(paths), `${name}.sh`);
+}
+
+function templateScriptsDir(): string {
+  return fileURLToPath(new URL("./templates/scripts", import.meta.url));
+}
+
+function assertKnownScriptName(name: string): void {
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+    throw new DevtaskError("Script name may only contain letters, numbers, dots, underscores, and dashes");
+  }
 }
 
 function resolveRepoPathForGroup(repoPath: string): ReturnType<typeof resolvePaths> {

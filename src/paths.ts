@@ -65,3 +65,7 @@ export function resultJsonPath(paths: DevtaskPaths, id: string): string {
 export function worktreePath(paths: DevtaskPaths, id: string): string {
   return path.join(paths.worktreesDir, id);
 }
+
+export function scriptsDir(paths: DevtaskPaths): string {
+  return path.join(paths.baseDir, "scripts");
+}
