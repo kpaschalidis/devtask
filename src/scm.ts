@@ -93,10 +93,10 @@ async function createBitbucketPullRequest(
     throw new DevtaskError("Bitbucket does not support draft pull requests. Use --ready.");
   }
 
-  const username = process.env.BITBUCKET_USERNAME;
+  const username = process.env.BITBUCKET_EMAIL ?? process.env.BITBUCKET_USERNAME;
   const apiToken = process.env.BITBUCKET_API_TOKEN ?? process.env.BITBUCKET_APP_PASSWORD;
   if (!username || !apiToken) {
-    throw new DevtaskError("Set BITBUCKET_USERNAME and BITBUCKET_API_TOKEN to create Bitbucket pull requests");
+    throw new DevtaskError("Set BITBUCKET_EMAIL and BITBUCKET_API_TOKEN to create Bitbucket pull requests");
   }
 
   await pushBranch(worktreePath, options.branch);
@@ -121,7 +121,7 @@ async function createBitbucketPullRequest(
   });
 
   if (!response.ok) {
-    throw new DevtaskError(`Bitbucket PR creation failed: ${response.status} ${await response.text()}`);
+    throw new DevtaskError(formatBitbucketApiError(response.status, await response.text()));
   }
 
   const payload = (await response.json()) as unknown;
@@ -209,6 +209,22 @@ function extractBitbucketPullRequestHref(payload: unknown): string | null {
     return null;
   }
   return html.href;
+}
+
+function formatBitbucketApiError(status: number, body: string): string {
+  if (status === 401) {
+    return [
+      `Bitbucket PR creation failed: ${status} ${body}`,
+      "",
+      "Check Bitbucket auth:",
+      "- BITBUCKET_EMAIL must be your Atlassian account email, not the workspace or repo name.",
+      "- BITBUCKET_API_TOKEN must be the generated API token value.",
+      "- New Bitbucket API tokens can take up to a minute to become active.",
+      "- Token scopes must include repository read/write and pull request read/write."
+    ].join("\n");
+  }
+
+  return `Bitbucket PR creation failed: ${status} ${body}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -56,32 +56,34 @@ Used by:
 Required environment:
 
 ```bash
-export BITBUCKET_USERNAME="<atlassian-account-email-or-bitbucket-username>"
+export BITBUCKET_EMAIL="<atlassian-account-email>"
 export BITBUCKET_API_TOKEN="<api-token-with-scopes>"
 ```
 
 These are account-level environment variables. You set them once in the shell that runs `devtask`, and they apply to every Bitbucket repo your Bitbucket user can access. They are not configured per repo.
+
+For Bitbucket REST API calls, `BITBUCKET_EMAIL` must be your Atlassian account email. It is not the workspace name, repo name, or necessarily your Bitbucket username.
 
 The API token needs repository and pull request scopes. At minimum, use scopes that allow reading/writing repositories and reading/writing pull requests.
 
 For a one-off shell session:
 
 ```bash
-export BITBUCKET_USERNAME="<atlassian-account-email-or-bitbucket-username>"
+export BITBUCKET_EMAIL="<atlassian-account-email>"
 export BITBUCKET_API_TOKEN="<api-token-with-scopes>"
 ```
 
 For a persistent local setup on zsh, add the exports to `~/.zshrc`:
 
 ```bash
-echo 'export BITBUCKET_USERNAME="<atlassian-account-email-or-bitbucket-username>"' >> ~/.zshrc
+echo 'export BITBUCKET_EMAIL="<atlassian-account-email>"' >> ~/.zshrc
 echo 'export BITBUCKET_API_TOKEN="<api-token-with-scopes>"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 Prefer storing the token in a password manager and pasting it into your shell profile intentionally. Do not commit these values to a repository, `.env` file, task file, or docs.
 
-Older Bitbucket app-password setups are still accepted through `BITBUCKET_APP_PASSWORD` as a fallback, but new onboarding should use `BITBUCKET_API_TOKEN`.
+Older setups are still accepted through `BITBUCKET_USERNAME` and `BITBUCKET_APP_PASSWORD` as fallbacks, but new onboarding should use `BITBUCKET_EMAIL` and `BITBUCKET_API_TOKEN`.
 
 Bitbucket Cloud does not support draft pull requests in devtask. Use:
 
@@ -95,7 +97,7 @@ devtask group pr <group> --ready
 Quick checks:
 
 ```bash
-test -n "$BITBUCKET_USERNAME"
+test -n "$BITBUCKET_EMAIL"
 test -n "$BITBUCKET_API_TOKEN"
 git remote get-url origin
 ```

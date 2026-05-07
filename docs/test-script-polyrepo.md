@@ -300,7 +300,7 @@ devtask group pr docs-polyrepo-smoke --draft
 For Bitbucket Cloud repos, draft PRs are not supported. Use ready PRs and provide API credentials:
 
 ```bash
-export BITBUCKET_USERNAME="<atlassian-account-email-or-bitbucket-username>"
+export BITBUCKET_EMAIL="<atlassian-account-email>"
 export BITBUCKET_API_TOKEN="<api-token-with-scopes>"
 devtask group pr docs-polyrepo-smoke --ready
 ```
