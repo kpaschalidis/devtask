@@ -19,7 +19,14 @@ import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.
 import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroups, removeRepoFromGroup } from "./group-store.js";
 import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
 import { assertValidTaskId } from "./task-id.js";
-import { countBranchCommits, createProviderPullRequest, hasUncommittedChanges } from "./scm.js";
+import {
+  countBranchCommits,
+  createProviderPullRequest,
+  detectRemoteInfo,
+  hasUncommittedChanges,
+  preflightScmForPullRequest,
+  type ScmPreflight
+} from "./scm.js";
 
 interface PrOptions {
   title?: string;
@@ -326,8 +333,9 @@ export function createCli(): Command {
       }
     });
 
-  program
-    .command("doctor")
+  const doctor = program.command("doctor").description("Inspect local devtask setup and task health.");
+
+  doctor
     .description("Inspect task metadata for stale process and filesystem state.")
     .action(() => {
       try {
@@ -341,6 +349,27 @@ export function createCli(): Command {
 
         for (const issue of issues) {
           console.log(`${issue.taskId}: ${issue.message}`);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  doctor
+    .command("auth")
+    .description("Inspect SCM provider and auth readiness for the current repository.")
+    .action(async () => {
+      try {
+        const paths = resolvePaths();
+        const remote = await detectRemoteInfo(paths.root);
+        const preflight = await preflightScmForPullRequest(paths.root, { draft: false });
+        printTable(
+          ["PROVIDER", "AUTH", "CLEAN", "COMMITS", "REMOTE"],
+          [[remote.provider, preflight.auth, preflight.clean ? "ok" : "dirty", String(preflight.commits), remote.remoteUrl]]
+        );
+        if (preflight.authDetail) {
+          console.log("");
+          console.log(preflight.authDetail);
         }
       } catch (error) {
         printError(error);
@@ -848,21 +877,46 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const repos = selectGroupRepos(paths, id, options.repo);
-        let failed = false;
+        const draft = resolvePrDraftMode(options);
+        const preflights = await Promise.all(
+          repos.map(async (repo) => {
+            const repoPaths = resolvePaths(repo.path);
+            return {
+              repo,
+              preflight: await preflightScmForPullRequest(getTask(repoPaths, repo.taskId).worktreePath, { draft })
+            };
+          })
+        );
+        printGroupPrPreflight(preflights, draft ? "draft" : "ready");
+        if (preflights.some(({ preflight }) => !isPrPreflightReady(preflight, draft))) {
+          process.exit(1);
+        }
 
-        for (const [index, repo] of repos.entries()) {
-          if (index > 0) {
-            console.log("");
-          }
-          console.log(`${repo.name}/${repo.taskId}`);
+        let failed = false;
+        const results: Array<{ repo: string; task: string; status: string; pr: string }> = [];
+
+        for (const repo of repos) {
           const repoPaths = resolvePaths(repo.path);
           try {
-            await openPrForTask(repoPaths, repo.taskId, options);
+            const prUrl = await openPrForTask(repoPaths, repo.taskId, options);
+            results.push({ repo: repo.name, task: repo.taskId, status: "opened", pr: prUrl });
           } catch (error) {
             failed = true;
+            results.push({
+              repo: repo.name,
+              task: repo.taskId,
+              status: "failed",
+              pr: error instanceof Error ? error.message.split("\n")[0] : String(error)
+            });
             printNonFatalError(error);
           }
         }
+
+        console.log("");
+        printTable(
+          ["REPO", "TASK", "STATUS", "PR"],
+          results.map((result) => [result.repo, result.task, result.status, result.pr])
+        );
 
         if (failed) {
           process.exit(1);
@@ -889,6 +943,47 @@ export function createCli(): Command {
           ["REPO", "TASK", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
           rows.map((row) => [row.repo, row.task, row.status, row.check, row.review, row.pr, row.updated, row.next])
         );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("doctor")
+    .description("Inspect SCM/auth readiness for repo tasks in a group.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only inspect one repo")
+    .action(async (id: string, options: { repo?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        const rows = await Promise.all(
+          repos.map(async (repo) => {
+            const repoPaths = resolvePaths(repo.path);
+            const meta = getTask(repoPaths, repo.taskId);
+            const preflight = await preflightScmForPullRequest(meta.worktreePath, { draft: false });
+            return { repo, preflight };
+          })
+        );
+        printTable(
+          ["REPO", "TASK", "PROVIDER", "AUTH", "CLEAN", "COMMITS"],
+          rows.map(({ repo, preflight }) => [
+            repo.name,
+            repo.taskId,
+            preflight.provider,
+            preflight.auth,
+            preflight.clean ? "ok" : "dirty",
+            preflight.commits > 0 ? "yes" : "no"
+          ])
+        );
+        const details = rows.filter(({ preflight }) => preflight.authDetail);
+        if (details.length > 0) {
+          console.log("");
+          console.log("Details:");
+          for (const { repo, preflight } of details) {
+            console.log(`${repo.name}/${repo.taskId}: ${preflight.authDetail}`);
+          }
+        }
       } catch (error) {
         printError(error);
       }
@@ -1656,6 +1751,38 @@ interface GroupBoardRow {
   next: string;
 }
 
+function printGroupPrPreflight(
+  rows: Array<{ repo: ReturnType<typeof getGroup>["repos"][number]; preflight: ScmPreflight }>,
+  mode: string
+): void {
+  console.log("Preflight:");
+  printTable(
+    ["REPO", "TASK", "PROVIDER", "AUTH", "CLEAN", "COMMITS", "MODE"],
+    rows.map(({ repo, preflight }) => [
+      repo.name,
+      repo.taskId,
+      preflight.provider,
+      preflight.auth,
+      preflight.clean ? "ok" : "dirty",
+      preflight.commits > 0 ? "yes" : "no",
+      mode === "draft" && !preflight.draftSupported ? "unsupported" : mode
+    ])
+  );
+  const details = rows.filter(({ preflight }) => preflight.authDetail);
+  if (details.length > 0) {
+    console.log("");
+    console.log("Preflight details:");
+    for (const { repo, preflight } of details) {
+      console.log(`${repo.name}/${repo.taskId}: ${preflight.authDetail}`);
+    }
+  }
+  console.log("");
+}
+
+function isPrPreflightReady(preflight: ScmPreflight, draft: boolean): boolean {
+  return preflight.auth === "ok" && preflight.clean && preflight.commits > 0 && (!draft || preflight.draftSupported);
+}
+
 async function buildGroupBoardRows(paths: ReturnType<typeof resolvePaths>, id: string): Promise<GroupBoardRow[]> {
   const group = getGroup(paths, id);
   const rows: GroupBoardRow[] = [];
@@ -1794,7 +1921,7 @@ async function openPrForTask(
   paths: ReturnType<typeof resolvePaths>,
   id: string,
   options: PrOptions
-): Promise<void> {
+): Promise<string> {
   const draft = resolvePrDraftMode(options);
   const meta = getTask(paths, id);
   if (meta.status === "running") {
@@ -1828,6 +1955,7 @@ async function openPrForTask(
     updatedAt: new Date().toISOString()
   });
   console.log(prUrl);
+  return prUrl;
 }
 
 async function commitTask(

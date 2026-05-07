@@ -18,6 +18,15 @@ export interface RemoteInfo {
   remoteUrl: string;
 }
 
+export interface ScmPreflight {
+  provider: ScmProvider | "unknown";
+  auth: "ok" | "skipped" | "failed";
+  authDetail: string | null;
+  clean: boolean;
+  commits: number;
+  draftSupported: boolean;
+}
+
 export async function createProviderPullRequest(worktreePath: string, options: PullRequestOptions): Promise<string> {
   const remote = await detectRemoteInfo(worktreePath);
 
@@ -65,6 +74,36 @@ export function parseRemoteUrl(remoteUrl: string): RemoteInfo {
     repo: parts[1],
     remoteUrl
   };
+}
+
+export async function preflightScmForPullRequest(
+  worktreePath: string,
+  options: { draft: boolean }
+): Promise<ScmPreflight> {
+  try {
+    const remote = await detectRemoteInfo(worktreePath);
+    const clean = !(await hasUncommittedChanges(worktreePath));
+    const commits = await countBranchCommits(worktreePath);
+    const draftSupported = remote.provider === "github";
+    const auth = await preflightProviderAuth(remote);
+    return {
+      provider: remote.provider,
+      auth: auth.ok ? "ok" : "failed",
+      authDetail: auth.detail,
+      clean,
+      commits,
+      draftSupported
+    };
+  } catch (error) {
+    return {
+      provider: "unknown",
+      auth: "failed",
+      authDetail: error instanceof Error ? error.message : String(error),
+      clean: false,
+      commits: 0,
+      draftSupported: false
+    };
+  }
 }
 
 async function createGitHubPullRequest(worktreePath: string, options: PullRequestOptions): Promise<string> {
@@ -143,6 +182,30 @@ async function verifyBitbucketRepositoryAccess(username: string, apiToken: strin
 
   if (!response.ok) {
     throw new DevtaskError(formatBitbucketApiError(response.status, await response.text()));
+  }
+}
+
+async function preflightProviderAuth(remote: RemoteInfo): Promise<{ ok: boolean; detail: string | null }> {
+  try {
+    switch (remote.provider) {
+      case "github":
+        await runCommandOrThrow("gh", ["--version"], { cwd: process.cwd() });
+        return { ok: true, detail: null };
+      case "bitbucket": {
+        const username = process.env.BITBUCKET_EMAIL ?? process.env.BITBUCKET_USERNAME;
+        const apiToken = process.env.BITBUCKET_API_TOKEN ?? process.env.BITBUCKET_APP_PASSWORD;
+        if (!username || !apiToken) {
+          return { ok: false, detail: "missing BITBUCKET_EMAIL or BITBUCKET_API_TOKEN" };
+        }
+        await verifyBitbucketRepositoryAccess(username, apiToken, remote);
+        return { ok: true, detail: null };
+      }
+      case "gitlab":
+        await runCommandOrThrow("glab", ["--version"], { cwd: process.cwd() });
+        return { ok: true, detail: null };
+    }
+  } catch (error) {
+    return { ok: false, detail: error instanceof Error ? error.message : String(error) };
   }
 }
 

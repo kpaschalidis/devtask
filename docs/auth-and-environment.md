@@ -171,7 +171,12 @@ Planned follow-up checks:
 
 ```bash
 devtask doctor auth
-devtask doctor scm
 ```
 
-Those should eventually validate provider auth, required CLIs, Bitbucket environment variables, and remote/provider detection.
+Group-level SCM readiness checks are available with:
+
+```bash
+devtask group doctor <group>
+```
+
+This validates provider auth, Bitbucket environment variables, remote/provider detection, dirty worktrees, and branch commits for each repo task.

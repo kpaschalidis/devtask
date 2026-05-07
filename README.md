@@ -237,6 +237,7 @@ devtask group check billing-export
 devtask group review billing-export
 devtask group mark billing-export approved
 devtask group commit billing-export
+devtask group doctor billing-export
 devtask group pr billing-export --draft
 devtask group run billing-export
 devtask group advance billing-export
@@ -251,6 +252,8 @@ devtask group cleanup billing-export --dry-run
 `devtask group mark <id> <status>` marks stopped repo tasks across the group using the same lifecycle validation as repo-level `devtask mark`. Use `--repo <name>` to approve or update one member.
 
 `devtask group commit <id>` and `devtask group pr <id>` run the commit and PR lifecycle across every repo in the group. Use `--repo <name>` to run only one member. Group PR creation follows the same strict rule as repo-level PR creation: it only publishes existing commits and refuses dirty worktrees.
+
+`devtask group doctor <id>` checks SCM provider/auth readiness, clean worktrees, and branch commits for every repo task. `devtask group pr <id>` prints the same style of preflight table before opening PRs and stops before publishing when a repo is not ready.
 
 `devtask group remove <id> <repo-name>` only removes the repo from the group. Pass `--delete-task` to also delete that repo task's `.devtask/tasks/<task-id>` metadata directory. It does not remove the task worktree or revert code changes.
 
