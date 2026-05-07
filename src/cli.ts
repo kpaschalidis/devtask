@@ -831,6 +831,40 @@ export function createCli(): Command {
     });
 
   group
+    .command("approve")
+    .description("Approve stopped repo tasks in a group after policy checks.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only approve one repo")
+    .option("--force", "Approve even when checks or review are missing or failing")
+    .action(async (id: string, options: { repo?: string; force?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        let failed = false;
+        const rows: string[][] = [];
+
+        for (const repo of repos) {
+          const repoPaths = resolvePaths(repo.path);
+          try {
+            const result = await approveTask(repoPaths, repo.taskId, { force: options.force === true });
+            rows.push([repo.name, repo.taskId, "approved", result]);
+          } catch (error) {
+            failed = true;
+            rows.push([repo.name, repo.taskId, "failed", error instanceof Error ? error.message.split("\n")[0] : String(error)]);
+          }
+        }
+
+        printTable(["REPO", "TASK", "STATUS", "DETAIL"], rows);
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
     .command("commit")
     .description("Commit current worktree changes for repo tasks in a group.")
     .argument("<id>")
@@ -1177,6 +1211,24 @@ export function createCli(): Command {
         const status = parseManualStatus(statusValue);
         markTask(paths, id, status);
         console.log(`Marked task ${id} as ${status}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("approve")
+    .description("Approve a stopped task after policy checks.")
+    .argument("<id>")
+    .option("--force", "Approve even when checks or review are missing or failing")
+    .action(async (id: string, options: { force?: boolean }) => {
+      try {
+        const paths = resolvePaths();
+        const result = await approveTask(paths, id, { force: options.force === true });
+        console.log(`Approved task ${id}`);
+        if (result) {
+          console.log(result);
+        }
       } catch (error) {
         printError(error);
       }
@@ -1711,6 +1763,60 @@ function markTask(paths: ReturnType<typeof resolvePaths>, id: string, status: Re
     tmuxSession: status === "cancelled" ? null : meta.tmuxSession,
     updatedAt: new Date().toISOString()
   });
+}
+
+async function approveTask(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  options: { force: boolean }
+): Promise<string> {
+  const meta = getTask(paths, id);
+  assertCanMark(meta, "approved");
+  const issues = await collectApprovalIssues(paths, meta);
+  if (issues.length > 0 && !options.force) {
+    throw new DevtaskError(
+      `Task ${id} is not ready for approval:\n${issues.map((issue) => `  - ${issue}`).join("\n")}\nUse --force to approve anyway.`
+    );
+  }
+
+  markTask(paths, id, "approved");
+  return issues.length > 0 ? `forced: ${issues.join("; ")}` : "policy passed";
+}
+
+async function collectApprovalIssues(paths: ReturnType<typeof resolvePaths>, meta: ReturnType<typeof getTask>): Promise<string[]> {
+  const issues: string[] = [];
+  const config = readConfig(paths);
+  const review = await buildTaskReview(paths, meta);
+
+  if (config.verify.length > 0) {
+    if (!review.latestVerification) {
+      issues.push("checks missing");
+    } else if (review.latestVerification.status !== "passed") {
+      issues.push(`checks ${review.latestVerification.status}`);
+    } else if (!isArtifactFresh(review.latestVerification.finishedAt, meta.updatedAt)) {
+      issues.push("checks stale");
+    }
+  }
+
+  if (!review.latestReviewAgent) {
+    issues.push("review missing");
+  } else if (review.latestReviewAgent.status !== "passed") {
+    issues.push(`review ${review.latestReviewAgent.status}`);
+  } else {
+    const baseline = review.latestVerification?.finishedAt ?? meta.updatedAt;
+    if (!isArtifactFresh(review.latestReviewAgent.finishedAt, baseline)) {
+      issues.push("review stale");
+    }
+  }
+
+  return issues;
+}
+
+function isArtifactFresh(finishedAt: string | undefined, baseline: string): boolean {
+  if (!finishedAt) {
+    return false;
+  }
+  return Date.parse(finishedAt) >= Date.parse(baseline);
 }
 
 function selectGroupRepos(

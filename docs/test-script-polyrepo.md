@@ -267,13 +267,13 @@ devtask group advance docs-polyrepo-smoke
 When you accept the diffs, approve the repo tasks from the control workspace:
 
 ```bash
-devtask group mark docs-polyrepo-smoke approved
+devtask group approve docs-polyrepo-smoke
 ```
 
 Approve only one repo when iterating:
 
 ```bash
-devtask group mark docs-polyrepo-smoke approved --repo frontend
+devtask group approve docs-polyrepo-smoke --repo frontend
 ```
 
 Then check the control workspace board:

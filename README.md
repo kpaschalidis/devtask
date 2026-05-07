@@ -66,7 +66,7 @@ devtask logs -f fix-login
 devtask inspect fix-login
 devtask check fix-login
 devtask review fix-login
-devtask mark fix-login approved
+devtask approve fix-login
 devtask commit fix-login
 devtask pr fix-login
 devtask ci fix-login
@@ -85,7 +85,7 @@ devtask inspect fix-login
 devtask inspect fix-login
 devtask check fix-login
 devtask review fix-login
-devtask mark fix-login approved
+devtask approve fix-login
 devtask commit fix-login
 devtask pr fix-login
 ```
@@ -108,7 +108,14 @@ Bitbucket Cloud does not support draft pull requests in devtask. Use `--ready` f
 
 `devtask advance <id>` runs the next safe step automatically. It can start or continue a worker, run checks, run the review agent, open an approved PR, or check CI. It stops at human approval and prints the command to run after you inspect the work.
 
-You can correct or record human decisions on stopped tasks:
+Use `approve` as the normal human gate. It requires passing configured checks and a passing review by default:
+
+```bash
+devtask approve fix-login
+devtask approve fix-login --force
+```
+
+You can correct or record lower-level human decisions on stopped tasks:
 
 ```bash
 devtask mark fix-login review
@@ -235,7 +242,7 @@ devtask group logs billing-export
 devtask group logs billing-export --repo backend -f
 devtask group check billing-export
 devtask group review billing-export
-devtask group mark billing-export approved
+devtask group approve billing-export
 devtask group commit billing-export
 devtask group doctor billing-export
 devtask group pr billing-export --draft
@@ -249,7 +256,9 @@ devtask group cleanup billing-export --dry-run
 
 `devtask group check <id>` and `devtask group review <id>` run the same repo-local lifecycle across every repo in the group. Use `--repo <name>` to run only one member.
 
-`devtask group mark <id> <status>` marks stopped repo tasks across the group using the same lifecycle validation as repo-level `devtask mark`. Use `--repo <name>` to approve or update one member.
+`devtask group approve <id>` applies the approval policy across repo tasks. Use `--repo <name>` to approve one member or `--force` to override missing/failing checks or review.
+
+`devtask group mark <id> <status>` is the lower-level manual status override across the group.
 
 `devtask group commit <id>` and `devtask group pr <id>` run the commit and PR lifecycle across every repo in the group. Use `--repo <name>` to run only one member. Group PR creation follows the same strict rule as repo-level PR creation: it only publishes existing commits and refuses dirty worktrees.
 
@@ -326,7 +335,7 @@ devtask check my-task
 Open a draft PR after review/approval:
 
 ```bash
-devtask mark my-task approved
+devtask approve my-task
 devtask commit my-task
 devtask pr my-task
 devtask ci my-task
