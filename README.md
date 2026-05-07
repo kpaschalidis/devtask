@@ -26,6 +26,8 @@ One installed `devtask` command can be used across all of your local repositorie
 - GitLab PR creation requires GitLab CLI (`glab`) installed and authenticated.
 - tmux installed only if you want attachable task sessions with `devtask run --tmux`.
 
+See [Auth And Environment](docs/auth-and-environment.md) for provider auth, environment variables, and optional tools.
+
 Recommended local setup:
 
 ```bash
