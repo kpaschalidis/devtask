@@ -99,12 +99,13 @@ async function createBitbucketPullRequest(
     throw new DevtaskError("Set BITBUCKET_EMAIL and BITBUCKET_API_TOKEN to create Bitbucket pull requests");
   }
 
+  await verifyBitbucketAuth(username, apiToken);
   await pushBranch(worktreePath, options.branch);
 
   const response = await fetch(`https://api.bitbucket.org/2.0/repositories/${remote.owner}/${remote.repo}/pullrequests`, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${username}:${apiToken}`).toString("base64")}`,
+      Authorization: bitbucketBasicAuthHeader(username, apiToken),
       "Content-Type": "application/json",
       Accept: "application/json"
     },
@@ -130,6 +131,19 @@ async function createBitbucketPullRequest(
     throw new DevtaskError("Bitbucket did not return a pull request URL");
   }
   return href;
+}
+
+async function verifyBitbucketAuth(username: string, apiToken: string): Promise<void> {
+  const response = await fetch("https://api.bitbucket.org/2.0/user", {
+    headers: {
+      Authorization: bitbucketBasicAuthHeader(username, apiToken),
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new DevtaskError(formatBitbucketApiError(response.status, await response.text()));
+  }
 }
 
 async function createGitLabMergeRequest(worktreePath: string, options: PullRequestOptions): Promise<string> {
@@ -225,6 +239,10 @@ function formatBitbucketApiError(status: number, body: string): string {
   }
 
   return `Bitbucket PR creation failed: ${status} ${body}`;
+}
+
+function bitbucketBasicAuthHeader(username: string, apiToken: string): string {
+  return `Basic ${Buffer.from(`${username}:${apiToken}`).toString("base64")}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

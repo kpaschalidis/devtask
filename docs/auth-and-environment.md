@@ -66,6 +66,14 @@ For Bitbucket REST API calls, `BITBUCKET_EMAIL` must be your Atlassian account e
 
 The API token needs repository and pull request scopes. At minimum, use scopes that allow reading/writing repositories and reading/writing pull requests.
 
+Bitbucket API tokens are sent as HTTP Basic auth using:
+
+```text
+BITBUCKET_EMAIL:BITBUCKET_API_TOKEN
+```
+
+The endpoint docs also show bearer-token examples for OAuth access tokens. `devtask` does not use that OAuth flow for local CLI usage.
+
 For a one-off shell session:
 
 ```bash
@@ -101,6 +109,15 @@ test -n "$BITBUCKET_EMAIL"
 test -n "$BITBUCKET_API_TOKEN"
 git remote get-url origin
 ```
+
+You can validate the credentials directly before running `devtask pr`:
+
+```bash
+curl --user "$BITBUCKET_EMAIL:$BITBUCKET_API_TOKEN" \
+  https://api.bitbucket.org/2.0/user
+```
+
+If that returns 401, fix the email/token/scopes first. `devtask` uses the same authentication form.
 
 ## GitLab
 
