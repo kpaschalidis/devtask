@@ -11,6 +11,58 @@ devtask scripts run smoke-polyrepo help
 
 You can either follow this document manually or edit/pass constants to the helper script.
 
+## Installed Helper Workflow
+
+Install scripts in the control repo:
+
+```bash
+cd /path/to/control/repo
+
+devtask init
+devtask scripts install
+devtask scripts list
+ls -la .devtask/scripts
+```
+
+Edit the installed script:
+
+```bash
+vim .devtask/scripts/smoke-polyrepo.sh
+```
+
+Update the constants at the top for the current run:
+
+```bash
+CONTROL_REPO="/path/to/control/repo"
+REPO_A_PATH="/path/to/frontend"
+REPO_B_PATH="/path/to/backend"
+```
+
+Run the installed script through `devtask`:
+
+```bash
+devtask scripts run smoke-polyrepo setup
+devtask scripts run smoke-polyrepo create
+devtask scripts run smoke-polyrepo run
+devtask scripts run smoke-polyrepo logs-a
+```
+
+When the workers finish:
+
+```bash
+devtask scripts run smoke-polyrepo inspect
+devtask scripts run smoke-polyrepo check
+devtask scripts run smoke-polyrepo review
+devtask scripts run smoke-polyrepo cleanup-plan
+```
+
+You can also avoid editing the file by passing environment overrides:
+
+```bash
+CONTROL_REPO=/path/to/control REPO_A_PATH=/path/to/frontend REPO_B_PATH=/path/to/backend \
+  devtask scripts run smoke-polyrepo setup
+```
+
 ## 0. Use The Latest Local CLI
 
 Run this from the `devtask-orchestration` repo:

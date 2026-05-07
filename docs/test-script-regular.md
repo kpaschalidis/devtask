@@ -11,6 +11,59 @@ devtask scripts run smoke-regular help
 
 You can either follow this document manually or edit/pass constants to the helper script.
 
+## Installed Helper Workflow
+
+From any target repo:
+
+```bash
+cd /path/to/target/repo
+
+devtask init
+devtask scripts install
+devtask scripts list
+ls -la .devtask/scripts
+```
+
+Edit the installed script:
+
+```bash
+vim .devtask/scripts/smoke-regular.sh
+```
+
+Update the constants at the top for the current run:
+
+```bash
+TARGET_REPO="/path/to/target/repo"
+TASK_ID="readme-smoke"
+CHECK_COMMAND_1="npm test"
+CHECK_COMMAND_2="npm run typecheck"
+```
+
+Run the installed script through `devtask`:
+
+```bash
+devtask scripts run smoke-regular setup
+devtask scripts run smoke-regular create
+devtask scripts run smoke-regular run
+devtask scripts run smoke-regular logs
+```
+
+When the worker finishes:
+
+```bash
+devtask scripts run smoke-regular inspect
+devtask scripts run smoke-regular check
+devtask scripts run smoke-regular review
+devtask scripts run smoke-regular cleanup-plan
+```
+
+You can also avoid editing the file by passing environment overrides:
+
+```bash
+TARGET_REPO=/path/to/target/repo TASK_ID=readme-smoke \
+  devtask scripts run smoke-regular setup
+```
+
 ## 0. Use The Latest Local CLI
 
 Run this from the `devtask-orchestration` repo:
