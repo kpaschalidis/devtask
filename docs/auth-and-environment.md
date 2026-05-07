@@ -110,14 +110,14 @@ test -n "$BITBUCKET_API_TOKEN"
 git remote get-url origin
 ```
 
-You can validate the credentials directly before running `devtask pr`:
+You can validate credentials against a target repository before running `devtask pr`:
 
 ```bash
 curl --user "$BITBUCKET_EMAIL:$BITBUCKET_API_TOKEN" \
-  https://api.bitbucket.org/2.0/user
+  https://api.bitbucket.org/2.0/repositories/<workspace>/<repo_slug>
 ```
 
-If that returns 401, fix the email/token/scopes first. `devtask` uses the same authentication form.
+If that returns 401 or 403, fix the email/token/scopes first. `devtask` uses the same authentication form and checks the target repository before pushing.
 
 ## GitLab
 

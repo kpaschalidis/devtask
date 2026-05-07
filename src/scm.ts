@@ -99,7 +99,7 @@ async function createBitbucketPullRequest(
     throw new DevtaskError("Set BITBUCKET_EMAIL and BITBUCKET_API_TOKEN to create Bitbucket pull requests");
   }
 
-  await verifyBitbucketAuth(username, apiToken);
+  await verifyBitbucketRepositoryAccess(username, apiToken, remote);
   await pushBranch(worktreePath, options.branch);
 
   const response = await fetch(`https://api.bitbucket.org/2.0/repositories/${remote.owner}/${remote.repo}/pullrequests`, {
@@ -133,8 +133,8 @@ async function createBitbucketPullRequest(
   return href;
 }
 
-async function verifyBitbucketAuth(username: string, apiToken: string): Promise<void> {
-  const response = await fetch("https://api.bitbucket.org/2.0/user", {
+async function verifyBitbucketRepositoryAccess(username: string, apiToken: string, remote: RemoteInfo): Promise<void> {
+  const response = await fetch(`https://api.bitbucket.org/2.0/repositories/${remote.owner}/${remote.repo}`, {
     headers: {
       Authorization: bitbucketBasicAuthHeader(username, apiToken),
       Accept: "application/json"
@@ -234,7 +234,8 @@ function formatBitbucketApiError(status: number, body: string): string {
       "- BITBUCKET_EMAIL must be your Atlassian account email, not the workspace or repo name.",
       "- BITBUCKET_API_TOKEN must be the generated API token value.",
       "- New Bitbucket API tokens can take up to a minute to become active.",
-      "- Token scopes must include repository read/write and pull request read/write."
+      "- Token scopes must include repository read/write and pull request read/write.",
+      "- devtask validates access against the target repository before pushing."
     ].join("\n");
   }
 
