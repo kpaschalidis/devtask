@@ -47,7 +47,7 @@ describe("workflow recommendations", () => {
       )
     ).toMatchObject({
       kind: "approve",
-      command: "devtask mark example approved",
+      command: "devtask approve example",
       automatic: false
     });
   });

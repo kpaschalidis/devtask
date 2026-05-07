@@ -20,8 +20,8 @@ export interface RemoteInfo {
 
 export interface ScmPreflight {
   provider: ScmProvider | "unknown";
-  auth: "ok" | "skipped" | "failed";
-  authDetail: string | null;
+  access: "ok" | "failed";
+  accessDetail: string | null;
   clean: boolean;
   commits: number;
   draftSupported: boolean;
@@ -88,8 +88,8 @@ export async function preflightScmForPullRequest(
     const auth = await preflightProviderAuth(remote);
     return {
       provider: remote.provider,
-      auth: auth.ok ? "ok" : "failed",
-      authDetail: auth.detail,
+      access: auth.ok ? "ok" : "failed",
+      accessDetail: auth.detail,
       clean,
       commits,
       draftSupported
@@ -97,8 +97,8 @@ export async function preflightScmForPullRequest(
   } catch (error) {
     return {
       provider: "unknown",
-      auth: "failed",
-      authDetail: error instanceof Error ? error.message : String(error),
+      access: "failed",
+      accessDetail: error instanceof Error ? error.message : String(error),
       clean: false,
       commits: 0,
       draftSupported: false

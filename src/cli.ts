@@ -364,12 +364,12 @@ export function createCli(): Command {
         const remote = await detectRemoteInfo(paths.root);
         const preflight = await preflightScmForPullRequest(paths.root, { draft: false });
         printTable(
-          ["PROVIDER", "AUTH", "CLEAN", "COMMITS", "REMOTE"],
-          [[remote.provider, preflight.auth, preflight.clean ? "ok" : "dirty", String(preflight.commits), remote.remoteUrl]]
+          ["PROVIDER", "ACCESS", "CLEAN", "COMMITS", "REMOTE"],
+          [[remote.provider, preflight.access, preflight.clean ? "ok" : "dirty", String(preflight.commits), remote.remoteUrl]]
         );
-        if (preflight.authDetail) {
+        if (preflight.accessDetail) {
           console.log("");
-          console.log(preflight.authDetail);
+          console.log(preflight.accessDetail);
         }
       } catch (error) {
         printError(error);
@@ -1007,22 +1007,22 @@ export function createCli(): Command {
           })
         );
         printTable(
-          ["REPO", "TASK", "PROVIDER", "AUTH", "CLEAN", "COMMITS"],
+          ["REPO", "TASK", "PROVIDER", "ACCESS", "CLEAN", "COMMITS"],
           rows.map(({ repo, preflight }) => [
             repo.name,
             repo.taskId,
             preflight.provider,
-            preflight.auth,
+            preflight.access,
             preflight.clean ? "ok" : "dirty",
             preflight.commits > 0 ? "yes" : "no"
           ])
         );
-        const details = rows.filter(({ preflight }) => preflight.authDetail);
+        const details = rows.filter(({ preflight }) => preflight.accessDetail);
         if (details.length > 0) {
           console.log("");
           console.log("Details:");
           for (const { repo, preflight } of details) {
-            console.log(`${repo.name}/${repo.taskId}: ${preflight.authDetail}`);
+            console.log(`${repo.name}/${repo.taskId}: ${preflight.accessDetail}`);
           }
         }
       } catch (error) {
@@ -1793,8 +1793,6 @@ async function collectApprovalIssues(paths: ReturnType<typeof resolvePaths>, met
       issues.push("checks missing");
     } else if (review.latestVerification.status !== "passed") {
       issues.push(`checks ${review.latestVerification.status}`);
-    } else if (!isArtifactFresh(review.latestVerification.finishedAt, meta.updatedAt)) {
-      issues.push("checks stale");
     }
   }
 
@@ -1802,21 +1800,11 @@ async function collectApprovalIssues(paths: ReturnType<typeof resolvePaths>, met
     issues.push("review missing");
   } else if (review.latestReviewAgent.status !== "passed") {
     issues.push(`review ${review.latestReviewAgent.status}`);
-  } else {
-    const baseline = review.latestVerification?.finishedAt ?? meta.updatedAt;
-    if (!isArtifactFresh(review.latestReviewAgent.finishedAt, baseline)) {
-      issues.push("review stale");
-    }
   }
 
+  // TODO(stage-contract): add a real content-change baseline before enforcing stale artifact checks.
+  // `meta.updatedAt` tracks metadata updates, not necessarily code/worktree changes.
   return issues;
-}
-
-function isArtifactFresh(finishedAt: string | undefined, baseline: string): boolean {
-  if (!finishedAt) {
-    return false;
-  }
-  return Date.parse(finishedAt) >= Date.parse(baseline);
 }
 
 function selectGroupRepos(
@@ -1870,25 +1858,25 @@ function printGroupPrPreflight(
 ): void {
   console.log("Preflight:");
   printTable(
-    ["REPO", "TASK", "STATUS", "PROVIDER", "AUTH", "CLEAN", "COMMITS", "MODE", "PR"],
+    ["REPO", "TASK", "STATUS", "PROVIDER", "ACCESS", "CLEAN", "COMMITS", "MODE", "PR"],
     rows.map(({ repo, meta, preflight }) => [
       repo.name,
       repo.taskId,
       meta.status,
       preflight.provider,
-      preflight.auth,
+      preflight.access,
       preflight.clean ? "ok" : "dirty",
       preflight.commits > 0 ? "yes" : "no",
       mode === "draft" && !preflight.draftSupported ? "unsupported" : mode,
       meta.prUrl ? "open" : "-"
     ])
   );
-  const details = rows.filter(({ preflight }) => preflight.authDetail);
+  const details = rows.filter(({ preflight }) => preflight.accessDetail);
   if (details.length > 0) {
     console.log("");
     console.log("Preflight details:");
     for (const { repo, preflight } of details) {
-      console.log(`${repo.name}/${repo.taskId}: ${preflight.authDetail}`);
+      console.log(`${repo.name}/${repo.taskId}: ${preflight.accessDetail}`);
     }
   }
   console.log("");
@@ -1898,7 +1886,7 @@ function isPrPreflightReady(meta: ReturnType<typeof getTask>, preflight: ScmPref
   if (meta.status === "pr-open" && meta.prUrl) {
     return true;
   }
-  return preflight.auth === "ok" && preflight.clean && preflight.commits > 0 && (!draft || preflight.draftSupported);
+  return preflight.access === "ok" && preflight.clean && preflight.commits > 0 && (!draft || preflight.draftSupported);
 }
 
 async function buildGroupBoardRows(paths: ReturnType<typeof resolvePaths>, id: string): Promise<GroupBoardRow[]> {

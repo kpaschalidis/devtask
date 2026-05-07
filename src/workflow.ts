@@ -120,7 +120,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
     if (review.latestReviewAgent?.status === "passed") {
       return {
         kind: "approve",
-        command: `devtask mark ${id} approved`,
+        command: `devtask approve ${id}`,
         reason: "Checks and agent review passed; human approval is required before PR creation.",
         automatic: false
       };
