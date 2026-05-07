@@ -264,17 +264,19 @@ devtask group next docs-polyrepo-smoke
 devtask group advance docs-polyrepo-smoke
 ```
 
-When you accept a repo's diff, approve it from that repo:
+When you accept the diffs, approve the repo tasks from the control workspace:
 
 ```bash
-cd "$FRONTEND_REPO"
-devtask mark docs-smoke-frontend approved
-
-cd "$BACKEND_REPO"
-devtask mark docs-smoke-backend approved
+devtask group mark docs-polyrepo-smoke approved
 ```
 
-Return to the control workspace:
+Approve only one repo when iterating:
+
+```bash
+devtask group mark docs-polyrepo-smoke approved --repo frontend
+```
+
+Then check the control workspace board:
 
 ```bash
 cd /path/to/control/workspace

@@ -768,6 +768,39 @@ export function createCli(): Command {
     });
 
   group
+    .command("mark")
+    .description("Manually mark stopped repo tasks in a group as review, approved, done, blocked, or cancelled.")
+    .argument("<id>")
+    .argument("<status>")
+    .option("--repo <repo-name>", "Only mark one repo")
+    .action((id: string, statusValue: string, options: { repo?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        const status = parseManualStatus(statusValue);
+        let failed = false;
+
+        for (const repo of repos) {
+          const repoPaths = resolvePaths(repo.path);
+          try {
+            markTask(repoPaths, repo.taskId, status);
+            console.log(`${repo.name}/${repo.taskId}: marked ${status}`);
+          } catch (error) {
+            failed = true;
+            console.log(`${repo.name}/${repo.taskId}`);
+            printNonFatalError(error);
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
     .command("commit")
     .description("Commit current worktree changes for repo tasks in a group.")
     .argument("<id>")
@@ -1038,18 +1071,8 @@ export function createCli(): Command {
     .action((id: string, statusValue: string) => {
       try {
         const paths = resolvePaths();
-        const meta = getTask(paths, id);
         const status = parseManualStatus(statusValue);
-        assertCanMark(meta, status);
-
-        writeTaskMeta(taskMetaPath(paths, id), {
-          ...meta,
-          status,
-          supervisorPid: null,
-          childPid: null,
-          tmuxSession: status === "cancelled" ? null : meta.tmuxSession,
-          updatedAt: new Date().toISOString()
-        });
+        markTask(paths, id, status);
         console.log(`Marked task ${id} as ${status}`);
       } catch (error) {
         printError(error);
@@ -1571,6 +1594,20 @@ function printGroupLog(
   }
 
   console.log(tailFile(logPath, options.lines));
+}
+
+function markTask(paths: ReturnType<typeof resolvePaths>, id: string, status: ReturnType<typeof parseManualStatus>): void {
+  const meta = getTask(paths, id);
+  assertCanMark(meta, status);
+
+  writeTaskMeta(taskMetaPath(paths, id), {
+    ...meta,
+    status,
+    supervisorPid: null,
+    childPid: null,
+    tmuxSession: status === "cancelled" ? null : meta.tmuxSession,
+    updatedAt: new Date().toISOString()
+  });
 }
 
 function selectGroupRepos(

@@ -229,6 +229,7 @@ devtask group logs billing-export
 devtask group logs billing-export --repo backend -f
 devtask group check billing-export
 devtask group review billing-export
+devtask group mark billing-export approved
 devtask group commit billing-export
 devtask group pr billing-export --draft
 devtask group run billing-export
@@ -240,6 +241,8 @@ devtask group cleanup billing-export --dry-run
 `devtask group board` shows every repo task with status, latest check, latest review, PR state, and next command. `devtask group advance` runs safe next steps across repos, using the same single-repo task lifecycle. It still stops at human approval, review findings, failed checks, and ambiguous states.
 
 `devtask group check <id>` and `devtask group review <id>` run the same repo-local lifecycle across every repo in the group. Use `--repo <name>` to run only one member.
+
+`devtask group mark <id> <status>` marks stopped repo tasks across the group using the same lifecycle validation as repo-level `devtask mark`. Use `--repo <name>` to approve or update one member.
 
 `devtask group commit <id>` and `devtask group pr <id>` run the commit and PR lifecycle across every repo in the group. Use `--repo <name>` to run only one member. Group PR creation follows the same strict rule as repo-level PR creation: it only publishes existing commits and refuses dirty worktrees.
 
