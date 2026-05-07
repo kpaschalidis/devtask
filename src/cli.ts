@@ -20,6 +20,13 @@ import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroup
 import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
 import { assertValidTaskId } from "./task-id.js";
 
+interface PrOptions {
+  title?: string;
+  body?: string;
+  draft?: boolean;
+  ready?: boolean;
+}
+
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
     console.error(`devtask: ${error.message}`);
@@ -801,8 +808,9 @@ export function createCli(): Command {
     .option("--repo <repo-name>", "Only open a PR for one repo")
     .option("--title <title>", "PR title")
     .option("--body <body>", "PR body")
+    .option("--draft", "Create draft PRs")
     .option("--ready", "Create ready-for-review PRs instead of drafts")
-    .action(async (id: string, options: { repo?: string; title?: string; body?: string; ready?: boolean }) => {
+    .action(async (id: string, options: PrOptions & { repo?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const repos = selectGroupRepos(paths, id, options.repo);
@@ -1060,7 +1068,7 @@ export function createCli(): Command {
 
   const prAction = async (
     id: string,
-    options: { title?: string; body?: string; ready?: boolean }
+    options: PrOptions
   ): Promise<void> => {
     const paths = resolvePaths();
     await openPrForTask(paths, id, options);
@@ -1119,8 +1127,9 @@ export function createCli(): Command {
     .argument("<id>")
     .option("--title <title>", "PR title")
     .option("--body <body>", "PR body")
+    .option("--draft", "Create a draft PR")
     .option("--ready", "Create a ready-for-review PR instead of a draft")
-    .action(async (id: string, options: { title?: string; body?: string; ready?: boolean }) => {
+    .action(async (id: string, options: PrOptions) => {
       try {
         await prAction(id, options);
       } catch (error) {
@@ -1746,8 +1755,9 @@ async function reviewTask(
 async function openPrForTask(
   paths: ReturnType<typeof resolvePaths>,
   id: string,
-  options: { title?: string; body?: string; ready?: boolean }
+  options: PrOptions
 ): Promise<void> {
+  const draft = resolvePrDraftMode(options);
   const meta = getTask(paths, id);
   if (meta.status === "running") {
     throw new DevtaskError(`Task ${id} is running; stop it before opening a PR`);
@@ -1770,7 +1780,7 @@ async function openPrForTask(
   const prUrl = await createPullRequest(meta, {
     title: options.title ?? meta.id,
     body: options.body ?? defaultPrBody(meta),
-    draft: options.ready !== true
+    draft
   });
 
   writeTaskMeta(taskMetaPath(paths, id), {
@@ -1916,6 +1926,13 @@ async function createPullRequest(
     throw new DevtaskError("gh did not return a PR URL");
   }
   return prUrl;
+}
+
+function resolvePrDraftMode(options: PrOptions): boolean {
+  if (options.ready && options.draft) {
+    throw new DevtaskError("Use either --ready or --draft, not both");
+  }
+  return options.ready !== true;
 }
 
 async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
