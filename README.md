@@ -1,6 +1,6 @@
 # devtask
 
-`devtask` is a local CLI for running persistent, parallel agent tasks against a git repository.
+`devtask` is a local CLI for running persistent, parallel agent tasks against a git repository and moving them through an opinionated task-to-PR workflow.
 
 Each task gets:
 
@@ -26,7 +26,7 @@ One installed `devtask` command can be used across all of your local repositorie
 - GitLab PR creation requires GitLab CLI (`glab`) installed and authenticated.
 - tmux installed only if you want attachable task sessions with `devtask run --tmux`.
 
-See [Auth And Environment](docs/auth-and-environment.md) for provider auth, environment variables, and optional tools.
+See [Auth And Environment](docs/auth-and-environment.md) for provider auth, environment variables, and optional tools. See [Lifecycle Contracts](docs/lifecycle-contracts.md) for the stage model behind `create`, `run`, `check`, `review`, `approve`, `commit`, `pr`, `ci`, and group workflows.
 
 Recommended local setup:
 
