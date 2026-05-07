@@ -2,9 +2,10 @@
 
 Use this script to test `devtask group` with multiple repositories. It is designed for safe README-only tasks.
 
-Runnable helper after installing scripts into a control repo:
+Runnable helper after installing scripts into a control workspace:
 
 ```bash
+devtask init --workspace
 devtask scripts install
 devtask scripts run smoke-polyrepo help
 ```
@@ -13,12 +14,12 @@ You can either follow this document manually or edit/pass constants to the helpe
 
 ## Installed Helper Workflow
 
-Install scripts in the control repo:
+Install scripts in the control workspace. This can be a non-git product folder that contains the member repos:
 
 ```bash
-cd /path/to/control/repo
+cd /path/to/control/workspace
 
-devtask init
+devtask init --workspace
 devtask scripts install
 devtask scripts list
 ls -la .devtask/scripts
@@ -33,7 +34,7 @@ vim .devtask/scripts/smoke-polyrepo.sh
 Update the constants at the top for the current run:
 
 ```bash
-CONTROL_REPO="/path/to/control/repo"
+CONTROL_ROOT="/path/to/control/workspace"
 REPO_A_PATH="/path/to/frontend"
 REPO_B_PATH="/path/to/backend"
 ```
@@ -59,7 +60,7 @@ devtask scripts run smoke-polyrepo cleanup-plan
 You can also avoid editing the file by passing environment overrides:
 
 ```bash
-CONTROL_REPO=/path/to/control REPO_A_PATH=/path/to/frontend REPO_B_PATH=/path/to/backend \
+CONTROL_ROOT=/path/to/control/workspace REPO_A_PATH=/path/to/frontend REPO_B_PATH=/path/to/backend \
   devtask scripts run smoke-polyrepo setup
 ```
 
@@ -93,17 +94,16 @@ run
 advance
 ```
 
-## 1. Choose A Control Repo
+## 1. Choose A Control Workspace
 
-The control repo stores group metadata under its own `.devtask/groups/<id>`. It does not own the member repos' task state.
+The control workspace stores group metadata under its own `.devtask/groups/<id>`. It does not own the member repos' task state. Use `devtask init --workspace` when the control folder is not a git repository.
 
 ```bash
-cd /path/to/control/repo
-git status --short
-devtask init
+cd /path/to/control/workspace
+devtask init --workspace
 ```
 
-For a first test, the control repo can be one of the member repos, but using a stable local repo as the control point is easier to reason about.
+For a first test, the control root can still be one of the member repos with normal `devtask init`, but a product folder initialized with `devtask init --workspace` is usually clearer for polyrepo work.
 
 ## 2. Choose Member Repos
 
@@ -141,10 +141,10 @@ If a repo does not have both commands, configure only what exists:
 devtask config check 'npm run typecheck'
 ```
 
-Return to the control repo:
+Return to the control workspace:
 
 ```bash
-cd /path/to/control/repo
+cd /path/to/control/workspace
 ```
 
 ## 4. Create A Group
@@ -218,10 +218,10 @@ git diff
 
 Expected: tiny `README.md` changes only.
 
-Return to the control repo:
+Return to the control workspace:
 
 ```bash
-cd /path/to/control/repo
+cd /path/to/control/workspace
 ```
 
 ## 8. Run Group Checks And Reviews
@@ -276,10 +276,10 @@ cd "$BACKEND_REPO"
 devtask mark docs-smoke-backend approved
 ```
 
-Return to the control repo:
+Return to the control workspace:
 
 ```bash
-cd /path/to/control/repo
+cd /path/to/control/workspace
 devtask group board docs-polyrepo-smoke
 ```
 
@@ -302,7 +302,7 @@ devtask ci docs-smoke-backend
 Preview full group cleanup:
 
 ```bash
-cd /path/to/control/repo
+cd /path/to/control/workspace
 devtask group cleanup docs-polyrepo-smoke --dry-run
 ```
 
@@ -333,7 +333,7 @@ git -C "$FRONTEND_REPO" worktree remove "$FRONTEND_REPO/.devtask/worktrees/docs-
 git -C "$BACKEND_REPO" worktree remove "$BACKEND_REPO/.devtask/worktrees/docs-smoke-backend"
 ```
 
-Group metadata lives in the control repo:
+Group metadata lives in the control workspace:
 
 ```bash
 rm -rf .devtask/groups/docs-polyrepo-smoke

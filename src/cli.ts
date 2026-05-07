@@ -4,10 +4,10 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { DevtaskError } from "./errors.js";
-import { resolvePaths, scriptsDir, taskMetaPath } from "./paths.js";
+import { resolvePaths, resolveWorkspacePaths, resolveWorkspacePathsForInit, scriptsDir, taskMetaPath } from "./paths.js";
 import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
-import { createTask, getTask, initializeStore, listTasks } from "./task-store.js";
+import { createTask, getTask, initializeStore, initializeWorkspace, listTasks } from "./task-store.js";
 import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-inspection.js";
 import { attachTmuxSession, killTmuxSession, startTmuxSession, tmuxSessionName } from "./tmux.js";
 import { buildCodexCommand, readConfig, writeConfig } from "./config.js";
@@ -47,9 +47,17 @@ export function createCli(): Command {
 
   program
     .command("init")
-    .description("Initialize devtask storage in the current git repository.")
-    .action(() => {
+    .description("Initialize devtask storage in the current git repository or workspace.")
+    .option("--workspace", "Initialize a non-git workspace for groups and helper scripts")
+    .action((options: { workspace?: boolean }) => {
       try {
+        if (options.workspace) {
+          const paths = resolveWorkspacePathsForInit();
+          initializeWorkspace(paths);
+          console.log(`Initialized workspace ${paths.baseDir}`);
+          return;
+        }
+
         const paths = resolvePaths();
         initializeStore(paths);
         console.log(`Initialized ${paths.baseDir}`);
@@ -156,8 +164,8 @@ export function createCli(): Command {
     .option("--force", "Overwrite existing installed scripts")
     .action((options: { force?: boolean }) => {
       try {
-        const paths = resolvePaths();
-        initializeStore(paths);
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
         const installed = installTemplateScripts(paths, { force: options.force === true });
         for (const filePath of installed) {
           console.log(filePath);
@@ -187,7 +195,7 @@ export function createCli(): Command {
     .allowUnknownOption(true)
     .action((name: string, args: string[]) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const scriptPath = installedScriptPath(paths, name);
         if (!fs.existsSync(scriptPath)) {
           throw new DevtaskError(`Script ${name} is not installed. Run devtask scripts install first.`);
@@ -434,13 +442,13 @@ export function createCli(): Command {
 
   group
     .command("create")
-    .description("Create a multi-repo task group in the current repository.")
+    .description("Create a multi-repo task group in the current repository or workspace.")
     .argument("<id>")
     .option("--goal <goal>", "Group goal")
     .action((id: string, options: { goal?: string }) => {
       try {
-        const paths = resolvePaths();
-        initializeStore(paths);
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
         const created = createGroup(paths, id, options);
         console.log(`Created group ${created.id}`);
         console.log(`Goal: ${created.goal ?? "-"}`);
@@ -459,8 +467,8 @@ export function createCli(): Command {
     .option("--goal <goal>", "Repo-local task goal")
     .action(async (id: string, repoName: string, repoPath: string, options: { task: string; goal?: string }) => {
       try {
-        const paths = resolvePaths();
-        initializeStore(paths);
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
         const existingGroup = getGroup(paths, id);
         if (existingGroup.repos.some((repo) => repo.name === repoName)) {
           throw new DevtaskError(`Group ${id} already has repo ${repoName}`);
@@ -495,7 +503,7 @@ export function createCli(): Command {
     .option("--delete-task", "Also delete the repo-local task metadata directory")
     .action((id: string, repoName: string, options: { deleteTask?: boolean }) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const updated = removeRepoFromGroup(paths, id, repoName, { deleteTask: options.deleteTask === true });
         console.log(`Removed ${repoName} from group ${updated.id}`);
         if (options.deleteTask) {
@@ -517,7 +525,7 @@ export function createCli(): Command {
     .option("--keep-group", "Keep group metadata")
     .action(async (id: string, options: CleanupOptions & { keepGroup?: boolean; keepWorktrees?: boolean; keepMetadata?: boolean }) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const groupData = getGroup(paths, id);
         const cleanupOptions = normalizeCleanupOptions(options);
         const plans: Array<{ repo: string; plan: CleanupPlan }> = [];
@@ -561,10 +569,10 @@ export function createCli(): Command {
 
   group
     .command("list")
-    .description("List task groups in the current repository.")
+    .description("List task groups in the current repository or workspace.")
     .action(() => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const groups = listGroups(paths);
         if (groups.length === 0) {
           console.log("No groups");
@@ -586,7 +594,7 @@ export function createCli(): Command {
     .argument("<id>")
     .action((id: string) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         console.log(JSON.stringify(getGroup(paths, id), null, 2));
       } catch (error) {
         printError(error);
@@ -599,7 +607,7 @@ export function createCli(): Command {
     .argument("<id>")
     .action(async (id: string) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const groupData = getGroup(paths, id);
         if (groupData.repos.length === 0) {
           console.log("No repos in group");
@@ -629,7 +637,7 @@ export function createCli(): Command {
     .option("-f, --follow", "Follow one repo task log")
     .action((id: string, options: { repo?: string; lines: number; follow?: boolean }) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const groupData = getGroup(paths, id);
         const repos = options.repo ? groupData.repos.filter((repo) => repo.name === options.repo) : groupData.repos;
         if (repos.length === 0) {
@@ -657,7 +665,7 @@ export function createCli(): Command {
     .option("--repo <repo-name>", "Only check one repo")
     .action(async (id: string, options: { repo?: string }) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const repos = selectGroupRepos(paths, id, options.repo);
         let failed = false;
 
@@ -695,7 +703,7 @@ export function createCli(): Command {
     .option("--repo <repo-name>", "Only review one repo")
     .action(async (id: string, options: { repo?: string }) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const repos = selectGroupRepos(paths, id, options.repo);
         let failed = false;
 
@@ -732,7 +740,7 @@ export function createCli(): Command {
     .argument("<id>")
     .action(async (id: string) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const rows = await buildGroupBoardRows(paths, id);
         if (rows.length === 0) {
           console.log("No repos in group");
@@ -754,7 +762,7 @@ export function createCli(): Command {
     .argument("<id>")
     .action(async (id: string) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const groupData = getGroup(paths, id);
         if (groupData.repos.length === 0) {
           console.log("No repos in group");
@@ -779,7 +787,7 @@ export function createCli(): Command {
     .argument("<id>")
     .action((id: string) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const groupData = getGroup(paths, id);
         for (const repo of groupData.repos) {
           const repoPaths = resolvePaths(repo.path);
@@ -801,7 +809,7 @@ export function createCli(): Command {
     .argument("<id>")
     .action(async (id: string) => {
       try {
-        const paths = resolvePaths();
+        const paths = resolveWorkspacePaths();
         const groupData = getGroup(paths, id);
         for (const repo of groupData.repos) {
           const repoPaths = resolvePaths(repo.path);

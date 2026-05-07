@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DevtaskError } from "../src/errors.js";
-import { findRepoRoot, resolvePaths } from "../src/paths.js";
+import { findRepoRoot, resolvePaths, resolveWorkspacePaths, resolveWorkspacePathsForInit } from "../src/paths.js";
+import { initializeWorkspace } from "../src/task-store.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("paths", () => {
@@ -36,5 +37,37 @@ describe("paths", () => {
       worktreesDir: path.join(repo, ".devtask", "worktrees"),
       groupsDir: path.join(repo, ".devtask", "groups")
     });
+  });
+
+  it("resolves a non-git workspace from a nested directory", () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-workspace-"));
+    const nested = path.join(workspace, "products", "studio");
+
+    try {
+      fs.mkdirSync(nested, { recursive: true });
+      const initialized = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(initialized);
+
+      expect(resolveWorkspacePaths(nested)).toEqual({
+        root: workspace,
+        baseDir: path.join(workspace, ".devtask"),
+        configPath: path.join(workspace, ".devtask", "config.json"),
+        tasksDir: path.join(workspace, ".devtask", "tasks"),
+        worktreesDir: path.join(workspace, ".devtask", "worktrees"),
+        groupsDir: path.join(workspace, ".devtask", "groups")
+      });
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("explains how to initialize workspace mode outside git", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-no-workspace-"));
+
+    try {
+      expect(() => resolveWorkspacePaths(dir)).toThrow("Run devtask init --workspace");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

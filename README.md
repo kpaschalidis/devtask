@@ -151,6 +151,16 @@ devtask scripts run smoke-polyrepo help
 
 Installed scripts live under `.devtask/scripts/`. Edit their constants per repo, or pass environment overrides when running them.
 
+For a product folder that contains multiple repositories but is not itself a git repo, initialize workspace mode first:
+
+```bash
+cd ~/projects/product-folder
+devtask init --workspace
+devtask scripts install
+```
+
+Workspace mode stores group metadata and helper scripts in the product folder's `.devtask/` directory. Repo-local task commands still run inside the member git repositories.
+
 Remove a task worktree and metadata when you no longer need the local task record:
 
 ```bash
@@ -162,7 +172,16 @@ Cleanup refuses running tasks and dirty worktrees unless you pass `--force`.
 
 ## Multi-Repo Groups
 
-A group coordinates multiple repo-local tasks from one control repository. Each repo still owns its own `.devtask` state, task worktree, checks, review, PR, and CI lifecycle. The group stores only cross-repo coordination metadata.
+A group coordinates multiple repo-local tasks from one control root. The control root can be either a git repository initialized with `devtask init` or a non-git product folder initialized with `devtask init --workspace`. Each repo still owns its own `.devtask` state, task worktree, checks, review, PR, and CI lifecycle. The group stores only cross-repo coordination metadata.
+
+For a product folder that contains several repos:
+
+```bash
+cd ~/projects/product-folder
+devtask init --workspace
+```
+
+Then add member repos by path:
 
 ```bash
 devtask group create billing-export \

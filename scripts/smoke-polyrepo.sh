@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Edit these constants for each smoke run.
-CONTROL_REPO="${CONTROL_REPO:-/path/to/control/repo}"
+CONTROL_ROOT="${CONTROL_ROOT:-${CONTROL_REPO:-/path/to/control/workspace}}"
 GROUP_ID="${GROUP_ID:-docs-polyrepo-smoke}"
 MODEL="${MODEL:-gpt-5.2}"
 GROUP_GOAL="${GROUP_GOAL:-Test multi-repo group workflow with README-only changes}"
@@ -36,8 +36,8 @@ require_repo() {
 }
 
 control() {
-  require_repo "CONTROL_REPO" "$CONTROL_REPO"
-  cd "$CONTROL_REPO"
+  require_repo "CONTROL_ROOT" "$CONTROL_ROOT"
+  cd "$CONTROL_ROOT"
 }
 
 configure_member_repo() {
@@ -60,7 +60,7 @@ configure_member_repo() {
 case "$ACTION" in
   setup)
     control
-    devtask init
+    devtask init --workspace
     configure_member_repo "$REPO_A_PATH" "$REPO_A_CHECK_1" "$REPO_A_CHECK_2"
     configure_member_repo "$REPO_B_PATH" "$REPO_B_CHECK_1" "$REPO_B_CHECK_2"
     control
@@ -142,10 +142,10 @@ case "$ACTION" in
   help|*)
     cat <<EOF
 Usage:
-  CONTROL_REPO=/path/to/control REPO_A_PATH=/path/to/a REPO_B_PATH=/path/to/b $0 <action>
+  CONTROL_ROOT=/path/to/control-workspace REPO_A_PATH=/path/to/a REPO_B_PATH=/path/to/b $0 <action>
 
 Actions:
-  setup         init control/member repos and configure model/checks
+  setup         init control workspace/member repos and configure model/checks
   create        create group and member repo tasks
   run           start created/paused member tasks
   logs-a        follow repo A logs

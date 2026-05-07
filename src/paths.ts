@@ -11,6 +11,19 @@ export interface DevtaskPaths {
   groupsDir: string;
 }
 
+function buildPaths(root: string): DevtaskPaths {
+  const baseDir = path.join(root, ".devtask");
+
+  return {
+    root,
+    baseDir,
+    configPath: path.join(baseDir, "config.json"),
+    tasksDir: path.join(baseDir, "tasks"),
+    worktreesDir: path.join(baseDir, "worktrees"),
+    groupsDir: path.join(baseDir, "groups")
+  };
+}
+
 export function findRepoRoot(start = process.cwd()): string {
   let current = path.resolve(start);
 
@@ -29,17 +42,43 @@ export function findRepoRoot(start = process.cwd()): string {
 }
 
 export function resolvePaths(start = process.cwd()): DevtaskPaths {
-  const root = findRepoRoot(start);
-  const baseDir = path.join(root, ".devtask");
+  return buildPaths(findRepoRoot(start));
+}
 
-  return {
-    root,
-    baseDir,
-    configPath: path.join(baseDir, "config.json"),
-    tasksDir: path.join(baseDir, "tasks"),
-    worktreesDir: path.join(baseDir, "worktrees"),
-    groupsDir: path.join(baseDir, "groups")
-  };
+export function findWorkspaceRoot(start = process.cwd()): string | null {
+  let current = path.resolve(start);
+
+  while (true) {
+    if (fs.existsSync(path.join(current, ".devtask", "workspace.json"))) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+
+    current = parent;
+  }
+}
+
+export function resolveWorkspacePaths(start = process.cwd()): DevtaskPaths {
+  const workspaceRoot = findWorkspaceRoot(start);
+  if (workspaceRoot) {
+    return buildPaths(workspaceRoot);
+  }
+
+  try {
+    return resolvePaths(start);
+  } catch {
+    throw new DevtaskError(
+      `No devtask workspace or git repository found from ${path.resolve(start)}. Run devtask init --workspace for non-git folders.`
+    );
+  }
+}
+
+export function resolveWorkspacePathsForInit(start = process.cwd()): DevtaskPaths {
+  return buildPaths(path.resolve(start));
 }
 
 export function taskDir(paths: DevtaskPaths, id: string): string {
@@ -68,4 +107,8 @@ export function worktreePath(paths: DevtaskPaths, id: string): string {
 
 export function scriptsDir(paths: DevtaskPaths): string {
   return path.join(paths.baseDir, "scripts");
+}
+
+export function workspaceJsonPath(paths: DevtaskPaths): string {
+  return path.join(paths.baseDir, "workspace.json");
 }

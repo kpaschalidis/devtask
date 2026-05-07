@@ -3,10 +3,12 @@ import path from "node:path";
 import type { DevtaskPaths } from "./paths.js";
 import {
   resultJsonPath,
+  scriptsDir,
   stateMarkdownPath,
   taskDir,
   taskMarkdownPath,
   taskMetaPath,
+  workspaceJsonPath,
   worktreePath
 } from "./paths.js";
 import { assertValidTaskId } from "./task-id.js";
@@ -30,6 +32,30 @@ export function initializeStore(paths: DevtaskPaths): void {
   fs.mkdirSync(paths.groupsDir, { recursive: true });
   if (!fs.existsSync(paths.configPath)) {
     writeConfig(paths, DEFAULT_CONFIG);
+  }
+}
+
+export function initializeWorkspace(paths: DevtaskPaths): void {
+  fs.mkdirSync(paths.baseDir, { recursive: true });
+  fs.mkdirSync(paths.groupsDir, { recursive: true });
+  fs.mkdirSync(scriptsDir(paths), { recursive: true });
+  if (!fs.existsSync(paths.configPath)) {
+    writeConfig(paths, DEFAULT_CONFIG);
+  }
+  const markerPath = workspaceJsonPath(paths);
+  if (!fs.existsSync(markerPath)) {
+    fs.writeFileSync(
+      markerPath,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          mode: "workspace",
+          createdAt: new Date().toISOString()
+        },
+        null,
+        2
+      )
+    );
   }
 }
 
