@@ -283,17 +283,40 @@ devtask group board docs-polyrepo-smoke
 
 ## 10. Optional PR Flow
 
-Group-level PR creation is not implemented yet. Create PRs repo-by-repo:
+Commit any remaining uncommitted task worktree changes from the control workspace:
+
+```bash
+devtask group commit docs-polyrepo-smoke
+```
+
+Create draft PRs across the group:
+
+```bash
+devtask group pr docs-polyrepo-smoke --draft
+```
+
+Narrow to one repo when iterating:
+
+```bash
+devtask group commit docs-polyrepo-smoke --repo frontend
+devtask group pr docs-polyrepo-smoke --repo frontend --draft
+```
+
+Repo-level commands are still available from each member repo:
 
 ```bash
 cd "$FRONTEND_REPO"
+devtask commit docs-smoke-frontend
 devtask pr docs-smoke-frontend
 devtask ci docs-smoke-frontend
 
 cd "$BACKEND_REPO"
+devtask commit docs-smoke-backend
 devtask pr docs-smoke-backend
 devtask ci docs-smoke-backend
 ```
+
+`devtask pr` and `devtask group pr` publish existing commits only. They refuse dirty worktrees instead of committing implicitly.
 
 ## 11. Cleanup Notes
 

@@ -761,6 +761,76 @@ export function createCli(): Command {
     });
 
   group
+    .command("commit")
+    .description("Commit current worktree changes for repo tasks in a group.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only commit one repo")
+    .option("-m, --message <message>", "Commit message")
+    .action(async (id: string, options: { repo?: string; message?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        let failed = false;
+
+        for (const [index, repo] of repos.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${repo.name}/${repo.taskId}`);
+          const repoPaths = resolvePaths(repo.path);
+          try {
+            await commitTask(repoPaths, repo.taskId, { message: options.message });
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("pr")
+    .description("Push existing branch commits and open PRs for repo tasks in a group.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only open a PR for one repo")
+    .option("--title <title>", "PR title")
+    .option("--body <body>", "PR body")
+    .option("--ready", "Create ready-for-review PRs instead of drafts")
+    .action(async (id: string, options: { repo?: string; title?: string; body?: string; ready?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        let failed = false;
+
+        for (const [index, repo] of repos.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${repo.name}/${repo.taskId}`);
+          const repoPaths = resolvePaths(repo.path);
+          try {
+            await openPrForTask(repoPaths, repo.taskId, options);
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
     .command("board")
     .description("Show all repo tasks in a group with next commands.")
     .argument("<id>")
@@ -996,6 +1066,11 @@ export function createCli(): Command {
     await openPrForTask(paths, id, options);
   };
 
+  const commitAction = async (id: string, options: { message?: string }): Promise<void> => {
+    const paths = resolvePaths();
+    await commitTask(paths, id, options);
+  };
+
   const ciAction = async (id: string): Promise<void> => {
     const paths = resolvePaths();
     await checkCiForTask(paths, id);
@@ -1026,8 +1101,21 @@ export function createCli(): Command {
     });
 
   program
+    .command("commit")
+    .description("Commit current task worktree changes without pushing or opening a PR.")
+    .argument("<id>")
+    .option("-m, --message <message>", "Commit message")
+    .action(async (id: string, options: { message?: string }) => {
+      try {
+        await commitAction(id, options);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
     .command("pr")
-    .description("Commit task worktree changes, push branch, and open a GitHub PR.")
+    .description("Push existing task branch commits and open a GitHub PR.")
     .argument("<id>")
     .option("--title <title>", "PR title")
     .option("--body <body>", "PR body")
@@ -1668,6 +1756,17 @@ async function openPrForTask(
     throw new DevtaskError(`Task ${id} is ${meta.status}; mark it approved before opening a PR`);
   }
 
+  const uncommitted = await hasUncommittedChanges(meta.worktreePath);
+  if (uncommitted) {
+    throw new DevtaskError(
+      `Task ${id} has uncommitted changes. Run devtask commit ${id}, or ask the agent to continue and commit its work.`
+    );
+  }
+  const commitCount = await countBranchCommits(meta.worktreePath);
+  if (commitCount === 0) {
+    throw new DevtaskError(`Task ${id} has no branch commits to publish. Run devtask commit ${id} first.`);
+  }
+
   const prUrl = await createPullRequest(meta, {
     title: options.title ?? meta.id,
     body: options.body ?? defaultPrBody(meta),
@@ -1681,6 +1780,32 @@ async function openPrForTask(
     updatedAt: new Date().toISOString()
   });
   console.log(prUrl);
+}
+
+async function commitTask(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  options: { message?: string } = {}
+): Promise<void> {
+  const meta = getTask(paths, id);
+  if (meta.status === "running") {
+    throw new DevtaskError(`Task ${id} is running; stop it before committing`);
+  }
+
+  await runCommandOrThrow("git", ["add", "-A"], { cwd: meta.worktreePath });
+  const staged = await runCommand("git", ["diff", "--cached", "--quiet"], { cwd: meta.worktreePath });
+  if (staged.exitCode === 0) {
+    console.log(`No changes to commit for ${id}`);
+    return;
+  }
+
+  const message = options.message ?? meta.id;
+  await runCommandOrThrow("git", ["commit", "-m", message], { cwd: meta.worktreePath });
+  writeTaskMeta(taskMetaPath(paths, id), {
+    ...meta,
+    updatedAt: new Date().toISOString()
+  });
+  console.log(`Committed ${id}`);
 }
 
 async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string): Promise<void> {
@@ -1778,13 +1903,6 @@ async function createPullRequest(
   options: { title: string; body: string; draft: boolean }
 ): Promise<string> {
   await runCommandOrThrow("gh", ["--version"], { cwd: meta.worktreePath });
-  await runCommandOrThrow("git", ["add", "-A"], { cwd: meta.worktreePath });
-
-  const staged = await runCommand("git", ["diff", "--cached", "--quiet"], { cwd: meta.worktreePath });
-  if (staged.exitCode !== 0) {
-    await runCommandOrThrow("git", ["commit", "-m", options.title], { cwd: meta.worktreePath });
-  }
-
   await runCommandOrThrow("git", ["push", "-u", "origin", meta.branch], { cwd: meta.worktreePath });
 
   const args = ["pr", "create", "--title", options.title, "--body", options.body];
@@ -1798,6 +1916,31 @@ async function createPullRequest(
     throw new DevtaskError("gh did not return a PR URL");
   }
   return prUrl;
+}
+
+async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
+  const result = await runCommandOrThrow("git", ["status", "--porcelain"], { cwd: worktreePath });
+  return result.stdout.trim().length > 0;
+}
+
+async function countBranchCommits(worktreePath: string): Promise<number> {
+  const baseRef = await findPublishBaseRef(worktreePath);
+  const mergeBase = await runCommandOrThrow("git", ["merge-base", "HEAD", baseRef], { cwd: worktreePath });
+  const result = await runCommandOrThrow("git", ["rev-list", "--count", `${mergeBase.stdout.trim()}..HEAD`], {
+    cwd: worktreePath
+  });
+  return Number.parseInt(result.stdout.trim(), 10);
+}
+
+async function findPublishBaseRef(worktreePath: string): Promise<string> {
+  const candidates = ["origin/HEAD", "origin/main", "origin/master", "main", "master"];
+  for (const candidate of candidates) {
+    const result = await runCommand("git", ["rev-parse", "--verify", candidate], { cwd: worktreePath });
+    if (result.exitCode === 0) {
+      return candidate;
+    }
+  }
+  throw new DevtaskError("Cannot determine the base branch for PR publishing");
 }
 
 function defaultPrBody(meta: ReturnType<typeof getTask>): string {

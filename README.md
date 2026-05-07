@@ -63,6 +63,7 @@ devtask inspect fix-login
 devtask check fix-login
 devtask review fix-login
 devtask mark fix-login approved
+devtask commit fix-login
 devtask pr fix-login
 devtask ci fix-login
 devtask cleanup fix-login --dry-run
@@ -81,6 +82,7 @@ devtask inspect fix-login
 devtask check fix-login
 devtask review fix-login
 devtask mark fix-login approved
+devtask commit fix-login
 devtask pr fix-login
 ```
 
@@ -93,6 +95,10 @@ devtask pr fix-login
 `devtask board` shows every task as a cockpit view: task status, latest check, latest review, PR state, and the next recommended command.
 
 `devtask next <id>` explains the next action for one task. Without an id, it prints recommendations for all tasks.
+
+`devtask commit <id>` commits current task worktree changes without pushing. Workers are instructed to commit completed work themselves, so this is mainly a manual recovery command.
+
+`devtask pr <id>` pushes existing task branch commits and opens a GitHub PR. It does not commit uncommitted work. If the task worktree is dirty or the branch has no commits to publish, it stops with a clear error.
 
 `devtask advance <id>` runs the next safe step automatically. It can start or continue a worker, run checks, run the review agent, open an approved PR, or check CI. It stops at human approval and prints the command to run after you inspect the work.
 
@@ -223,6 +229,8 @@ devtask group logs billing-export
 devtask group logs billing-export --repo backend -f
 devtask group check billing-export
 devtask group review billing-export
+devtask group commit billing-export
+devtask group pr billing-export --draft
 devtask group run billing-export
 devtask group advance billing-export
 devtask group remove billing-export frontend
@@ -232,6 +240,8 @@ devtask group cleanup billing-export --dry-run
 `devtask group board` shows every repo task with status, latest check, latest review, PR state, and next command. `devtask group advance` runs safe next steps across repos, using the same single-repo task lifecycle. It still stops at human approval, review findings, failed checks, and ambiguous states.
 
 `devtask group check <id>` and `devtask group review <id>` run the same repo-local lifecycle across every repo in the group. Use `--repo <name>` to run only one member.
+
+`devtask group commit <id>` and `devtask group pr <id>` run the commit and PR lifecycle across every repo in the group. Use `--repo <name>` to run only one member. Group PR creation follows the same strict rule as repo-level PR creation: it only publishes existing commits and refuses dirty worktrees.
 
 `devtask group remove <id> <repo-name>` only removes the repo from the group. Pass `--delete-task` to also delete that repo task's `.devtask/tasks/<task-id>` metadata directory. It does not remove the task worktree or revert code changes.
 
@@ -305,6 +315,7 @@ Open a draft PR after review/approval:
 
 ```bash
 devtask mark my-task approved
+devtask commit my-task
 devtask pr my-task
 devtask ci my-task
 ```
