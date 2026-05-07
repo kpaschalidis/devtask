@@ -94,9 +94,9 @@ async function createBitbucketPullRequest(
   }
 
   const username = process.env.BITBUCKET_USERNAME;
-  const appPassword = process.env.BITBUCKET_APP_PASSWORD;
-  if (!username || !appPassword) {
-    throw new DevtaskError("Set BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD to create Bitbucket pull requests");
+  const apiToken = process.env.BITBUCKET_API_TOKEN ?? process.env.BITBUCKET_APP_PASSWORD;
+  if (!username || !apiToken) {
+    throw new DevtaskError("Set BITBUCKET_USERNAME and BITBUCKET_API_TOKEN to create Bitbucket pull requests");
   }
 
   await pushBranch(worktreePath, options.branch);
@@ -104,7 +104,7 @@ async function createBitbucketPullRequest(
   const response = await fetch(`https://api.bitbucket.org/2.0/repositories/${remote.owner}/${remote.repo}/pullrequests`, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${username}:${appPassword}`).toString("base64")}`,
+      Authorization: `Basic ${Buffer.from(`${username}:${apiToken}`).toString("base64")}`,
       "Content-Type": "application/json",
       Accept: "application/json"
     },

@@ -56,11 +56,32 @@ Used by:
 Required environment:
 
 ```bash
-export BITBUCKET_USERNAME="<username>"
-export BITBUCKET_APP_PASSWORD="<app-password>"
+export BITBUCKET_USERNAME="<atlassian-account-email-or-bitbucket-username>"
+export BITBUCKET_API_TOKEN="<api-token-with-scopes>"
 ```
 
-The app password needs repository and pull request permissions. At minimum, use permissions that allow reading the repository, pushing branches, and creating pull requests.
+These are account-level environment variables. You set them once in the shell that runs `devtask`, and they apply to every Bitbucket repo your Bitbucket user can access. They are not configured per repo.
+
+The API token needs repository and pull request scopes. At minimum, use scopes that allow reading/writing repositories and reading/writing pull requests.
+
+For a one-off shell session:
+
+```bash
+export BITBUCKET_USERNAME="<atlassian-account-email-or-bitbucket-username>"
+export BITBUCKET_API_TOKEN="<api-token-with-scopes>"
+```
+
+For a persistent local setup on zsh, add the exports to `~/.zshrc`:
+
+```bash
+echo 'export BITBUCKET_USERNAME="<atlassian-account-email-or-bitbucket-username>"' >> ~/.zshrc
+echo 'export BITBUCKET_API_TOKEN="<api-token-with-scopes>"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Prefer storing the token in a password manager and pasting it into your shell profile intentionally. Do not commit these values to a repository, `.env` file, task file, or docs.
+
+Older Bitbucket app-password setups are still accepted through `BITBUCKET_APP_PASSWORD` as a fallback, but new onboarding should use `BITBUCKET_API_TOKEN`.
 
 Bitbucket Cloud does not support draft pull requests in devtask. Use:
 
@@ -75,7 +96,7 @@ Quick checks:
 
 ```bash
 test -n "$BITBUCKET_USERNAME"
-test -n "$BITBUCKET_APP_PASSWORD"
+test -n "$BITBUCKET_API_TOKEN"
 git remote get-url origin
 ```
 

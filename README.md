@@ -22,7 +22,7 @@ One installed `devtask` command can be used across all of your local repositorie
 - npm matching that Node installation.
 - Codex CLI installed and authenticated.
 - GitHub CLI (`gh`) installed and authenticated for GitHub `devtask pr` and `devtask ci`.
-- Bitbucket Cloud PR creation requires `BITBUCKET_USERNAME` and `BITBUCKET_APP_PASSWORD`.
+- Bitbucket Cloud PR creation requires `BITBUCKET_USERNAME` and `BITBUCKET_API_TOKEN`.
 - GitLab PR creation requires GitLab CLI (`glab`) installed and authenticated.
 - tmux installed only if you want attachable task sessions with `devtask run --tmux`.
 
