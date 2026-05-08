@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { sendToTmuxSession, tmuxSessionName } from "../src/tmux.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { sendToTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionName } from "../src/tmux.js";
 
 vi.mock("node:child_process", () => ({
   spawnSync: vi.fn(() => ({ status: 0, error: undefined, stdout: "" }))
@@ -9,6 +9,11 @@ const { spawnSync } = await import("node:child_process");
 const mockedSpawnSync = vi.mocked(spawnSync);
 
 describe("tmux", () => {
+  afterEach(() => {
+    mockedSpawnSync.mockReset();
+    mockedSpawnSync.mockReturnValue({ status: 0, error: undefined, stdout: "" });
+  });
+
   it("uses repository identity in the session name to avoid cross-repo collisions", () => {
     const first = tmuxSessionName(
       {
@@ -67,5 +72,26 @@ describe("tmux", () => {
       expect.arrayContaining(["paste-buffer"]),
       expect.objectContaining({ stdio: "ignore" })
     );
+  });
+
+  it("confirms steering delivery when captured output changes", () => {
+    mockedSpawnSync.mockClear();
+    mockedSpawnSync.mockImplementation((command, args) => {
+      if (command === "tmux" && Array.isArray(args) && args[0] === "capture-pane") {
+        const captureCount = mockedSpawnSync.mock.calls.filter((call) => Array.isArray(call[1]) && call[1][0] === "capture-pane").length;
+        return { status: 0, error: undefined, stdout: captureCount === 1 ? "before" : "after" };
+      }
+      return { status: 0, error: undefined, stdout: "" };
+    });
+
+    const result = sendToTmuxSessionWithConfirmation("devtask-test", "hello", {
+      attempts: 1,
+      intervalMs: 1
+    });
+
+    expect(result).toEqual({
+      confirmed: true,
+      output: "after"
+    });
   });
 });

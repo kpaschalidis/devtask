@@ -198,7 +198,7 @@ devtask init --workspace
 devtask scripts install
 ```
 
-Workspace mode stores group metadata and helper scripts in the product folder's `.devtask/` directory. Repo-local task commands still run inside the member git repositories.
+Workspace mode stores group metadata and helper scripts in the product folder's `.devtask/` directory. Repo-local task commands still run inside the member git repositories. Run `devtask init` inside each member repo to configure its runtime mode, checks, and provider-local task storage.
 
 Remove a task worktree and metadata when you no longer need the local task record:
 
@@ -260,6 +260,8 @@ devtask group board billing-export
 devtask group next billing-export
 devtask group logs billing-export
 devtask group logs billing-export --repo backend -f
+devtask group attach billing-export --repo backend
+devtask group steer billing-export --repo backend "Keep this scoped to backend conventions."
 devtask group plan billing-export
 devtask group check billing-export
 devtask group review billing-export
@@ -277,13 +279,15 @@ devtask group cleanup billing-export --dry-run
 
 `devtask group plan <id>`, `devtask group check <id>`, and `devtask group review <id>` run the same repo-local lifecycle across every repo in the group. Use `--repo <name>` to run only one member.
 
+`devtask group attach <id> --repo <name>` and `devtask group steer <id> --repo <name> "message"` target one repo task at a time. Group steering does not broadcast by default.
+
 `devtask group approve <id>` applies the approval policy across repo tasks. Use `--repo <name>` to approve one member or `--force` to override missing/failing checks or review.
 
 `devtask group mark <id> <status>` is the lower-level manual status override across the group.
 
 `devtask group commit <id>` and `devtask group pr <id>` run the commit and PR lifecycle across every repo in the group. Use `--repo <name>` to run only one member. Group PR creation follows the same strict rule as repo-level PR creation: it only publishes existing commits and refuses dirty worktrees.
 
-`devtask group doctor <id>` checks SCM provider/auth readiness, clean worktrees, and branch commits for every repo task. `devtask group pr <id>` prints the same style of preflight table before opening PRs and stops before publishing when a repo is not ready.
+`devtask group doctor <id>` checks runtime attachability, SCM provider/auth readiness, clean worktrees, and branch commits for every repo task. `devtask group pr <id>` prints the same style of preflight table before opening PRs and stops before publishing when a repo is not ready.
 
 `devtask group remove <id> <repo-name>` only removes the repo from the group. Pass `--delete-task` to also delete that repo task's `.devtask/tasks/<task-id>` metadata directory. It does not remove the task worktree or revert code changes.
 

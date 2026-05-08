@@ -182,4 +182,4 @@ Group-level SCM readiness checks are available with:
 devtask group doctor <group>
 ```
 
-This validates provider auth, Bitbucket environment variables, remote/provider detection, dirty worktrees, and branch commits for each repo task.
+This validates repo-local runtime mode, attach/steer availability, provider auth, Bitbucket environment variables, remote/provider detection, dirty worktrees, and branch commits for each repo task. In workspace mode, group metadata lives in the workspace folder, but runtime configuration still lives in each member repository. Run `devtask init` inside each member repo to configure attachable runtime defaults.

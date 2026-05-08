@@ -11,10 +11,9 @@ import { createTask, getTask, initializeStore, initializeWorkspace, listTasks } 
 import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-inspection.js";
 import {
   attachTmuxSession,
-  captureTmuxSession,
   isTmuxAvailable,
   killTmuxSession,
-  sendToTmuxSession,
+  sendToTmuxSessionWithConfirmation,
   startTmuxSession,
   tmuxSessionName
 } from "./tmux.js";
@@ -796,6 +795,47 @@ export function createCli(): Command {
     });
 
   group
+    .command("attach")
+    .description("Attach to one repo task's tmux session in a group.")
+    .argument("<id>")
+    .requiredOption("--repo <repo-name>", "Repo to attach")
+    .action((id: string, options: { repo: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repo = selectOneGroupRepo(paths, id, options.repo);
+        const repoPaths = resolvePaths(repo.path);
+        const meta = getTask(repoPaths, repo.taskId);
+        const session = meta.tmuxSession ?? tmuxSessionName(repoPaths, repo.taskId);
+        attachTmuxSession(session);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
+    .command("steer")
+    .description("Send live feedback to one repo task in a group.")
+    .argument("<id>")
+    .argument("[message...]")
+    .requiredOption("--repo <repo-name>", "Repo to steer")
+    .option("-f, --file <path>", "Read feedback from a file")
+    .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
+    .action((id: string, messageParts: string[], options: { repo: string; file?: string; lines: number }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repo = selectOneGroupRepo(paths, id, options.repo);
+        const repoPaths = resolvePaths(repo.path);
+        steerTask(repoPaths, repo.taskId, {
+          messageParts,
+          file: options.file,
+          lines: options.lines
+        });
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
     .command("plan")
     .description("Run planning agents for every repo task in a group.")
     .argument("<id>")
@@ -1109,15 +1149,20 @@ export function createCli(): Command {
           repos.map(async (repo) => {
             const repoPaths = resolvePaths(repo.path);
             const meta = getTask(repoPaths, repo.taskId);
+            const config = readConfig(repoPaths);
             const preflight = await preflightScmForPullRequest(meta.worktreePath, { draft: false });
-            return { repo, preflight };
+            return { repo, meta, config, preflight };
           })
         );
         printTable(
-          ["REPO", "TASK", "PROVIDER", "ACCESS", "CLEAN", "COMMITS"],
-          rows.map(({ repo, preflight }) => [
+          ["REPO", "TASK", "RUNTIME", "TMUX", "ATTACH", "STEER", "PROVIDER", "ACCESS", "CLEAN", "COMMITS"],
+          rows.map(({ repo, meta, config, preflight }) => [
             repo.name,
             repo.taskId,
+            config.runtime.mode,
+            meta.tmuxSession ?? "-",
+            meta.tmuxSession ? "yes" : "no",
+            meta.tmuxSession ? "yes" : "no",
             preflight.provider,
             preflight.access,
             preflight.clean ? "ok" : "dirty",
@@ -1576,18 +1621,11 @@ export function createCli(): Command {
     .action((id: string, messageParts: string[], options: { file?: string; lines: number }) => {
       try {
         const paths = resolvePaths();
-        const meta = getTask(paths, id);
-        if (!meta.tmuxSession) {
-          throw new DevtaskError(`Task ${id} is not running in an attachable session. Use devtask run ${id} after configuring attachable runtime.`);
-        }
-        const message = readSteerMessage(paths.root, options.file, messageParts);
-        sendToTmuxSession(meta.tmuxSession, message);
-        console.log("Message sent");
-        const output = captureTmuxSession(meta.tmuxSession, options.lines);
-        if (output.trim()) {
-          console.log("");
-          console.log(output.trimEnd());
-        }
+        steerTask(paths, id, {
+          messageParts,
+          file: options.file,
+          lines: options.lines
+        });
       } catch (error) {
         printError(error);
       }
@@ -1775,6 +1813,24 @@ function readSteerMessage(root: string, filePath: string | undefined, messagePar
     throw new DevtaskError("No feedback message provided");
   }
   return message;
+}
+
+function steerTask(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  options: { messageParts: string[]; file?: string; lines: number }
+): void {
+  const meta = getTask(paths, id);
+  if (!meta.tmuxSession) {
+    throw new DevtaskError(`Task ${id} is not running in an attachable session. Use devtask run ${id} after configuring attachable runtime.`);
+  }
+  const message = readSteerMessage(paths.root, options.file, options.messageParts);
+  const result = sendToTmuxSessionWithConfirmation(meta.tmuxSession, message, { lines: options.lines });
+  console.log(result.confirmed ? "Message sent and activity changed" : "Message sent; delivery not confirmed");
+  if (result.output.trim()) {
+    console.log("");
+    console.log(result.output.trimEnd());
+  }
 }
 
 function printTable(headers: string[], rows: string[][]): void {
@@ -2067,6 +2123,14 @@ function selectGroupRepos(
     throw new DevtaskError(repoName ? `Group ${id} does not have repo ${repoName}` : "No repos in group");
   }
   return repos;
+}
+
+function selectOneGroupRepo(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  repoName: string
+): ReturnType<typeof getGroup>["repos"][number] {
+  return selectGroupRepos(paths, id, repoName)[0]!;
 }
 
 function normalizeCleanupOptions(

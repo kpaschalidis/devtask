@@ -115,6 +115,29 @@ export function sendToTmuxSession(session: string, message: string): void {
   runTmux(["send-keys", "-t", session, "Enter"], `Failed to submit message to tmux session ${session}`);
 }
 
+export function sendToTmuxSessionWithConfirmation(
+  session: string,
+  message: string,
+  options: { lines?: number; attempts?: number; intervalMs?: number } = {}
+): { confirmed: boolean; output: string } {
+  const lines = options.lines ?? 30;
+  const attempts = options.attempts ?? 6;
+  const intervalMs = options.intervalMs ?? 500;
+  const before = captureTmuxSession(session, lines);
+  sendToTmuxSession(session, message);
+
+  let output = captureTmuxSession(session, lines);
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (output !== before || output.includes("Press up to edit queued messages")) {
+      return { confirmed: true, output };
+    }
+    sleepSync(intervalMs);
+    output = captureTmuxSession(session, lines);
+  }
+
+  return { confirmed: false, output };
+}
+
 function runTmux(args: string[], errorMessage: string): void {
   const result = spawnSync("tmux", args, { stdio: "ignore" });
   if (result.error || result.status !== 0) {
@@ -124,4 +147,8 @@ function runTmux(args: string[], errorMessage: string): void {
 
 function runTmuxBestEffort(args: string[]): void {
   spawnSync("tmux", args, { stdio: "ignore" });
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }

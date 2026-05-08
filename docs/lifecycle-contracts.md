@@ -286,6 +286,8 @@ Each member repo still owns:
 
 Group commands such as `devtask group plan <id>`, `devtask group check <id>`, `devtask group review <id>`, `devtask group approve <id>`, `devtask group commit <id>`, and `devtask group pr <id>` fan out repo-local lifecycle commands. Use `--repo <name>` to target one member.
 
+`devtask group attach <id> --repo <name>` and `devtask group steer <id> --repo <name> "message"` target one repo task. Group steering is intentionally one-repo-at-a-time in V1.
+
 V1 groups do not yet provide dependency ordering, cross-repo handoff generation, grouped CI repair, or a single combined PR object. Those belong above the current coordination layer.
 
 ## Command Mapping
@@ -315,6 +317,8 @@ devtask group create <id> --goal-file goal.md \
 
 devtask group plan <id>
 devtask group run <id>
+devtask group attach <id> --repo api
+devtask group steer <id> --repo api "message"
 devtask group inspect <id>
 devtask group check <id>
 devtask group review <id>
