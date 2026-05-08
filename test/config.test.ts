@@ -45,9 +45,30 @@ describe("config", () => {
         mode: "attachable",
         backend: "tmux"
       },
+      runtimeConfigured: true,
       verify: []
     });
 
     expect(hasRuntimeConfig(paths)).toBe(true);
+  });
+
+  it("does not treat generated plain runtime config as explicit", async () => {
+    const repo = await makeTempRepo();
+    const paths = resolvePaths(repo);
+    writeConfig(paths, {
+      schemaVersion: 1,
+      codex: {
+        model: null,
+        fullAuto: true
+      },
+      runtime: {
+        mode: "plain",
+        backend: null
+      },
+      runtimeConfigured: false,
+      verify: []
+    });
+
+    expect(hasRuntimeConfig(paths)).toBe(false);
   });
 });

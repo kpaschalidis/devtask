@@ -15,6 +15,7 @@ import {
   killTmuxSession,
   sendToTmuxSessionWithConfirmation,
   startTmuxSession,
+  tmuxSessionExists,
   tmuxSessionName
 } from "./tmux.js";
 import { buildCodexCommand, hasRuntimeConfig, readConfig, writeConfig } from "./config.js";
@@ -129,9 +130,10 @@ export function createCli(): Command {
         const runtime = parseRuntimeMode(mode);
         writeConfig(paths, {
           ...current,
-          runtime
+          runtime,
+          runtimeConfigured: true
         });
-        console.log(`Runtime: ${formatRuntime({ ...current, runtime })}`);
+        console.log(`Runtime: ${formatRuntime({ ...current, runtime, runtimeConfigured: true })}`);
       } catch (error) {
         printError(error);
       }
@@ -828,7 +830,8 @@ export function createCli(): Command {
         steerTask(repoPaths, repo.taskId, {
           messageParts,
           file: options.file,
-          lines: options.lines
+          lines: options.lines,
+          messageRoot: paths.root
         });
       } catch (error) {
         printError(error);
@@ -1151,18 +1154,19 @@ export function createCli(): Command {
             const meta = getTask(repoPaths, repo.taskId);
             const config = readConfig(repoPaths);
             const preflight = await preflightScmForPullRequest(meta.worktreePath, { draft: false });
-            return { repo, meta, config, preflight };
+            const tmuxAlive = meta.tmuxSession ? tmuxSessionExists(meta.tmuxSession) : false;
+            return { repo, meta, config, preflight, tmuxAlive };
           })
         );
         printTable(
           ["REPO", "TASK", "RUNTIME", "TMUX", "ATTACH", "STEER", "PROVIDER", "ACCESS", "CLEAN", "COMMITS"],
-          rows.map(({ repo, meta, config, preflight }) => [
+          rows.map(({ repo, meta, config, preflight, tmuxAlive }) => [
             repo.name,
             repo.taskId,
             config.runtime.mode,
             meta.tmuxSession ?? "-",
-            meta.tmuxSession ? "yes" : "no",
-            meta.tmuxSession ? "yes" : "no",
+            tmuxAlive ? "yes" : "no",
+            tmuxAlive ? "yes" : "no",
             preflight.provider,
             preflight.access,
             preflight.clean ? "ok" : "dirty",
@@ -1717,7 +1721,8 @@ function configureRuntimeFromEnvironment(paths: ReturnType<typeof resolvePaths>)
       runtime: {
         mode: "attachable",
         backend: "tmux"
-      }
+      },
+      runtimeConfigured: true
     });
     console.log("Runtime: attachable (tmux)");
     return;
@@ -1728,7 +1733,8 @@ function configureRuntimeFromEnvironment(paths: ReturnType<typeof resolvePaths>)
     runtime: {
       mode: "plain",
       backend: null
-    }
+    },
+    runtimeConfigured: true
   });
   console.log("Runtime: plain");
   console.log("tmux is not installed. devtask can still run tasks in plain background mode, but attach and steer will not be available.");
@@ -1818,15 +1824,15 @@ function readSteerMessage(root: string, filePath: string | undefined, messagePar
 function steerTask(
   paths: ReturnType<typeof resolvePaths>,
   id: string,
-  options: { messageParts: string[]; file?: string; lines: number }
+  options: { messageParts: string[]; file?: string; lines: number; messageRoot?: string }
 ): void {
   const meta = getTask(paths, id);
   if (!meta.tmuxSession) {
     throw new DevtaskError(`Task ${id} is not running in an attachable session. Use devtask run ${id} after configuring attachable runtime.`);
   }
-  const message = readSteerMessage(paths.root, options.file, options.messageParts);
+  const message = readSteerMessage(options.messageRoot ?? paths.root, options.file, options.messageParts);
   const result = sendToTmuxSessionWithConfirmation(meta.tmuxSession, message, { lines: options.lines });
-  console.log(result.confirmed ? "Message sent and activity changed" : "Message sent; delivery not confirmed");
+  console.log(result.confirmed ? "Message sent; terminal output changed" : "Message sent; no terminal change observed yet");
   if (result.output.trim()) {
     console.log("");
     console.log(result.output.trimEnd());

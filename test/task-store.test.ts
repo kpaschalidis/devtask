@@ -27,6 +27,7 @@ describe("task store", () => {
         mode: "plain",
         backend: null
       },
+      runtimeConfigured: false,
       verify: []
     });
   });
@@ -79,6 +80,7 @@ describe("task store", () => {
         mode: "plain",
         backend: null
       },
+      runtimeConfigured: true,
       verify: []
     });
 

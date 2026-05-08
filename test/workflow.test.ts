@@ -13,6 +13,7 @@ const config: DevtaskConfig = {
     mode: "plain",
     backend: null
   },
+  runtimeConfigured: true,
   verify: ["npm test"]
 };
 
