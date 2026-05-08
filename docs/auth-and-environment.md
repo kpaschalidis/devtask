@@ -155,7 +155,14 @@ Required config:
 ```bash
 devtask config jira \
   --base-url https://company.atlassian.net \
-  --email you@company.com
+  --email you@company.com \
+  --cloud-id <cloudId>
+```
+
+Get `cloudId` once per Jira site:
+
+```bash
+curl https://company.atlassian.net/_edge/tenant_info
 ```
 
 Required environment:
@@ -165,6 +172,18 @@ export JIRA_API_TOKEN="<jira-api-token>"
 ```
 
 The Jira token is an Atlassian account API token. It is account-level, not repo-specific. `devtask` uses it with your configured Jira email via HTTP Basic auth.
+
+When `cloudId` is configured, `devtask` calls Atlassian's gateway URL:
+
+```text
+https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/...
+```
+
+Without `cloudId`, `devtask` falls back to the classic site-local URL:
+
+```text
+https://company.atlassian.net/rest/api/3/...
+```
 
 Quick checks:
 

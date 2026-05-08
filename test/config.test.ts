@@ -48,7 +48,8 @@ describe("config", () => {
       runtimeConfigured: true,
       jira: {
         baseUrl: null,
-        email: null
+        email: null,
+        cloudId: null
       },
       verify: []
     });
@@ -72,7 +73,8 @@ describe("config", () => {
       runtimeConfigured: false,
       jira: {
         baseUrl: null,
-        email: null
+        email: null,
+        cloudId: null
       },
       verify: []
     });
@@ -90,14 +92,16 @@ describe("config", () => {
         schemaVersion: 1,
         jira: {
           baseUrl: "https://example.atlassian.net/",
-          email: "dev@example.com"
+          email: "dev@example.com",
+          cloudId: "cloud-123"
         }
       })
     );
 
     expect(readConfig(paths).jira).toEqual({
       baseUrl: "https://example.atlassian.net",
-      email: "dev@example.com"
+      email: "dev@example.com",
+      cloudId: "cloud-123"
     });
   });
 });

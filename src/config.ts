@@ -15,6 +15,7 @@ export interface DevtaskConfig {
   jira: {
     baseUrl: string | null;
     email: string | null;
+    cloudId: string | null;
   };
   verify: string[];
 }
@@ -32,7 +33,8 @@ export const DEFAULT_CONFIG: DevtaskConfig = {
   runtimeConfigured: false,
   jira: {
     baseUrl: null,
-    email: null
+    email: null,
+    cloudId: null
   },
   verify: []
 };
@@ -129,9 +131,10 @@ function parseJiraConfig(value: unknown): DevtaskConfig["jira"] {
     return DEFAULT_CONFIG.jira;
   }
 
-  const record = value as { baseUrl?: unknown; email?: unknown };
+  const record = value as { baseUrl?: unknown; email?: unknown; cloudId?: unknown };
   return {
     baseUrl: typeof record.baseUrl === "string" && record.baseUrl.trim() ? record.baseUrl.trim().replace(/\/+$/, "") : null,
-    email: typeof record.email === "string" && record.email.trim() ? record.email.trim() : null
+    email: typeof record.email === "string" && record.email.trim() ? record.email.trim() : null,
+    cloudId: typeof record.cloudId === "string" && record.cloudId.trim() ? record.cloudId.trim() : null
   };
 }

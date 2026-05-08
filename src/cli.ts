@@ -41,6 +41,7 @@ import {
   assertJiraConfigured,
   buildJiraGroupRepoGoal,
   buildJiraTaskGoal,
+  checkJiraAuth,
   fetchJiraIssue,
   renderJiraIssueMarkdown,
   writeJiraSourceArtifacts,
@@ -216,20 +217,22 @@ export function createCli(): Command {
     .description("Show or update Jira source configuration.")
     .option("--base-url <url>", "Jira Cloud base URL, for example https://company.atlassian.net")
     .option("--email <email>", "Jira account email used with JIRA_API_TOKEN")
-    .action((options: { baseUrl?: string; email?: string }) => {
+    .option("--cloud-id <id>", "Jira Cloud ID for scoped Atlassian API tokens")
+    .action((options: { baseUrl?: string; email?: string; cloudId?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         initializeStore(paths);
         const current = readConfig(paths);
 
-        if (!options.baseUrl && !options.email) {
+        if (!options.baseUrl && !options.email && !options.cloudId) {
           console.log(JSON.stringify(current.jira, null, 2));
           return;
         }
 
         const jira = {
           baseUrl: options.baseUrl ? options.baseUrl.replace(/\/+$/, "") : current.jira.baseUrl,
-          email: options.email ?? current.jira.email
+          email: options.email ?? current.jira.email,
+          cloudId: options.cloudId ?? current.jira.cloudId
         };
         writeConfig(paths, {
           ...current,
@@ -641,15 +644,19 @@ export function createCli(): Command {
   jira
     .command("doctor")
     .description("Check Jira configuration and environment.")
-    .action(() => {
+    .action(async () => {
       try {
         const paths = resolveWorkspacePaths();
         const config = readConfig(paths);
         console.log(`baseUrl: ${config.jira.baseUrl ?? "-"}`);
         console.log(`email: ${config.jira.email ?? "-"}`);
+        console.log(`cloudId: ${config.jira.cloudId ?? "-"}`);
         console.log(`JIRA_API_TOKEN: ${process.env.JIRA_API_TOKEN ? "set" : "missing"}`);
         assertJiraConfigured(config);
-        console.log("Jira: configured");
+        const auth = await checkJiraAuth(config);
+        console.log(`mode: ${auth.mode}`);
+        console.log(`account: ${auth.displayName ?? auth.accountId ?? "-"}`);
+        console.log("Jira: authenticated");
       } catch (error) {
         printError(error);
       }

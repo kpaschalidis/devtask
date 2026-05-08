@@ -30,7 +30,8 @@ describe("task store", () => {
       runtimeConfigured: false,
       jira: {
         baseUrl: null,
-        email: null
+        email: null,
+        cloudId: null
       },
       verify: []
     });
@@ -87,7 +88,8 @@ describe("task store", () => {
       runtimeConfigured: true,
       jira: {
         baseUrl: null,
-        email: null
+        email: null,
+        cloudId: null
       },
       verify: []
     });

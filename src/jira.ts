@@ -37,7 +37,15 @@ interface JiraFetchResponse {
   };
 }
 
-export function assertJiraConfigured(config: DevtaskConfig): { baseUrl: string; email: string; token: string } {
+export interface JiraAuth {
+  baseUrl: string;
+  apiBaseUrl: string;
+  email: string;
+  token: string;
+  mode: "site" | "gateway";
+}
+
+export function assertJiraConfigured(config: DevtaskConfig): JiraAuth {
   const token = process.env.JIRA_API_TOKEN;
   if (!config.jira.baseUrl || !config.jira.email) {
     throw new DevtaskError("Jira is not configured. Run devtask config jira --base-url <url> --email <email>.");
@@ -48,16 +56,18 @@ export function assertJiraConfigured(config: DevtaskConfig): { baseUrl: string; 
 
   return {
     baseUrl: config.jira.baseUrl,
+    apiBaseUrl: jiraApiBaseUrl(config),
     email: config.jira.email,
-    token
+    token,
+    mode: config.jira.cloudId ? "gateway" : "site"
   };
 }
 
 export async function fetchJiraIssue(config: DevtaskConfig, issueKey: string): Promise<JiraIssue> {
   const auth = assertJiraConfigured(config);
-  const response = await fetch(`${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}`, {
+  const response = await fetch(`${auth.apiBaseUrl}/issue/${encodeURIComponent(issueKey)}`, {
     headers: {
-      Authorization: `Basic ${Buffer.from(`${auth.email}:${auth.token}`).toString("base64")}`,
+      Authorization: jiraAuthHeader(auth),
       Accept: "application/json"
     }
   });
@@ -67,6 +77,39 @@ export async function fetchJiraIssue(config: DevtaskConfig, issueKey: string): P
   }
 
   return normalizeJiraIssue((await response.json()) as JiraFetchResponse, auth.baseUrl);
+}
+
+export async function checkJiraAuth(config: DevtaskConfig): Promise<{ accountId: string | null; displayName: string | null; mode: JiraAuth["mode"] }> {
+  const auth = assertJiraConfigured(config);
+  const response = await fetch(`${auth.apiBaseUrl}/myself`, {
+    headers: {
+      Authorization: jiraAuthHeader(auth),
+      Accept: "application/json"
+    }
+  });
+  if (!response.ok) {
+    throw new DevtaskError(`Jira auth check failed: ${response.status} ${await response.text()}`);
+  }
+  const body = (await response.json()) as { accountId?: unknown; displayName?: unknown };
+  return {
+    accountId: optionalString(body.accountId),
+    displayName: optionalString(body.displayName),
+    mode: auth.mode
+  };
+}
+
+function jiraApiBaseUrl(config: DevtaskConfig): string {
+  if (!config.jira.baseUrl) {
+    throw new DevtaskError("Jira is not configured. Run devtask config jira --base-url <url> --email <email>.");
+  }
+  if (config.jira.cloudId) {
+    return `https://api.atlassian.com/ex/jira/${encodeURIComponent(config.jira.cloudId)}/rest/api/3`;
+  }
+  return `${config.jira.baseUrl}/rest/api/3`;
+}
+
+function jiraAuthHeader(auth: JiraAuth): string {
+  return `Basic ${Buffer.from(`${auth.email}:${auth.token}`).toString("base64")}`;
 }
 
 export function normalizeJiraIssue(value: JiraFetchResponse, baseUrl: string): JiraIssue {

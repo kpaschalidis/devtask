@@ -84,10 +84,17 @@ Configure Jira once in the repo or workspace where you create tasks:
 ```bash
 devtask config jira \
   --base-url https://company.atlassian.net \
-  --email you@company.com
+  --email you@company.com \
+  --cloud-id <cloudId>
 
 export JIRA_API_TOKEN="<jira-api-token>"
 devtask jira doctor
+```
+
+Get `cloudId` once per Jira site:
+
+```bash
+curl https://company.atlassian.net/_edge/tenant_info
 ```
 
 Fetch an issue into durable local source artifacts:
