@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
-import { hasRuntimeConfig, readConfig, writeConfig } from "../src/config.js";
+import { buildCodexCommand, hasRuntimeConfig, readConfig, writeConfig } from "../src/config.js";
 import { resolvePaths } from "../src/paths.js";
 import { makeTempRepo } from "./helpers.js";
 
@@ -103,5 +103,9 @@ describe("config", () => {
       email: "dev@example.com",
       cloudId: "cloud-123"
     });
+  });
+
+  it("can build Codex commands for non-git workspace execution", () => {
+    expect(buildCodexCommand({ skipGitRepoCheck: true })).toContain("--skip-git-repo-check");
   });
 });

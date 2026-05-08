@@ -3,7 +3,7 @@ import path from "node:path";
 import type { DevtaskConfig } from "./config.js";
 import { buildCodexCommand } from "./config.js";
 import { groupDir, type TaskGroup } from "./group-store.js";
-import type { DevtaskPaths } from "./paths.js";
+import { planMarkdownPath, resolvePaths, taskMarkdownPath, type DevtaskPaths } from "./paths.js";
 import { runCommand } from "./process-runner.js";
 import { newRunId } from "./run-record.js";
 
@@ -61,7 +61,7 @@ export async function runGroupOrchestrator(
   const prompt = buildGroupOrchestrationPrompt(paths, group, orchestrationPath);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
-  const command = buildCodexCommand({ model: config.codex.model, fullAuto: config.codex.fullAuto });
+  const command = buildCodexCommand({ model: config.codex.model, fullAuto: config.codex.fullAuto, skipGitRepoCheck: true });
   options.onStart?.({ command, promptPath, outputPath, orchestrationPath });
   const startedAt = new Date().toISOString();
   const output = fs.createWriteStream(outputPath, { flags: "w" });
@@ -128,6 +128,19 @@ function buildGroupOrchestrationPrompt(paths: DevtaskPaths, group: TaskGroup, or
     "",
     ...group.repos.map((repo) => [`- ${repo.name}`, `  - path: ${repo.path}`, `  - task: ${repo.taskId}`].join("\n")),
     "",
+    "Repo task artifacts:",
+    "",
+    ...group.repos.map((repo) => {
+      const repoPaths = resolvePaths(repo.path);
+      const taskPath = taskMarkdownPath(repoPaths, repo.taskId);
+      const planPath = planMarkdownPath(repoPaths, repo.taskId);
+      return [
+        `- ${repo.name}`,
+        `  - task file: ${taskPath}`,
+        `  - existing repo plan: ${fs.existsSync(planPath) ? planPath : "(none yet)"}`
+      ].join("\n");
+    }),
+    "",
     "Write the orchestration plan with these Markdown sections:",
     "1. Summary",
     "2. Source Inputs",
@@ -145,6 +158,7 @@ function buildGroupOrchestrationPrompt(paths: DevtaskPaths, group: TaskGroup, or
     "- Assign each responsibility to exactly one repo when possible.",
     "- Include rejected or not-selected repos only if they are present in the group goal or repo list.",
     "- Use explicit dependencies; do not rely on natural-language implication.",
+    "- If repo-local plans already exist, read them and reconcile their contracts into this group plan.",
     "- Keep repo implementation details high-level enough for repo-local planners to refine.",
     "- Prefer existing repo boundaries from the group metadata over guessing new repositories.",
     "- If a contract is unknown, mark it as an open question instead of inventing behavior.",

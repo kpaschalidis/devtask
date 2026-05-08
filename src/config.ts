@@ -86,10 +86,13 @@ export function writeConfig(paths: DevtaskPaths, config: DevtaskConfig): void {
   fs.writeFileSync(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
-export function buildCodexCommand(options: { model?: string | null; fullAuto?: boolean } = {}): string {
+export function buildCodexCommand(options: { model?: string | null; fullAuto?: boolean; skipGitRepoCheck?: boolean } = {}): string {
   const args = ["codex", "exec"];
   if (options.fullAuto !== false) {
     args.push("--full-auto");
+  }
+  if (options.skipGitRepoCheck) {
+    args.push("--skip-git-repo-check");
   }
   args.push("--add-dir", '"$DEVTASK_TASK_DIR"');
   if (options.model) {

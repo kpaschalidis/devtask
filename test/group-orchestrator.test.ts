@@ -8,7 +8,7 @@ import {
   readGroupOrchestration
 } from "../src/group-orchestrator.js";
 import { addRepoToGroup, createGroup } from "../src/group-store.js";
-import { resolvePaths } from "../src/paths.js";
+import { planMarkdownPath, resolvePaths } from "../src/paths.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("group orchestrator", () => {
@@ -40,6 +40,9 @@ describe("group orchestrator", () => {
       repoPath: webRepo,
       taskId: "billing-export-web"
     });
+    const backendPaths = resolvePaths(backendRepo);
+    fs.mkdirSync(path.dirname(planMarkdownPath(backendPaths, "billing-export-backend")), { recursive: true });
+    fs.writeFileSync(planMarkdownPath(backendPaths, "billing-export-backend"), "# Backend Plan\n\nOwns export API.\n");
 
     const prompt = buildGroupOrchestrationPromptForTest(
       paths,
@@ -53,9 +56,12 @@ describe("group orchestrator", () => {
     expect(prompt).toContain("Repo Responsibilities");
     expect(prompt).toContain("Dependencies and Execution Order");
     expect(prompt).toContain("Ownership Boundaries");
+    expect(prompt).toContain("Repo task artifacts:");
     expect(prompt).toContain("backend");
     expect(prompt).toContain("billing-export-backend");
+    expect(prompt).toContain(planMarkdownPath(backendPaths, "billing-export-backend"));
     expect(prompt).toContain("web");
     expect(prompt).toContain("billing-export-web");
+    expect(prompt).toContain("If repo-local plans already exist");
   });
 });
