@@ -1,13 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./paths.js";
-import { taskDir } from "./paths.js";
+import { planMarkdownPath, taskDir } from "./paths.js";
 import type { RunRecord } from "./run-record.js";
 import type { TaskMeta } from "./types.js";
 import { isProcessAlive } from "./processes.js";
 import { runCommandOrThrow } from "./process-runner.js";
 import { readLatestVerification, type VerificationRecord } from "./verification.js";
 import { readLatestReviewAgent, type ReviewAgentRecord } from "./review-agent.js";
+import { hasTaskPlan, readLatestPlan, type PlanRecord } from "./planner.js";
 
 export interface TaskReview {
   meta: TaskMeta;
@@ -15,6 +16,9 @@ export interface TaskReview {
   latestRun: RunRecord | null;
   latestVerification: VerificationRecord | null;
   latestReviewAgent: ReviewAgentRecord | null;
+  latestPlan: PlanRecord | null;
+  hasPlan: boolean;
+  planPath: string;
   result: unknown;
 }
 
@@ -30,6 +34,9 @@ export async function buildTaskReview(paths: DevtaskPaths, meta: TaskMeta): Prom
     latestRun: readLatestRun(paths, meta.id),
     latestVerification: readLatestVerification(paths, meta.id),
     latestReviewAgent: readLatestReviewAgent(paths, meta.id),
+    latestPlan: readLatestPlan(paths, meta.id),
+    hasPlan: hasTaskPlan(paths, meta.id),
+    planPath: planMarkdownPath(paths, meta.id),
     result: readJsonIfExists(meta.resultPath)
   };
 }

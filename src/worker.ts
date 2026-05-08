@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { DevtaskPaths } from "./paths.js";
-import { resolvePaths, taskDir, taskMetaPath } from "./paths.js";
+import { planMarkdownPath, resolvePaths, taskDir, taskMetaPath } from "./paths.js";
 import { readTaskMeta, writeTaskMeta } from "./meta.js";
 import { acquireLock, releaseLock } from "./lock.js";
 import { newRunId, writeRunRecord, type RunStatus } from "./run-record.js";
@@ -66,6 +66,7 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
   fs.mkdirSync(logsDir, { recursive: true });
   await excludeDevtaskRuntimeFiles(meta.worktreePath);
   prepareRuntimeFiles(meta.statePath, meta.resultPath, runtimeStatePath, runtimeResultPath);
+  const promptPath = prepareWorkerPrompt(paths, meta);
 
   const logPath = path.join(logsDir, `${runId}.log`);
   const stdout = fs.openSync(logPath, "a");
@@ -82,7 +83,8 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
         DEVTASK_ROOT: paths.root,
         DEVTASK_TASK_ID: id,
         DEVTASK_TASK_DIR: currentTaskDir,
-        DEVTASK_TASK_PATH: meta.taskPath,
+        DEVTASK_TASK_PATH: promptPath,
+        DEVTASK_PLAN_PATH: planMarkdownPath(paths, id),
         DEVTASK_STATE_PATH: runtimeStatePath,
         DEVTASK_RESULT_PATH: runtimeResultPath
       },
@@ -142,6 +144,25 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
     failCount: nextFailCount,
     updatedAt: finishedAt
   }));
+}
+
+function prepareWorkerPrompt(paths: DevtaskPaths, meta: ReturnType<typeof readTaskMeta>): string {
+  const planPath = planMarkdownPath(paths, meta.id);
+  if (!fs.existsSync(planPath)) {
+    return meta.taskPath;
+  }
+
+  const content = [
+    fs.readFileSync(meta.taskPath, "utf8").trimEnd(),
+    "",
+    "## Accepted Plan",
+    "",
+    fs.readFileSync(planPath, "utf8").trimEnd(),
+    ""
+  ].join("\n");
+  const promptPath = path.join(taskDir(paths, meta.id), "runtime-task.md");
+  fs.writeFileSync(promptPath, content);
+  return promptPath;
 }
 
 function prepareRuntimeFiles(

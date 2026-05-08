@@ -54,6 +54,7 @@ devtask config check 'npm test -w @converge/v0' 'npm run typecheck -w @converge/
 devtask create fix-login \
   --goal "Fix login redirect loop and add regression coverage"
 
+devtask plan fix-login
 devtask run fix-login
 
 devtask list
@@ -91,6 +92,8 @@ devtask pr fix-login
 ```
 
 `devtask inspect` summarizes task metadata, the latest run, latest checks, latest review artifact, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to check, review, merge, continue, or discard the task worktree.
+
+`devtask plan` runs a planning-only agent and writes `.devtask/tasks/<id>/plan.md`. It is useful before implementation, and `devtask run` includes the plan in the worker prompt when one exists.
 
 `devtask check` runs deterministic commands configured with `devtask config check`, such as tests, typecheck, and lint.
 
@@ -240,6 +243,7 @@ devtask group board billing-export
 devtask group next billing-export
 devtask group logs billing-export
 devtask group logs billing-export --repo backend -f
+devtask group plan billing-export
 devtask group check billing-export
 devtask group review billing-export
 devtask group approve billing-export
@@ -254,7 +258,7 @@ devtask group cleanup billing-export --dry-run
 
 `devtask group board` shows every repo task with status, latest check, latest review, PR state, and next command. `devtask group advance` runs safe next steps across repos, using the same single-repo task lifecycle. It still stops at human approval, review findings, failed checks, and ambiguous states.
 
-`devtask group check <id>` and `devtask group review <id>` run the same repo-local lifecycle across every repo in the group. Use `--repo <name>` to run only one member.
+`devtask group plan <id>`, `devtask group check <id>`, and `devtask group review <id>` run the same repo-local lifecycle across every repo in the group. Use `--repo <name>` to run only one member.
 
 `devtask group approve <id>` applies the approval policy across repo tasks. Use `--repo <name>` to approve one member or `--force` to override missing/failing checks or review.
 

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./paths.js";
-import { taskDir } from "./paths.js";
+import { planMarkdownPath, taskDir } from "./paths.js";
 import { buildCodexCommand } from "./config.js";
 import { newRunId } from "./run-record.js";
 import { runCommand } from "./process-runner.js";
@@ -42,13 +42,16 @@ export async function runReviewAgent(
 
   const promptPath = path.join(reviewsDir, `${reviewId}.prompt.md`);
   const outputPath = path.join(reviewsDir, `${reviewId}.md`);
+  const plan = readTextIfExists(planMarkdownPath(paths, meta.id)).trim();
   const prompt = [
     `Review task ${meta.id}.`,
     "",
     "Act as a code reviewer. Do not modify files.",
     "Focus only on bugs, regressions, missing tests, unsafe assumptions, unnecessary files, and PR-blocking issues.",
+    plan ? "Review whether the implementation matches the accepted plan." : "No accepted plan artifact exists for this task.",
     "If there are no blocking findings, say exactly: REVIEW PASSED",
     "",
+    plan ? `Accepted plan:\n\n${plan}\n` : "",
     "Inspect the current worktree diff and relevant files before answering."
   ].join("\n");
   fs.writeFileSync(promptPath, `${prompt}\n`);
@@ -115,6 +118,14 @@ export function readLatestReviewAgent(paths: DevtaskPaths, id: string): ReviewAg
 function readOutput(outputPath: string): string {
   try {
     return fs.readFileSync(outputPath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function readTextIfExists(filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, "utf8");
   } catch {
     return "";
   }

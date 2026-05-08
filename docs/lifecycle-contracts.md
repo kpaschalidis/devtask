@@ -53,7 +53,7 @@ The create stage should not run the agent.
 
 ### Plan
 
-Planning is a first-class stage in the workflow model, but V1 does not yet expose a dedicated `devtask plan` command. Today, planning can be represented as a documentation-only task or included in the task goal.
+`devtask plan <id>` runs a planning-only agent and writes a durable task plan.
 
 Inputs:
 
@@ -64,14 +64,21 @@ Inputs:
 
 Artifacts:
 
-- a plan document, such as `docs/<topic>-plan.md`
+- `.devtask/tasks/<id>/plan.md`
+- plan run records under `.devtask/tasks/<id>/plans/`
 - state updates explaining what was inspected and decided
+
+Rules:
+
+- planning should not modify the task worktree
+- planning is available before approval and publishing
+- if a plan exists, `run` includes it in the worker prompt
+- `review` checks the implementation against the accepted plan
 
 Future direction:
 
-- add `devtask plan <id>` and `devtask group plan <id>`
-- store the selected plan path in task metadata
-- pass the accepted plan into `run`, `review`, and `approve`
+- support interactive planning sessions
+- allow explicit human acceptance or replacement of a plan artifact
 
 ### Run
 
@@ -270,7 +277,7 @@ Each member repo still owns:
 - branch
 - check, review, approve, commit, PR, and CI artifacts
 
-Group commands such as `devtask group check <id>`, `devtask group review <id>`, `devtask group approve <id>`, `devtask group commit <id>`, and `devtask group pr <id>` fan out repo-local lifecycle commands. Use `--repo <name>` to target one member.
+Group commands such as `devtask group plan <id>`, `devtask group check <id>`, `devtask group review <id>`, `devtask group approve <id>`, `devtask group commit <id>`, and `devtask group pr <id>` fan out repo-local lifecycle commands. Use `--repo <name>` to target one member.
 
 V1 groups do not yet provide dependency ordering, cross-repo handoff generation, grouped CI repair, or a single combined PR object. Those belong above the current coordination layer.
 
@@ -280,6 +287,7 @@ Single repo:
 
 ```bash
 devtask create <id> --goal "..."
+devtask plan <id>
 devtask run <id>
 devtask inspect <id>
 devtask check <id>
@@ -298,6 +306,7 @@ devtask group create <id> --goal-file goal.md \
   --repo api=../api:<task-id-api> \
   --repo web=../web:<task-id-web>
 
+devtask group plan <id>
 devtask group run <id>
 devtask group inspect <id>
 devtask group check <id>

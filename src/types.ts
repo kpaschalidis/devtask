@@ -1,5 +1,6 @@
 export const TASK_STATUSES = [
   "created",
+  "planned",
   "running",
   "paused",
   "review",

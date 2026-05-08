@@ -13,8 +13,16 @@ const config: DevtaskConfig = {
 };
 
 describe("workflow recommendations", () => {
-  it("runs new tasks", () => {
+  it("plans new tasks", () => {
     expect(recommendNextAction(taskReview({ status: "created" }), config)).toMatchObject({
+      kind: "plan",
+      command: "devtask plan example",
+      automatic: true
+    });
+  });
+
+  it("runs planned tasks", () => {
+    expect(recommendNextAction(taskReview({ status: "planned" }), config)).toMatchObject({
       kind: "run",
       command: "devtask run example",
       automatic: true
@@ -114,6 +122,9 @@ function taskReview(options: {
           exitCode: 0
         }
       : null,
+    latestPlan: null,
+    hasPlan: false,
+    planPath: "/tmp/repo/.devtask/tasks/example/plan.md",
     result: null
   };
 }

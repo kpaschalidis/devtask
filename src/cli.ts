@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { DevtaskError } from "./errors.js";
-import { resolvePaths, resolveWorkspacePaths, resolveWorkspacePathsForInit, scriptsDir, taskMetaPath } from "./paths.js";
+import { planMarkdownPath, resolvePaths, resolveWorkspacePaths, resolveWorkspacePathsForInit, scriptsDir, taskMetaPath } from "./paths.js";
 import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, initializeWorkspace, listTasks } from "./task-store.js";
@@ -15,6 +15,7 @@ import { assertCanMark, parseManualStatus } from "./lifecycle.js";
 import { runVerification } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
 import { runReviewAgent } from "./review-agent.js";
+import { runPlanAgent } from "./planner.js";
 import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
 import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroups, removeRepoFromGroup } from "./group-store.js";
 import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
@@ -286,6 +287,16 @@ export function createCli(): Command {
       console.log(`  Log: ${review.latestRun.logPath}`);
     }
 
+    console.log("");
+    console.log("Plan:");
+    console.log(`  File: ${review.planPath}`);
+    console.log(`  Exists: ${review.hasPlan ? "yes" : "no"}`);
+    if (review.latestPlan) {
+      console.log(`  Status: ${review.latestPlan.status}`);
+      console.log(`  Finished: ${review.latestPlan.finishedAt}`);
+      console.log(`  Output: ${review.latestPlan.outputPath}`);
+    }
+
     if (review.latestVerification) {
       console.log("");
       console.log("Latest check:");
@@ -328,6 +339,19 @@ export function createCli(): Command {
     .action(async (id: string) => {
       try {
         await inspectAction(id);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("plan")
+    .description("Run a planning-only agent and store the plan artifact.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolvePaths();
+        await planTask(paths, id);
       } catch (error) {
         printError(error);
       }
@@ -722,6 +746,39 @@ export function createCli(): Command {
     });
 
   group
+    .command("plan")
+    .description("Run planning agents for every repo task in a group.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only plan one repo")
+    .action(async (id: string, options: { repo?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        let failed = false;
+
+        for (const [index, repo] of repos.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${repo.name}/${repo.taskId}`);
+          const repoPaths = resolvePaths(repo.path);
+          try {
+            await planTask(repoPaths, repo.taskId);
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
     .command("check")
     .description("Run configured checks for every repo task in a group.")
     .argument("<id>")
@@ -1066,7 +1123,7 @@ export function createCli(): Command {
         for (const repo of groupData.repos) {
           const repoPaths = resolvePaths(repo.path);
           const meta = getTask(repoPaths, repo.taskId);
-          if (!["created", "paused"].includes(meta.status)) {
+          if (!["created", "planned", "paused"].includes(meta.status)) {
             console.log(`${repo.name}/${repo.taskId}: skipped (${meta.status})`);
             continue;
           }
@@ -1123,6 +1180,7 @@ export function createCli(): Command {
         console.log(`Branch: ${meta.branch}`);
         console.log(`Worktree: ${meta.worktreePath}`);
         console.log(`Task file: ${meta.taskPath}`);
+        console.log(`Plan file: ${planMarkdownPath(paths, meta.id)}`);
         console.log(`State file: ${meta.statePath}`);
         console.log(`Result file: ${meta.resultPath}`);
         console.log(`Model: ${meta.model ?? "-"}`);
@@ -1365,6 +1423,9 @@ export function createCli(): Command {
         }
 
         switch (next.kind) {
+          case "plan":
+            await planTask(paths, id);
+            return;
           case "run": {
             printStartedWorker(id, startWorker(paths, id), "Running");
             return;
@@ -1930,6 +1991,9 @@ function rewriteCommandForRepo(command: string, repoPath: string): string {
 
 async function advanceTask(paths: ReturnType<typeof resolvePaths>, id: string, next: NextAction): Promise<void> {
   switch (next.kind) {
+    case "plan":
+      await planTask(paths, id);
+      return;
     case "run":
       printStartedWorker(id, startWorker(paths, id), "Running");
       return;
@@ -1952,6 +2016,43 @@ async function advanceTask(paths: ReturnType<typeof resolvePaths>, id: string, n
       return;
     default:
       printNextAction(id, next);
+  }
+}
+
+async function planTask(paths: ReturnType<typeof resolvePaths>, id: string): Promise<void> {
+  const meta = getTask(paths, id);
+  if (meta.status === "running") {
+    throw new DevtaskError(`Task ${id} is running; stop it before planning`);
+  }
+  if (["approved", "pr-open", "ci-running", "ci-failed", "ci-passed", "done", "cancelled"].includes(meta.status)) {
+    throw new DevtaskError(`Task ${id} is ${meta.status}; planning is only available before approval and publishing`);
+  }
+
+  const config = readConfig(paths);
+  console.log(`Running planning agent in ${meta.worktreePath}`);
+  const record = await runPlanAgent(paths, meta, {
+    model: meta.model ?? config.codex.model,
+    fullAuto: config.codex.fullAuto,
+    onStart: (start) => {
+      console.log(`Prompt: ${start.promptPath}`);
+      console.log(`Plan: ${start.planPath}`);
+      console.log(`Output: ${start.outputPath}`);
+      console.log(`Command: ${start.command}`);
+    },
+    onStdout: (chunk) => {
+      process.stdout.write(chunk);
+    },
+    onStderr: (chunk) => {
+      process.stderr.write(chunk);
+    }
+  });
+  console.log(`Plan: ${record.status}`);
+  console.log(`File: ${record.planPath}`);
+  if (record.worktreeChanged) {
+    throw new DevtaskError("Planning changed the task worktree. Revert those changes or inspect them before continuing.");
+  }
+  if (record.status === "failed") {
+    process.exit(1);
   }
 }
 

@@ -93,6 +93,10 @@ export function taskMarkdownPath(paths: DevtaskPaths, id: string): string {
   return path.join(taskDir(paths, id), "task.md");
 }
 
+export function planMarkdownPath(paths: DevtaskPaths, id: string): string {
+  return path.join(taskDir(paths, id), "plan.md");
+}
+
 export function stateMarkdownPath(paths: DevtaskPaths, id: string): string {
   return path.join(taskDir(paths, id), "state.md");
 }

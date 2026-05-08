@@ -2,6 +2,7 @@ import type { DevtaskConfig } from "./config.js";
 import type { TaskReview } from "./task-inspection.js";
 
 export type NextActionKind =
+  | "plan"
   | "run"
   | "continue"
   | "check"
@@ -45,9 +46,18 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
 
   if (review.meta.status === "created") {
     return {
+      kind: "plan",
+      command: `devtask plan ${id}`,
+      reason: "Task has not been planned.",
+      automatic: true
+    };
+  }
+
+  if (review.meta.status === "planned") {
+    return {
       kind: "run",
       command: `devtask run ${id}`,
-      reason: "Task has not started.",
+      reason: "Task has an accepted plan and is ready to run.",
       automatic: true
     };
   }
