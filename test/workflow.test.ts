@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DevtaskConfig } from "../src/config.js";
 import type { TaskReview } from "../src/task-inspection.js";
-import { recommendNextAction } from "../src/workflow.js";
+import { buildBoardRow, recommendNextAction } from "../src/workflow.js";
 
 const config: DevtaskConfig = {
   schemaVersion: 1,
@@ -31,6 +31,33 @@ describe("workflow recommendations", () => {
       kind: "run",
       command: "devtask run example",
       automatic: true
+    });
+  });
+
+  it("retries planning when the planning stage failed", () => {
+    expect(
+      recommendNextAction(
+        taskReview({
+          status: "failed",
+          stages: {
+            plan: {
+              stage: "plan",
+              status: "failed",
+              startedAt: "2026-05-05T00:00:00.000Z",
+              finishedAt: "2026-05-05T00:00:01.000Z",
+              input: {},
+              output: {},
+              artifacts: [],
+              reason: "planning failed"
+            }
+          }
+        }),
+        config
+      )
+    ).toMatchObject({
+      kind: "plan",
+      command: "devtask plan example",
+      automatic: false
     });
   });
 
@@ -102,12 +129,40 @@ describe("workflow recommendations", () => {
       automatic: false
     });
   });
+
+  it("builds board rows with lifecycle stage and stage status", () => {
+    const row = buildBoardRow(
+      taskReview({
+        status: "failed",
+        stages: {
+          plan: {
+            stage: "plan",
+            status: "failed",
+            startedAt: "2026-05-05T00:00:00.000Z",
+            finishedAt: "2026-05-05T00:00:01.000Z",
+            input: {},
+            output: {},
+            artifacts: [],
+            reason: "planning failed"
+          }
+        }
+      }),
+      config
+    );
+
+    expect(row).toMatchObject({
+      stage: "plan",
+      status: "failed",
+      next: "devtask plan example"
+    });
+  });
 });
 
 function taskReview(options: {
   status: TaskReview["meta"]["status"];
   latestVerification?: { status: "passed" | "failed"; finishedAt: string };
   latestReviewAgent?: { status: "passed" | "findings" | "failed"; finishedAt: string };
+  stages?: TaskReview["stages"]["stages"];
 }): TaskReview {
   return {
     meta: {
@@ -162,7 +217,7 @@ function taskReview(options: {
       schemaVersion: 1,
       taskId: "example",
       updatedAt: "1970-01-01T00:00:00.000Z",
-      stages: {}
+      stages: options.stages ?? {}
     },
     hasPlan: false,
     planPath: "/tmp/repo/.devtask/tasks/example/plan.md",

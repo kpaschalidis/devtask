@@ -564,8 +564,8 @@ export function createCli(): Command {
         }
 
         printTable(
-          ["ID", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
-          rows.map((row) => [row.id, row.status, row.check, row.review, row.pr, row.updated, row.next])
+          ["ID", "STAGE", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
+          rows.map((row) => [row.id, row.stage, row.status, row.check, row.review, row.pr, row.updated, row.next])
         );
       } catch (error) {
         printError(error);
@@ -1282,8 +1282,8 @@ export function createCli(): Command {
         }
 
         printTable(
-          ["REPO", "TASK", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
-          rows.map((row) => [row.repo, row.task, row.status, row.check, row.review, row.pr, row.updated, row.next])
+          ["REPO", "TASK", "STAGE", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
+          rows.map((row) => [row.repo, row.task, row.stage, row.status, row.check, row.review, row.pr, row.updated, row.next])
         );
       } catch (error) {
         printError(error);
@@ -2345,6 +2345,7 @@ function printCleanupPlan(label: string, plan: CleanupPlan): void {
 interface GroupBoardRow {
   repo: string;
   task: string;
+  stage: string;
   status: string;
   check: string;
   review: string;
@@ -2401,16 +2402,35 @@ async function buildGroupBoardRows(paths: ReturnType<typeof resolvePaths>, id: s
     rows.push({
       repo: repo.name,
       task: row.id,
+      stage: row.stage,
       status: row.status,
       check: row.check,
       review: row.review,
       pr: row.pr,
       updated: row.updated,
-      next: rewriteCommandForRepo(row.next, repo.path)
+      next: rewriteCommandForGroup(row.next, id, repo.name, repo.path)
     });
   }
 
   return rows;
+}
+
+function rewriteCommandForGroup(command: string, groupId: string, repoName: string, repoPath: string): string {
+  const parts = command.split(" ");
+  const action = parts[1];
+  if (parts[0] !== "devtask" || !action) {
+    return command;
+  }
+
+  if (["plan", "check", "review", "approve", "commit", "pr"].includes(action)) {
+    return `devtask group ${action} ${shellQuote(groupId)} --repo ${shellQuote(repoName)}`;
+  }
+
+  if (action === "run") {
+    return `devtask group run ${shellQuote(groupId)}`;
+  }
+
+  return rewriteCommandForRepo(command, repoPath);
 }
 
 function withRepoCommand(next: NextAction, repoName: string, repoPath: string): NextAction {

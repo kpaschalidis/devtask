@@ -1,4 +1,5 @@
 import type { DevtaskConfig } from "./config.js";
+import { STAGE_NAMES, type StageName, type StageStatus } from "./stage-contracts.js";
 import type { TaskReview } from "./task-inspection.js";
 
 export type NextActionKind =
@@ -24,6 +25,7 @@ export interface NextAction {
 
 export interface BoardRow {
   id: string;
+  stage: string;
   status: string;
   check: string;
   review: string;
@@ -72,6 +74,16 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   }
 
   if (review.meta.status === "failed") {
+    const failedStage = latestFailedStage(review);
+    if (failedStage === "plan") {
+      return {
+        kind: "plan",
+        command: `devtask plan ${id}`,
+        reason: "Planning failed and can be retried.",
+        automatic: false
+      };
+    }
+
     return {
       kind: "continue",
       command: `devtask continue ${id}`,
@@ -193,15 +205,69 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
 
 export function buildBoardRow(review: TaskReview, config: DevtaskConfig): BoardRow {
   const next = recommendNextAction(review, config);
+  const lifecycle = describeLifecycle(review);
   return {
     id: review.meta.id,
-    status: review.meta.status,
+    stage: lifecycle.stage,
+    status: lifecycle.status,
     check: formatCheckState(review),
     review: formatReviewState(review),
     pr: review.meta.prUrl ? "open" : "-",
     updated: review.meta.updatedAt,
     next: next.command ?? next.reason
   };
+}
+
+function describeLifecycle(review: TaskReview): { stage: string; status: string } {
+  if (review.meta.status === "created") {
+    return { stage: "plan", status: "pending" };
+  }
+
+  if (review.meta.status === "planned") {
+    return { stage: "run", status: "pending" };
+  }
+
+  if (review.meta.status === "running") {
+    return { stage: "run", status: "running" };
+  }
+
+  const latest = latestStage(review);
+  if (latest) {
+    return { stage: latest.stage, status: latest.status };
+  }
+
+  if (review.meta.status === "review") {
+    return { stage: "check", status: "pending" };
+  }
+
+  if (review.meta.status === "approved") {
+    return { stage: "pr", status: "pending" };
+  }
+
+  if (review.meta.status === "pr-open") {
+    return { stage: "ci", status: "pending" };
+  }
+
+  return { stage: "-", status: review.meta.status };
+}
+
+function latestFailedStage(review: TaskReview): StageName | null {
+  const latest = latestStage(review);
+  return latest?.status === "failed" ? latest.stage : null;
+}
+
+function latestStage(review: TaskReview): { stage: StageName; status: StageStatus; finishedAt: string | null } | null {
+  const stages = STAGE_NAMES.map((stage) => review.stages.stages[stage])
+    .filter((stage): stage is NonNullable<typeof stage> => Boolean(stage))
+    .sort((a, b) => stageTime(b) - stageTime(a));
+
+  const latest = stages.at(0);
+  return latest ? { stage: latest.stage, status: latest.status, finishedAt: latest.finishedAt } : null;
+}
+
+function stageTime(stage: { finishedAt: string | null; startedAt: string | null }): number {
+  const value = Date.parse(stage.finishedAt ?? stage.startedAt ?? "");
+  return Number.isFinite(value) ? value : 0;
 }
 
 function formatCheckState(review: TaskReview): string {
