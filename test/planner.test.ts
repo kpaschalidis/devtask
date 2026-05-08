@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { hasTaskPlan, readLatestPlan } from "../src/planner.js";
+import { buildPlanPromptForTest, hasTaskPlan, readLatestPlan } from "../src/planner.js";
 import { resolvePaths, planMarkdownPath } from "../src/paths.js";
 import { createTask } from "../src/task-store.js";
 import { makeTempRepo } from "./helpers.js";
@@ -35,5 +35,25 @@ describe("planner artifacts", () => {
     fs.writeFileSync(path.join(plansDir, `${record.planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
 
     expect(readLatestPlan(paths, meta.id)?.status).toBe("planned");
+  });
+
+  it("builds a research-first planning prompt with explicit artifact boundaries", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(repo);
+    const meta = await createTask(paths, "prompt-task", {
+      goal: "Add health-check endpoint"
+    });
+
+    const prompt = buildPlanPromptForTest(meta, planMarkdownPath(paths, meta.id));
+
+    expect(prompt).toContain("You are in the devtask planning stage.");
+    expect(prompt).toContain("The only file you may write is the devtask plan artifact");
+    expect(prompt).toContain("Before writing the plan:");
+    expect(prompt).toContain("Relevant Existing Files");
+    expect(prompt).toContain("Current Behavior / Current Structure");
+    expect(prompt).toContain("Step-by-Step Implementation Plan");
+    expect(prompt).toContain("Every implementation step must name the expected files");
+    expect(prompt).toContain("Do not invent requirements");
+    expect(prompt).toContain("Add health-check endpoint");
   });
 });
