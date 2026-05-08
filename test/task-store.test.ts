@@ -28,6 +28,10 @@ describe("task store", () => {
         backend: null
       },
       runtimeConfigured: false,
+      jira: {
+        baseUrl: null,
+        email: null
+      },
       verify: []
     });
   });
@@ -81,6 +85,10 @@ describe("task store", () => {
         backend: null
       },
       runtimeConfigured: true,
+      jira: {
+        baseUrl: null,
+        email: null
+      },
       verify: []
     });
 

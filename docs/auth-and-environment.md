@@ -142,6 +142,45 @@ git remote get-url origin
 
 Draft GitLab merge requests are not supported yet. Use `--ready`.
 
+## Jira
+
+Used by:
+
+- `devtask jira fetch <issue>`
+- `devtask jira create <issue>`
+- `devtask jira group <issue>`
+
+Required config:
+
+```bash
+devtask config jira \
+  --base-url https://company.atlassian.net \
+  --email you@company.com
+```
+
+Required environment:
+
+```bash
+export JIRA_API_TOKEN="<jira-api-token>"
+```
+
+The Jira token is an Atlassian account API token. It is account-level, not repo-specific. `devtask` uses it with your configured Jira email via HTTP Basic auth.
+
+Quick checks:
+
+```bash
+devtask jira doctor
+test -n "$JIRA_API_TOKEN"
+```
+
+For polyrepo work, configure Jira in the workspace folder where you run `devtask init --workspace`, then create a group with explicit repo ownership:
+
+```bash
+devtask jira group APP-123 \
+  --repo backend=./backend:app-123-backend \
+  --repo web=./web:app-123-web
+```
+
 ## Optional Tools
 
 ### tmux

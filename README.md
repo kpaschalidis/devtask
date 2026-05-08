@@ -23,6 +23,7 @@ One installed `devtask` command can be used across all of your local repositorie
 - Codex CLI installed and authenticated.
 - GitHub CLI (`gh`) installed and authenticated for GitHub `devtask pr` and `devtask ci`.
 - Bitbucket Cloud PR creation requires `BITBUCKET_EMAIL` and `BITBUCKET_API_TOKEN`.
+- Jira source ingestion requires `devtask config jira ...` and `JIRA_API_TOKEN`.
 - GitLab PR creation requires GitLab CLI (`glab`) installed and authenticated.
 - tmux recommended for the default attachable runtime, `devtask attach`, and `devtask steer`.
 
@@ -75,6 +76,46 @@ devtask pr fix-login
 devtask ci fix-login
 devtask cleanup fix-login --dry-run
 ```
+
+## Jira Source Workflow
+
+Configure Jira once in the repo or workspace where you create tasks:
+
+```bash
+devtask config jira \
+  --base-url https://company.atlassian.net \
+  --email you@company.com
+
+export JIRA_API_TOKEN="<jira-api-token>"
+devtask jira doctor
+```
+
+Fetch an issue into durable local source artifacts:
+
+```bash
+devtask jira fetch APP-123
+```
+
+Create a single-repo task from a Jira issue:
+
+```bash
+devtask jira create APP-123 --task app-123
+devtask plan app-123
+devtask run app-123
+```
+
+Create a polyrepo group from a Jira issue with explicit repo ownership:
+
+```bash
+devtask jira group APP-123 \
+  --repo backend=./backend:app-123-backend \
+  --repo web=./web:app-123-web
+
+devtask group plan app-123
+devtask group run app-123
+```
+
+Jira artifacts are written under `.devtask/sources/jira/`. V1 does not guess affected repositories from ticket text; pass every repo explicitly with `--repo name=path:task-id`.
 
 If a worker command exits successfully but does not write a terminal `result.json`, devtask moves the task to `review` instead of looping forever. If the worker writes `{"status":"done"}`, devtask marks the worker run as `done`.
 

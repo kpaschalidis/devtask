@@ -46,6 +46,10 @@ describe("config", () => {
         backend: "tmux"
       },
       runtimeConfigured: true,
+      jira: {
+        baseUrl: null,
+        email: null
+      },
       verify: []
     });
 
@@ -66,9 +70,34 @@ describe("config", () => {
         backend: null
       },
       runtimeConfigured: false,
+      jira: {
+        baseUrl: null,
+        email: null
+      },
       verify: []
     });
 
     expect(hasRuntimeConfig(paths)).toBe(false);
+  });
+
+  it("reads Jira config when present", async () => {
+    const repo = await makeTempRepo();
+    const paths = resolvePaths(repo);
+    fs.mkdirSync(paths.baseDir, { recursive: true });
+    fs.writeFileSync(
+      paths.configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        jira: {
+          baseUrl: "https://example.atlassian.net/",
+          email: "dev@example.com"
+        }
+      })
+    );
+
+    expect(readConfig(paths).jira).toEqual({
+      baseUrl: "https://example.atlassian.net",
+      email: "dev@example.com"
+    });
   });
 });

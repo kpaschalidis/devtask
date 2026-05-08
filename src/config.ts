@@ -12,6 +12,10 @@ export interface DevtaskConfig {
     backend: "tmux" | null;
   };
   runtimeConfigured: boolean;
+  jira: {
+    baseUrl: string | null;
+    email: string | null;
+  };
   verify: string[];
 }
 
@@ -26,6 +30,10 @@ export const DEFAULT_CONFIG: DevtaskConfig = {
     backend: null
   },
   runtimeConfigured: false,
+  jira: {
+    baseUrl: null,
+    email: null
+  },
   verify: []
 };
 
@@ -43,6 +51,7 @@ export function readConfig(paths: DevtaskPaths): DevtaskConfig {
     },
     runtime: parseRuntimeConfig(value.runtime),
     runtimeConfigured: value.runtimeConfigured === true,
+    jira: parseJiraConfig(value.jira),
     verify: Array.isArray(value.verify) ? value.verify.filter((item): item is string => typeof item === "string") : []
   };
 }
@@ -112,5 +121,17 @@ function parseRuntimeConfig(value: unknown): DevtaskConfig["runtime"] {
   return {
     mode: "plain",
     backend: null
+  };
+}
+
+function parseJiraConfig(value: unknown): DevtaskConfig["jira"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_CONFIG.jira;
+  }
+
+  const record = value as { baseUrl?: unknown; email?: unknown };
+  return {
+    baseUrl: typeof record.baseUrl === "string" && record.baseUrl.trim() ? record.baseUrl.trim().replace(/\/+$/, "") : null,
+    email: typeof record.email === "string" && record.email.trim() ? record.email.trim() : null
   };
 }

@@ -37,6 +37,15 @@ import {
   type ScmPreflight
 } from "./scm.js";
 import { recordStage, runStage } from "./stage-contracts.js";
+import {
+  assertJiraConfigured,
+  buildJiraGroupRepoGoal,
+  buildJiraTaskGoal,
+  fetchJiraIssue,
+  renderJiraIssueMarkdown,
+  writeJiraSourceArtifacts,
+  type JiraIssue
+} from "./jira.js";
 
 interface PrOptions {
   title?: string;
@@ -202,6 +211,37 @@ export function createCli(): Command {
       }
     });
 
+  config
+    .command("jira")
+    .description("Show or update Jira source configuration.")
+    .option("--base-url <url>", "Jira Cloud base URL, for example https://company.atlassian.net")
+    .option("--email <email>", "Jira account email used with JIRA_API_TOKEN")
+    .action((options: { baseUrl?: string; email?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        initializeStore(paths);
+        const current = readConfig(paths);
+
+        if (!options.baseUrl && !options.email) {
+          console.log(JSON.stringify(current.jira, null, 2));
+          return;
+        }
+
+        const jira = {
+          baseUrl: options.baseUrl ? options.baseUrl.replace(/\/+$/, "") : current.jira.baseUrl,
+          email: options.email ?? current.jira.email
+        };
+        writeConfig(paths, {
+          ...current,
+          jira
+        });
+        console.log("Jira config:");
+        console.log(JSON.stringify(jira, null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
   const scripts = program.command("scripts").description("Install and run packaged devtask helper scripts.");
 
   scripts
@@ -224,7 +264,7 @@ export function createCli(): Command {
     .action((options: { force?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
-        initializeWorkspace(paths);
+        initializeStore(paths);
         const installed = installTemplateScripts(paths, { force: options.force === true });
         for (const filePath of installed) {
           console.log(filePath);
@@ -587,6 +627,109 @@ export function createCli(): Command {
             taskId: meta.id
           });
           console.log(`Added ${repo.name} to group ${updated.id}`);
+          console.log(`Repo: ${repo.paths.root}`);
+          console.log(`Task: ${meta.id}`);
+          console.log(`Worktree: ${meta.worktreePath}`);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  const jira = program.command("jira").description("Use Jira issues as durable devtask source inputs.");
+
+  jira
+    .command("doctor")
+    .description("Check Jira configuration and environment.")
+    .action(() => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const config = readConfig(paths);
+        console.log(`baseUrl: ${config.jira.baseUrl ?? "-"}`);
+        console.log(`email: ${config.jira.email ?? "-"}`);
+        console.log(`JIRA_API_TOKEN: ${process.env.JIRA_API_TOKEN ? "set" : "missing"}`);
+        assertJiraConfigured(config);
+        console.log("Jira: configured");
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  jira
+    .command("fetch")
+    .description("Fetch a Jira issue and write durable source artifacts.")
+    .argument("<issue-key>")
+    .action(async (issueKey: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        initializeStore(paths);
+        const issue = await fetchJiraIssue(readConfig(paths), issueKey);
+        const artifacts = writeJiraSourceArtifacts(paths, issue);
+        console.log(`${issue.key}: ${issue.summary}`);
+        console.log(`JSON: ${artifacts.jsonPath}`);
+        console.log(`Markdown: ${artifacts.markdownPath}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  jira
+    .command("create")
+    .description("Create a repo-local task from a Jira issue.")
+    .argument("<issue-key>")
+    .option("--task <task-id>", "Task id to create. Defaults to lower-case Jira key.")
+    .action(async (issueKey: string, options: { task?: string }) => {
+      try {
+        const paths = resolvePaths();
+        initializeStore(paths);
+        const issue = await fetchJiraIssue(readConfig(paths), issueKey);
+        const artifacts = writeJiraSourceArtifacts(paths, issue);
+        const taskId = options.task ?? defaultTaskIdForIssue(issue.key);
+        const meta = await createTask(paths, taskId, {
+          goal: buildJiraTaskGoal(issue, artifacts.markdownPath)
+        });
+        console.log(`Fetched ${issue.key}: ${issue.summary}`);
+        console.log(`Source: ${artifacts.markdownPath}`);
+        console.log(`Created task ${meta.id}`);
+        console.log(`Branch: ${meta.branch}`);
+        console.log(`Worktree: ${meta.worktreePath}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  jira
+    .command("group")
+    .description("Create a multi-repo group from a Jira issue.")
+    .argument("<issue-key>")
+    .option("--group <group-id>", "Group id to create. Defaults to lower-case Jira key.")
+    .option("--repo <spec>", "Create and add a repo task as name=path:task-id", collectOption, [])
+    .action(async (issueKey: string, options: { group?: string; repo: string[] }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
+        const issue = await fetchJiraIssue(readConfig(paths), issueKey);
+        const artifacts = writeJiraSourceArtifacts(paths, issue);
+        const groupId = options.group ?? defaultTaskIdForIssue(issue.key);
+        const repoSpecs = parseGroupCreateRepoSpecs(options.repo);
+        const plannedRepos = preflightGroupCreateRepos(paths, groupId, repoSpecs);
+        const goal = buildJiraGroupGoal(issue, artifacts.markdownPath);
+        const created = createGroup(paths, groupId, { goal });
+        console.log(`Fetched ${issue.key}: ${issue.summary}`);
+        console.log(`Source: ${artifacts.markdownPath}`);
+        console.log(`Created group ${created.id}`);
+
+        for (const repo of plannedRepos) {
+          initializeStore(repo.paths);
+          const meta = await createTask(repo.paths, repo.taskId, {
+            goal: buildJiraGroupRepoGoal(issue, groupId, repo.name, artifacts.markdownPath)
+          });
+          addRepoToGroup(paths, groupId, {
+            name: repo.name,
+            repoPath: repo.paths.root,
+            taskId: meta.id
+          });
+          console.log(`Added ${repo.name}`);
           console.log(`Repo: ${repo.paths.root}`);
           console.log(`Task: ${meta.id}`);
           console.log(`Worktree: ${meta.worktreePath}`);
@@ -1965,6 +2108,25 @@ function parseGroupCreateRepoSpecs(values: string[]): GroupCreateRepoSpec[] {
       taskId: value.slice(colonIndex + 1)
     };
   });
+}
+
+function defaultTaskIdForIssue(issueKey: string): string {
+  return issueKey.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+}
+
+function buildJiraGroupGoal(issue: JiraIssue, sourcePath: string): string {
+  return [
+    `Implement Jira issue ${issue.key}: ${issue.summary}`,
+    "",
+    `Jira source artifact: ${sourcePath}`,
+    `Jira URL: ${issue.url}`,
+    "",
+    "This is a multi-repo devtask group. Each repo task should inspect its own repository, implement only its scoped part, and keep changes aligned with the Jira issue.",
+    "",
+    "## Jira Issue",
+    "",
+    renderJiraIssueMarkdown(issue).trim()
+  ].join("\n");
 }
 
 function preflightGroupCreateRepos(
