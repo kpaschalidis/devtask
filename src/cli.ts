@@ -36,7 +36,7 @@ import {
   preflightScmForPullRequest,
   type ScmPreflight
 } from "./scm.js";
-import { recordStage } from "./stage-contracts.js";
+import { recordStage, runStage } from "./stage-contracts.js";
 
 interface PrOptions {
   title?: string;
@@ -2300,43 +2300,46 @@ async function planTask(paths: ReturnType<typeof resolvePaths>, id: string): Pro
   }
 
   const config = readConfig(paths);
-  recordStage(paths, id, "plan", {
-    status: "running",
+  const record = await runStage(paths, id, "plan", {
     input: {
       taskPath: meta.taskPath,
       worktreePath: meta.worktreePath,
       model: meta.model ?? config.codex.model
     },
     artifacts: [planMarkdownPath(paths, id)]
-  });
-  console.log(`Running planning agent in ${meta.worktreePath}`);
-  const record = await runPlanAgent(paths, meta, {
-    model: meta.model ?? config.codex.model,
-    fullAuto: config.codex.fullAuto,
-    onStart: (start) => {
-      console.log(`Prompt: ${start.promptPath}`);
-      console.log(`Plan: ${start.planPath}`);
-      console.log(`Output: ${start.outputPath}`);
-      console.log(`Command: ${start.command}`);
-    },
-    onStdout: (chunk) => {
-      process.stdout.write(chunk);
-    },
-    onStderr: (chunk) => {
-      process.stderr.write(chunk);
-    }
-  });
-  recordStage(paths, id, "plan", {
-    status: record.worktreeChanged ? "failed" : record.status === "planned" ? "passed" : record.status,
-    output: {
-      planId: record.planId,
-      exitCode: record.exitCode,
-      worktreeChanged: record.worktreeChanged,
-      planPath: record.planPath,
-      outputPath: record.outputPath
-    },
-    artifacts: [record.planPath, record.outputPath],
-    reason: record.worktreeChanged ? "planning changed the task worktree" : record.status === "failed" ? "planning agent failed" : null
+  }, async () => {
+    console.log(`Running planning agent in ${meta.worktreePath}`);
+    const planRecord = await runPlanAgent(paths, meta, {
+      model: meta.model ?? config.codex.model,
+      fullAuto: config.codex.fullAuto,
+      onStart: (start) => {
+        console.log(`Prompt: ${start.promptPath}`);
+        console.log(`Plan: ${start.planPath}`);
+        console.log(`Output: ${start.outputPath}`);
+        console.log(`Command: ${start.command}`);
+      },
+      onStdout: (chunk) => {
+        process.stdout.write(chunk);
+      },
+      onStderr: (chunk) => {
+        process.stderr.write(chunk);
+      }
+    });
+    return {
+      result: planRecord,
+      final: {
+        status: planRecord.worktreeChanged ? "failed" : planRecord.status === "planned" ? "passed" : planRecord.status,
+        output: {
+          planId: planRecord.planId,
+          exitCode: planRecord.exitCode,
+          worktreeChanged: planRecord.worktreeChanged,
+          planPath: planRecord.planPath,
+          outputPath: planRecord.outputPath
+        },
+        artifacts: [planRecord.planPath, planRecord.outputPath],
+        reason: planRecord.worktreeChanged ? "planning changed the task worktree" : planRecord.status === "failed" ? "planning agent failed" : null
+      }
+    };
   });
   console.log(`Plan: ${record.status}`);
   console.log(`File: ${record.planPath}`);
@@ -2363,29 +2366,32 @@ async function checkTask(
     throw new DevtaskError("No check commands configured. Use devtask config check <command...>");
   }
 
-  recordStage(paths, id, "check", {
-    status: "running",
+  console.log(`Running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"} in ${meta.worktreePath}`);
+  const record = await runStage(paths, id, "check", {
     input: {
       commands: config.verify,
       worktreePath: meta.worktreePath
     }
-  });
-  console.log(`Running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"} in ${meta.worktreePath}`);
-  const record = await runVerification(paths, meta, config.verify, {
-    onStepStart: (command, index, total) => {
-      console.log(`[${index}/${total}] ${command}`);
-    }
-  });
-  recordStage(paths, id, "check", {
-    status: record.status,
-    output: {
-      verificationId: record.verificationId,
-      steps: record.steps.map((step) => ({
-        command: step.command,
-        exitCode: step.exitCode
-      }))
-    },
-    reason: record.status === "failed" ? "one or more check commands failed" : null
+  }, async () => {
+    const verificationRecord = await runVerification(paths, meta, config.verify, {
+      onStepStart: (command, index, total) => {
+        console.log(`[${index}/${total}] ${command}`);
+      }
+    });
+    return {
+      result: verificationRecord,
+      final: {
+        status: verificationRecord.status,
+        output: {
+          verificationId: verificationRecord.verificationId,
+          steps: verificationRecord.steps.map((step) => ({
+            command: step.command,
+            exitCode: step.exitCode
+          }))
+        },
+        reason: verificationRecord.status === "failed" ? "one or more check commands failed" : null
+      }
+    };
   });
   console.log(`Check: ${record.status}`);
   for (const step of record.steps) {
@@ -2411,39 +2417,42 @@ async function reviewTask(
   }
 
   const config = readConfig(paths);
-  recordStage(paths, id, "review", {
-    status: "running",
+  console.log(`Running review agent in ${meta.worktreePath}`);
+  const record = await runStage(paths, id, "review", {
     input: {
       worktreePath: meta.worktreePath,
       model: meta.model ?? config.codex.model,
       planPath: planMarkdownPath(paths, id)
     }
-  });
-  console.log(`Running review agent in ${meta.worktreePath}`);
-  const record = await runReviewAgent(paths, meta, {
-    model: meta.model ?? config.codex.model,
-    fullAuto: config.codex.fullAuto,
-    onStart: (start) => {
-      console.log(`Prompt: ${start.promptPath}`);
-      console.log(`Output: ${start.outputPath}`);
-      console.log(`Command: ${start.command}`);
-    },
-    onStdout: (chunk) => {
-      process.stdout.write(chunk);
-    },
-    onStderr: (chunk) => {
-      process.stderr.write(chunk);
-    }
-  });
-  recordStage(paths, id, "review", {
-    status: record.status,
-    output: {
-      reviewId: record.reviewId,
-      exitCode: record.exitCode,
-      outputPath: record.outputPath
-    },
-    artifacts: [record.outputPath],
-    reason: record.status === "passed" ? null : `review agent ${record.status}`
+  }, async () => {
+    const reviewRecord = await runReviewAgent(paths, meta, {
+      model: meta.model ?? config.codex.model,
+      fullAuto: config.codex.fullAuto,
+      onStart: (start) => {
+        console.log(`Prompt: ${start.promptPath}`);
+        console.log(`Output: ${start.outputPath}`);
+        console.log(`Command: ${start.command}`);
+      },
+      onStdout: (chunk) => {
+        process.stdout.write(chunk);
+      },
+      onStderr: (chunk) => {
+        process.stderr.write(chunk);
+      }
+    });
+    return {
+      result: reviewRecord,
+      final: {
+        status: reviewRecord.status,
+        output: {
+          reviewId: reviewRecord.reviewId,
+          exitCode: reviewRecord.exitCode,
+          outputPath: reviewRecord.outputPath
+        },
+        artifacts: [reviewRecord.outputPath],
+        reason: reviewRecord.status === "passed" ? null : `review agent ${reviewRecord.status}`
+      }
+    };
   });
   console.log(`Review agent: ${record.status}`);
   console.log(`Output: ${record.outputPath}`);
@@ -2477,33 +2486,36 @@ async function openPrForTask(
     throw new DevtaskError(`Task ${id} has no branch commits to publish. Run devtask commit ${id} first.`);
   }
 
-  recordStage(paths, id, "pr", {
-    status: "running",
+  const prUrl = await runStage(paths, id, "pr", {
     input: {
       title: options.title ?? meta.id,
       draft,
       commitCount,
       worktreePath: meta.worktreePath
     }
-  });
-  const prUrl = await createPullRequest(meta, {
-    title: options.title ?? meta.id,
-    body: options.body ?? defaultPrBody(meta),
-    draft
-  });
-
-  writeTaskMeta(taskMetaPath(paths, id), {
-    ...meta,
-    status: "pr-open",
-    prUrl,
-    updatedAt: new Date().toISOString()
-  });
-  recordStage(paths, id, "pr", {
-    status: "passed",
-    output: {
-      prUrl,
+  }, async () => {
+    const openedPrUrl = await createPullRequest(meta, {
+      title: options.title ?? meta.id,
+      body: options.body ?? defaultPrBody(meta),
       draft
-    }
+    });
+
+    writeTaskMeta(taskMetaPath(paths, id), {
+      ...meta,
+      status: "pr-open",
+      prUrl: openedPrUrl,
+      updatedAt: new Date().toISOString()
+    });
+    return {
+      result: openedPrUrl,
+      final: {
+        status: "passed",
+        output: {
+          prUrl: openedPrUrl,
+          draft
+        }
+      }
+    };
   });
   console.log(prUrl);
   return prUrl;
@@ -2534,23 +2546,26 @@ async function commitTask(
   }
 
   const message = options.message ?? meta.id;
-  recordStage(paths, id, "commit", {
-    status: "running",
+  await runStage(paths, id, "commit", {
     input: {
       message,
       worktreePath: meta.worktreePath
     }
-  });
-  await runCommandOrThrow("git", ["commit", "-m", message], { cwd: meta.worktreePath });
-  writeTaskMeta(taskMetaPath(paths, id), {
-    ...meta,
-    updatedAt: new Date().toISOString()
-  });
-  recordStage(paths, id, "commit", {
-    status: "passed",
-    output: {
-      message
-    }
+  }, async () => {
+    await runCommandOrThrow("git", ["commit", "-m", message], { cwd: meta.worktreePath });
+    writeTaskMeta(taskMetaPath(paths, id), {
+      ...meta,
+      updatedAt: new Date().toISOString()
+    });
+    return {
+      result: undefined,
+      final: {
+        status: "passed",
+        output: {
+          message
+        }
+      }
+    };
   });
   console.log(`Committed ${id}`);
 }
@@ -2602,43 +2617,87 @@ function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options
     updatedAt: new Date().toISOString()
   };
   writeTaskMeta(taskMetaPath(paths, id), next);
+  const runInput = {
+    command: meta.command,
+    worktreePath: meta.worktreePath,
+    mode: options.tmux ? "attachable" : "plain",
+    tmuxSession: next.tmuxSession
+  };
   recordStage(paths, id, "run", {
     status: "running",
-    input: {
-      command: meta.command,
-      worktreePath: meta.worktreePath,
-      mode: options.tmux ? "attachable" : "plain",
-      tmuxSession: next.tmuxSession
-    }
+    input: runInput
   });
+
+  const rollbackStartFailure = (error: unknown): never => {
+    writeTaskMeta(taskMetaPath(paths, id), {
+      ...meta,
+      updatedAt: new Date().toISOString()
+    });
+    recordStage(paths, id, "run", {
+      status: "failed",
+      input: runInput,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  };
 
   const workerPath = fileURLToPath(new URL("./bin/devtask-worker.js", import.meta.url));
   const workerCommand = [process.execPath, workerPath, id, "--root", paths.root];
 
   if (options.tmux) {
-    if (!next.tmuxSession) {
-      throw new DevtaskError("Unable to derive tmux session name");
+    const session = next.tmuxSession;
+    if (!session) {
+      return rollbackStartFailure(new DevtaskError("Unable to derive tmux session name"));
     }
 
-    startTmuxSession(next.tmuxSession, workerCommand, paths.root);
-    return { pid: null, tmuxSession: next.tmuxSession };
+    try {
+      startTmuxSession(session, workerCommand, paths.root);
+    } catch (error) {
+      rollbackStartFailure(error);
+    }
+    return { pid: null, tmuxSession: session };
   }
 
-  const child = spawn(process.execPath, [workerPath, id, "--root", paths.root], {
-    cwd: paths.root,
-    detached: true,
-    stdio: "ignore"
+  let child: ReturnType<typeof spawn> | null = null;
+  try {
+    child = spawn(process.execPath, [workerPath, id, "--root", paths.root], {
+      cwd: paths.root,
+      detached: true,
+      stdio: "ignore"
+    });
+  } catch (error) {
+    rollbackStartFailure(error);
+  }
+
+  const startedChild = child;
+  if (!startedChild || startedChild.pid === undefined) {
+    return rollbackStartFailure(new DevtaskError("Failed to start worker process"));
+  }
+  const childPid: number = startedChild.pid;
+  startedChild.once("error", (error) => {
+    const current = getTask(paths, id);
+    if (current.status === "running" && current.supervisorPid === childPid) {
+      writeTaskMeta(taskMetaPath(paths, id), {
+        ...meta,
+        updatedAt: new Date().toISOString()
+      });
+    }
+    recordStage(paths, id, "run", {
+      status: "failed",
+      input: runInput,
+      reason: error.message
+    });
   });
-  child.unref();
+  startedChild.unref();
 
   writeTaskMeta(taskMetaPath(paths, id), {
     ...next,
-    supervisorPid: child.pid ?? null,
+    supervisorPid: childPid,
     tmuxSession: null,
     updatedAt: new Date().toISOString()
   });
 
-  return { pid: child.pid ?? null, tmuxSession: null };
+  return { pid: childPid, tmuxSession: null };
 }
 
 function parsePositiveInteger(value: string): number {

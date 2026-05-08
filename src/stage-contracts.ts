@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./paths.js";
 import { taskDir } from "./paths.js";
+import { DevtaskError } from "./errors.js";
 
 export const STAGE_NAMES = ["plan", "run", "check", "review", "approve", "commit", "pr", "ci"] as const;
 
@@ -50,8 +51,12 @@ export function readStageLedger(paths: DevtaskPaths, id: string): StageLedger {
       updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date(0).toISOString(),
       stages: parseStages(value.stages)
     };
-  } catch {
-    return emptyLedger(id);
+  } catch (error) {
+    const quarantinePath = `${filePath}.corrupt.${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    fs.renameSync(filePath, quarantinePath);
+    throw new DevtaskError(
+      `Stage ledger for task ${id} is corrupt and was moved to ${quarantinePath}: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -59,15 +64,16 @@ export function recordStage(paths: DevtaskPaths, id: string, stage: StageName, u
   const ledger = readStageLedger(paths, id);
   const now = new Date().toISOString();
   const previous = ledger.stages[stage];
+  const isNewAttempt = update.status === "running";
   const next: StageContract = {
     stage,
     status: update.status,
-    startedAt: update.startedAt === undefined ? previous?.startedAt ?? (update.status === "running" ? now : null) : update.startedAt,
+    startedAt: update.startedAt === undefined ? (isNewAttempt ? now : previous?.startedAt ?? null) : update.startedAt,
     finishedAt: update.finishedAt === undefined ? (update.status === "running" ? null : now) : update.finishedAt,
-    input: update.input ?? previous?.input ?? {},
-    output: update.output ?? previous?.output ?? {},
-    artifacts: update.artifacts ?? previous?.artifacts ?? [],
-    reason: update.reason === undefined ? previous?.reason ?? null : update.reason
+    input: update.input ?? (isNewAttempt ? {} : previous?.input ?? {}),
+    output: update.output ?? (isNewAttempt ? {} : previous?.output ?? {}),
+    artifacts: update.artifacts ?? (isNewAttempt ? [] : previous?.artifacts ?? []),
+    reason: update.reason === undefined ? (isNewAttempt ? null : previous?.reason ?? null) : update.reason
   };
 
   const nextLedger: StageLedger = {
@@ -83,6 +89,33 @@ export function recordStage(paths: DevtaskPaths, id: string, stage: StageName, u
   fs.mkdirSync(taskDir(paths, id), { recursive: true });
   fs.writeFileSync(stageLedgerPath(paths, id), `${JSON.stringify(nextLedger, null, 2)}\n`);
   return next;
+}
+
+export async function runStage<T>(
+  paths: DevtaskPaths,
+  id: string,
+  stage: StageName,
+  start: Omit<StageUpdate, "status">,
+  run: () => Promise<{ result: T; final: StageUpdate }>
+): Promise<T> {
+  recordStage(paths, id, stage, {
+    ...start,
+    status: "running"
+  });
+
+  try {
+    const { result, final } = await run();
+    recordStage(paths, id, stage, final);
+    return result;
+  } catch (error) {
+    recordStage(paths, id, stage, {
+      status: "failed",
+      input: start.input,
+      artifacts: start.artifacts,
+      reason: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 }
 
 export function stageLedgerPath(paths: DevtaskPaths, id: string): string {

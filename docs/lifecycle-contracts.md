@@ -37,6 +37,8 @@ This file is the normalized stage ledger. It stores the latest status, inputs, o
 
 The richer stage artifacts still remain in their stage-specific locations, for example `plans/`, `runs/`, `verifications/`, and `reviews/`. `stages.json` is the small machine-readable contract that lets `board`, `next`, and `advance` reason about the task without scraping logs or provider output.
 
+During the transition to stage contracts, existing rich artifacts remain authoritative for their detailed payloads. The CLI hydrates task inspection from both sources: stage-specific artifacts provide backward compatibility and detail, while `stages.json` provides the normalized latest stage state. New automation should write terminal stage states atomically rather than leaving stages in `running`.
+
 ## Stage Contracts
 
 ### Create
