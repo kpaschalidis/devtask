@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { DevtaskPaths } from "./paths.js";
 import { DevtaskError } from "./errors.js";
@@ -14,8 +16,13 @@ export function tmuxSessionName(paths: DevtaskPaths, taskId: string): string {
 export function assertTmuxAvailable(): void {
   const result = spawnSync("tmux", ["-V"], { stdio: "ignore" });
   if (result.error || result.status !== 0) {
-    throw new DevtaskError("tmux is not available. Install tmux or start without --tmux.");
+    throw new DevtaskError("tmux is not available. Install tmux or run in plain mode.");
   }
+}
+
+export function isTmuxAvailable(): boolean {
+  const result = spawnSync("tmux", ["-V"], { stdio: "ignore" });
+  return !result.error && result.status === 0;
 }
 
 export function tmuxSessionExists(session: string): boolean {
@@ -61,4 +68,60 @@ export function killTmuxSession(session: string): void {
   if (result.error || result.status !== 0) {
     throw new DevtaskError(`Failed to kill tmux session ${session}`);
   }
+}
+
+export function captureTmuxSession(session: string, lines = 30): string {
+  assertTmuxAvailable();
+  if (!tmuxSessionExists(session)) {
+    throw new DevtaskError(`tmux session ${session} does not exist`);
+  }
+
+  const result = spawnSync("tmux", ["capture-pane", "-t", session, "-p", "-S", `-${lines}`], {
+    encoding: "utf8"
+  });
+  if (result.error || result.status !== 0) {
+    throw new DevtaskError(`Failed to capture tmux session ${session}`);
+  }
+  return result.stdout;
+}
+
+export function sendToTmuxSession(session: string, message: string): void {
+  assertTmuxAvailable();
+  if (!tmuxSessionExists(session)) {
+    throw new DevtaskError(`tmux session ${session} does not exist`);
+  }
+
+  runTmux(["send-keys", "-t", session, "C-u"], `Failed to clear tmux session ${session}`);
+
+  if (message.includes("\n") || message.length > 200) {
+    const bufferName = `devtask-${crypto.randomUUID()}`;
+    const tmpPath = path.join(os.tmpdir(), `devtask-send-${crypto.randomUUID()}.txt`);
+    fs.writeFileSync(tmpPath, message, { encoding: "utf8", mode: 0o600 });
+    try {
+      runTmux(["load-buffer", "-b", bufferName, tmpPath], `Failed to load tmux buffer for ${session}`);
+      runTmux(["paste-buffer", "-b", bufferName, "-t", session, "-d"], `Failed to paste tmux buffer into ${session}`);
+    } finally {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {
+        // ignore cleanup failure
+      }
+      runTmuxBestEffort(["delete-buffer", "-b", bufferName]);
+    }
+  } else {
+    runTmux(["send-keys", "-t", session, "-l", message], `Failed to send message to tmux session ${session}`);
+  }
+
+  runTmux(["send-keys", "-t", session, "Enter"], `Failed to submit message to tmux session ${session}`);
+}
+
+function runTmux(args: string[], errorMessage: string): void {
+  const result = spawnSync("tmux", args, { stdio: "ignore" });
+  if (result.error || result.status !== 0) {
+    throw new DevtaskError(errorMessage);
+  }
+}
+
+function runTmuxBestEffort(args: string[]): void {
+  spawnSync("tmux", args, { stdio: "ignore" });
 }

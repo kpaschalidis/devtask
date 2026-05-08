@@ -9,6 +9,10 @@ const config: DevtaskConfig = {
     model: null,
     fullAuto: true
   },
+  runtime: {
+    mode: "plain",
+    backend: null
+  },
   verify: ["npm test"]
 };
 

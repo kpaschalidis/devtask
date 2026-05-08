@@ -7,6 +7,10 @@ export interface DevtaskConfig {
     model: string | null;
     fullAuto: boolean;
   };
+  runtime: {
+    mode: "attachable" | "plain";
+    backend: "tmux" | null;
+  };
   verify: string[];
 }
 
@@ -15,6 +19,10 @@ export const DEFAULT_CONFIG: DevtaskConfig = {
   codex: {
     model: null,
     fullAuto: true
+  },
+  runtime: {
+    mode: "plain",
+    backend: null
   },
   verify: []
 };
@@ -31,8 +39,26 @@ export function readConfig(paths: DevtaskPaths): DevtaskConfig {
       model: typeof value.codex?.model === "string" ? value.codex.model : null,
       fullAuto: typeof value.codex?.fullAuto === "boolean" ? value.codex.fullAuto : true
     },
+    runtime: parseRuntimeConfig(value.runtime),
     verify: Array.isArray(value.verify) ? value.verify.filter((item): item is string => typeof item === "string") : []
   };
+}
+
+export function hasRuntimeConfig(paths: DevtaskPaths): boolean {
+  if (!fs.existsSync(paths.configPath)) {
+    return false;
+  }
+
+  try {
+    const value = JSON.parse(fs.readFileSync(paths.configPath, "utf8")) as { runtime?: unknown };
+    if (typeof value.runtime !== "object" || value.runtime === null || Array.isArray(value.runtime)) {
+      return false;
+    }
+    const runtime = value.runtime as { mode?: unknown; backend?: unknown };
+    return (runtime.mode === "attachable" && runtime.backend === "tmux") || (runtime.mode === "plain" && runtime.backend === null);
+  } catch {
+    return false;
+  }
 }
 
 export function writeConfig(paths: DevtaskPaths, config: DevtaskConfig): void {
@@ -59,4 +85,23 @@ function shellQuote(value: string): string {
   }
 
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function parseRuntimeConfig(value: unknown): DevtaskConfig["runtime"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_CONFIG.runtime;
+  }
+
+  const record = value as { mode?: unknown; backend?: unknown };
+  if (record.mode === "attachable" && record.backend === "tmux") {
+    return {
+      mode: "attachable",
+      backend: "tmux"
+    };
+  }
+
+  return {
+    mode: "plain",
+    backend: null
+  };
 }

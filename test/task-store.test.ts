@@ -23,6 +23,10 @@ describe("task store", () => {
         model: null,
         fullAuto: true
       },
+      runtime: {
+        mode: "plain",
+        backend: null
+      },
       verify: []
     });
   });
@@ -70,6 +74,10 @@ describe("task store", () => {
       codex: {
         model: "gpt-5.2",
         fullAuto: true
+      },
+      runtime: {
+        mode: "plain",
+        backend: null
       },
       verify: []
     });

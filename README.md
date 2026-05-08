@@ -24,7 +24,7 @@ One installed `devtask` command can be used across all of your local repositorie
 - GitHub CLI (`gh`) installed and authenticated for GitHub `devtask pr` and `devtask ci`.
 - Bitbucket Cloud PR creation requires `BITBUCKET_EMAIL` and `BITBUCKET_API_TOKEN`.
 - GitLab PR creation requires GitLab CLI (`glab`) installed and authenticated.
-- tmux installed only if you want attachable task sessions with `devtask run --tmux`.
+- tmux recommended for the default attachable runtime, `devtask attach`, and `devtask steer`.
 
 See [Auth And Environment](docs/auth-and-environment.md) for provider auth, environment variables, and optional tools. See [Lifecycle Contracts](docs/lifecycle-contracts.md) for the stage model behind `create`, `run`, `check`, `review`, `approve`, `commit`, `pr`, `ci`, and group workflows.
 
@@ -56,6 +56,8 @@ devtask create fix-login \
 
 devtask plan fix-login
 devtask run fix-login
+devtask attach fix-login
+devtask steer fix-login "Use the existing middleware pattern."
 
 devtask list
 devtask board
@@ -94,6 +96,21 @@ devtask pr fix-login
 `devtask inspect` summarizes task metadata, the latest run, latest checks, latest review artifact, current worktree changes, and `result.json`. It is the command to use when a worker stops, reaches `review`, or you want to decide whether to check, review, merge, continue, or discard the task worktree.
 
 `devtask plan` runs a planning-only agent and writes `.devtask/tasks/<id>/plan.md`. It is useful before implementation, and `devtask run` includes the plan in the worker prompt when one exists.
+
+By default, `devtask run` uses an attachable tmux runtime when tmux is available during `devtask init`. The command still returns immediately, but the live agent can be entered or steered later:
+
+```bash
+devtask attach fix-login
+devtask steer fix-login "Adjust the implementation before continuing."
+```
+
+If tmux is not installed, devtask configures plain mode. Plain mode can run background workers, but live `attach` and `steer` are unavailable:
+
+```bash
+devtask config runtime
+devtask config runtime attachable
+devtask run fix-login --plain
+```
 
 `devtask check` runs deterministic commands configured with `devtask config check`, such as tests, typecheck, and lint.
 
@@ -136,11 +153,11 @@ Common states:
 - `pr-open`: a GitHub PR exists
 - `ci-passed` / `ci-failed`: PR checks were inspected
 
-Run a task inside tmux when you want an attachable terminal:
+Attach to a live task or send steering feedback:
 
 ```bash
-devtask run fix-login --tmux
 devtask attach fix-login
+devtask steer fix-login "Keep the change scoped to the API layer."
 ```
 
 Pause future runs without killing the current command:

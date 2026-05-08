@@ -9,8 +9,16 @@ import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, initializeWorkspace, listTasks } from "./task-store.js";
 import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-inspection.js";
-import { attachTmuxSession, killTmuxSession, startTmuxSession, tmuxSessionName } from "./tmux.js";
-import { buildCodexCommand, readConfig, writeConfig } from "./config.js";
+import {
+  attachTmuxSession,
+  captureTmuxSession,
+  isTmuxAvailable,
+  killTmuxSession,
+  sendToTmuxSession,
+  startTmuxSession,
+  tmuxSessionName
+} from "./tmux.js";
+import { buildCodexCommand, hasRuntimeConfig, readConfig, writeConfig } from "./config.js";
 import { assertCanMark, parseManualStatus } from "./lifecycle.js";
 import { runVerification } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
@@ -76,8 +84,14 @@ export function createCli(): Command {
         }
 
         const paths = resolvePaths();
+        const shouldConfigureRuntime = !hasRuntimeConfig(paths);
         initializeStore(paths);
         console.log(`Initialized ${paths.baseDir}`);
+        if (shouldConfigureRuntime) {
+          configureRuntimeFromEnvironment(paths);
+        } else {
+          console.log(`Runtime: ${formatRuntime(readConfig(paths))}`);
+        }
       } catch (error) {
         printError(error);
       }
@@ -93,6 +107,32 @@ export function createCli(): Command {
         const paths = resolvePaths();
         initializeStore(paths);
         console.log(JSON.stringify(readConfig(paths), null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  config
+    .command("runtime")
+    .description("Show or update the task runtime mode.")
+    .argument("[mode]", "attachable or plain")
+    .action((mode?: string) => {
+      try {
+        const paths = resolvePaths();
+        initializeStore(paths);
+        const current = readConfig(paths);
+
+        if (!mode) {
+          console.log(formatRuntime(current));
+          return;
+        }
+
+        const runtime = parseRuntimeMode(mode);
+        writeConfig(paths, {
+          ...current,
+          runtime
+        });
+        console.log(`Runtime: ${formatRuntime({ ...current, runtime })}`);
       } catch (error) {
         printError(error);
       }
@@ -364,7 +404,17 @@ export function createCli(): Command {
     .action(() => {
       try {
         const paths = resolvePaths();
+        const config = readConfig(paths);
         const issues = listTasks(paths).flatMap((summary) => inspectTaskHealth(getTask(paths, summary.id)));
+
+        console.log(`Runtime: ${formatRuntime(config)}`);
+        console.log(`tmux: ${isTmuxAvailable() ? "available" : "missing"}`);
+        if (config.runtime.mode === "plain") {
+          console.log("attach: unavailable");
+          console.log("steer: unavailable");
+          console.log("Fix: install tmux and run devtask config runtime attachable");
+          console.log("");
+        }
 
         if (issues.length === 0) {
           console.log("No issues found");
@@ -1127,7 +1177,7 @@ export function createCli(): Command {
             console.log(`${repo.name}/${repo.taskId}: skipped (${meta.status})`);
             continue;
           }
-          printStartedWorker(`${repo.name}/${repo.taskId}`, startWorker(repoPaths, repo.taskId), "Running");
+          printStartedWorker(`${repo.name}/${repo.taskId}`, startWorker(repoPaths, repo.taskId, resolveRunRuntime(repoPaths, {})), "Running");
         }
       } catch (error) {
         printError(error);
@@ -1427,12 +1477,12 @@ export function createCli(): Command {
             await planTask(paths, id);
             return;
           case "run": {
-            printStartedWorker(id, startWorker(paths, id), "Running");
+            printStartedWorker(id, startWorker(paths, id, resolveRunRuntime(paths, {})), "Running");
             return;
           }
           case "continue": {
             const meta = getTask(paths, id);
-            printStartedWorker(id, startWorker(paths, id, { tmux: meta.tmuxSession !== null }), "Continuing");
+            printStartedWorker(id, startWorker(paths, id, meta.tmuxSession ? { tmux: true } : resolveRunRuntime(paths, {})), "Continuing");
             return;
           }
           case "check":
@@ -1459,11 +1509,13 @@ export function createCli(): Command {
     .command("run")
     .description("Run or continue a task worker in the background.")
     .argument("<id>")
-    .option("--tmux", "Run the worker inside a tmux session")
-    .action((id: string, options: { tmux?: boolean }) => {
+    .option("--attachable", "Run the worker inside an attachable tmux session")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run the worker as a plain detached background process")
+    .action((id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
       try {
         const paths = resolvePaths();
-        const started = startWorker(paths, id, { tmux: options.tmux === true });
+        const started = startWorker(paths, id, resolveRunRuntime(paths, options));
         printStartedWorker(id, started, "Running");
       } catch (error) {
         printError(error);
@@ -1507,8 +1559,35 @@ export function createCli(): Command {
           throw new DevtaskError(`Task ${id} is done and cannot be continued`);
         }
 
-        const started = startWorker(paths, id, { tmux: meta.tmuxSession !== null });
+        const started = startWorker(paths, id, meta.tmuxSession ? { tmux: true } : resolveRunRuntime(paths, {}));
         printStartedWorker(id, started, "Continuing");
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
+    .command("steer")
+    .description("Send live feedback to a running attachable task session.")
+    .argument("<id>")
+    .argument("[message...]")
+    .option("-f, --file <path>", "Read feedback from a file")
+    .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
+    .action((id: string, messageParts: string[], options: { file?: string; lines: number }) => {
+      try {
+        const paths = resolvePaths();
+        const meta = getTask(paths, id);
+        if (!meta.tmuxSession) {
+          throw new DevtaskError(`Task ${id} is not running in an attachable session. Use devtask run ${id} after configuring attachable runtime.`);
+        }
+        const message = readSteerMessage(paths.root, options.file, messageParts);
+        sendToTmuxSession(meta.tmuxSession, message);
+        console.log("Message sent");
+        const output = captureTmuxSession(meta.tmuxSession, options.lines);
+        if (output.trim()) {
+          console.log("");
+          console.log(output.trimEnd());
+        }
       } catch (error) {
         printError(error);
       }
@@ -1574,8 +1653,11 @@ function printStartedWorker(id: string, started: StartedWorker, verb: "Running" 
   console.log(`${verb} task ${id}`);
   if (started.tmuxSession) {
     console.log(`tmux: ${started.tmuxSession}`);
+    console.log(`Attach: devtask attach ${id}`);
+    console.log(`Steer: devtask steer ${id} "message"`);
     return;
   }
+  console.log("Runtime: plain (attach/steer unavailable)");
   console.log(`Supervisor PID: ${started.pid ?? "-"}`);
 }
 
@@ -1587,6 +1669,112 @@ function printNextAction(id: string, next: NextAction): void {
   } else {
     console.log("  Next: -");
   }
+}
+
+function configureRuntimeFromEnvironment(paths: ReturnType<typeof resolvePaths>): void {
+  const current = readConfig(paths);
+  if (isTmuxAvailable()) {
+    writeConfig(paths, {
+      ...current,
+      runtime: {
+        mode: "attachable",
+        backend: "tmux"
+      }
+    });
+    console.log("Runtime: attachable (tmux)");
+    return;
+  }
+
+  writeConfig(paths, {
+    ...current,
+    runtime: {
+      mode: "plain",
+      backend: null
+    }
+  });
+  console.log("Runtime: plain");
+  console.log("tmux is not installed. devtask can still run tasks in plain background mode, but attach and steer will not be available.");
+  console.log("Install tmux, then run: devtask config runtime attachable");
+}
+
+function parseRuntimeMode(mode: string): ReturnType<typeof readConfig>["runtime"] {
+  if (mode === "attachable") {
+    if (!isTmuxAvailable()) {
+      throw new DevtaskError("tmux is not available. Install tmux before enabling attachable runtime.");
+    }
+    return {
+      mode: "attachable",
+      backend: "tmux"
+    };
+  }
+
+  if (mode === "plain") {
+    return {
+      mode: "plain",
+      backend: null
+    };
+  }
+
+  throw new DevtaskError('Invalid runtime mode. Use "attachable" or "plain".');
+}
+
+function formatRuntime(config: ReturnType<typeof readConfig>): string {
+  return config.runtime.mode === "attachable" ? "attachable (tmux)" : "plain";
+}
+
+function resolveRunRuntime(
+  paths: ReturnType<typeof resolvePaths>,
+  options: { attachable?: boolean; tmux?: boolean; plain?: boolean }
+): { tmux: boolean } {
+  const requestedAttachable = options.attachable === true || options.tmux === true;
+  if (options.plain === true && requestedAttachable) {
+    throw new DevtaskError("Use either --attachable/--tmux or --plain, not both");
+  }
+
+  if (options.plain === true) {
+    warnPlainRuntime();
+    return { tmux: false };
+  }
+
+  const config = readConfig(paths);
+  if (requestedAttachable || config.runtime.mode === "attachable") {
+    if (!isTmuxAvailable()) {
+      throw new DevtaskError("tmux is required for attachable sessions. Install tmux or run devtask run <id> --plain.");
+    }
+    return { tmux: true };
+  }
+
+  warnPlainRuntime();
+  return { tmux: false };
+}
+
+function warnPlainRuntime(): void {
+  console.log("Warning: running in plain mode. attach/steer will not be available.");
+  console.log("Install tmux and run: devtask config runtime attachable");
+}
+
+function readSteerMessage(root: string, filePath: string | undefined, messageParts: string[]): string {
+  if (filePath && messageParts.length > 0) {
+    throw new DevtaskError("Use either --file or an inline message, not both");
+  }
+
+  if (filePath) {
+    const resolved = path.resolve(root, filePath);
+    if (!fs.existsSync(resolved)) {
+      throw new DevtaskError(`Feedback file does not exist: ${resolved}`);
+    }
+    const content = fs.readFileSync(resolved, "utf8").trim();
+    if (!content) {
+      throw new DevtaskError(`Feedback file is empty: ${resolved}`);
+    }
+    return content;
+  }
+
+  const message = messageParts.join(" ").trim();
+  if (!message) {
+    throw new DevtaskError("No feedback message provided");
+  }
+  return message;
 }
 
 function printTable(headers: string[], rows: string[][]): void {
@@ -1995,11 +2183,11 @@ async function advanceTask(paths: ReturnType<typeof resolvePaths>, id: string, n
       await planTask(paths, id);
       return;
     case "run":
-      printStartedWorker(id, startWorker(paths, id), "Running");
+      printStartedWorker(id, startWorker(paths, id, resolveRunRuntime(paths, {})), "Running");
       return;
     case "continue": {
       const meta = getTask(paths, id);
-      printStartedWorker(id, startWorker(paths, id, { tmux: meta.tmuxSession !== null }), "Continuing");
+      printStartedWorker(id, startWorker(paths, id, meta.tmuxSession ? { tmux: true } : resolveRunRuntime(paths, {})), "Continuing");
       return;
     }
     case "check":

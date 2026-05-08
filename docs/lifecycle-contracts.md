@@ -103,6 +103,13 @@ Artifacts:
 
 The worker should commit completed work itself when it is confident, but V1 also provides `devtask commit` as a manual recovery path.
 
+Runtime behavior:
+
+- attachable mode uses tmux and is the preferred runtime when available
+- attachable tasks can be entered with `devtask attach <id>`
+- live feedback can be sent with `devtask steer <id> "message"`
+- plain mode is a degraded fallback and does not support live attach or steer
+
 ### Inspect
 
 `devtask inspect <id>` is the local decision point after a worker stops or when a task looks ambiguous.

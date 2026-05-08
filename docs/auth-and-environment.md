@@ -146,12 +146,15 @@ Draft GitLab merge requests are not supported yet. Use `--ready`.
 
 ### tmux
 
-Required only for attachable task sessions:
+Recommended for the default attachable runtime. When tmux is available during `devtask init`, `devtask run <task>` starts a detached but attachable session, so you can enter or steer the live agent later:
 
 ```bash
-devtask run <task> --tmux
+devtask run <task>
 devtask attach <task>
+devtask steer <task> "Use the existing project convention."
 ```
+
+If tmux is missing, devtask falls back to plain mode. Plain mode can run background workers, but `attach` and `steer` are unavailable.
 
 Quick check:
 
@@ -161,7 +164,7 @@ tmux -V
 
 ## Current Doctor Command
 
-`devtask doctor` currently inspects task metadata for stale process and filesystem state.
+`devtask doctor` inspects runtime configuration, tmux availability, and task metadata for stale process and filesystem state.
 
 ```bash
 devtask doctor
