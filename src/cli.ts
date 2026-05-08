@@ -36,6 +36,7 @@ import {
   preflightScmForPullRequest,
   type ScmPreflight
 } from "./scm.js";
+import { recordStage } from "./stage-contracts.js";
 
 interface PrOptions {
   title?: string;
@@ -2091,6 +2092,18 @@ async function approveTask(
   }
 
   markTask(paths, id, "approved");
+  recordStage(paths, id, "approve", {
+    status: "passed",
+    input: {
+      force: options.force,
+      issues
+    },
+    output: {
+      approved: true,
+      forced: issues.length > 0
+    },
+    reason: issues.length > 0 ? `forced: ${issues.join("; ")}` : null
+  });
   return issues.length > 0 ? `forced: ${issues.join("; ")}` : "policy passed";
 }
 
@@ -2287,6 +2300,15 @@ async function planTask(paths: ReturnType<typeof resolvePaths>, id: string): Pro
   }
 
   const config = readConfig(paths);
+  recordStage(paths, id, "plan", {
+    status: "running",
+    input: {
+      taskPath: meta.taskPath,
+      worktreePath: meta.worktreePath,
+      model: meta.model ?? config.codex.model
+    },
+    artifacts: [planMarkdownPath(paths, id)]
+  });
   console.log(`Running planning agent in ${meta.worktreePath}`);
   const record = await runPlanAgent(paths, meta, {
     model: meta.model ?? config.codex.model,
@@ -2303,6 +2325,18 @@ async function planTask(paths: ReturnType<typeof resolvePaths>, id: string): Pro
     onStderr: (chunk) => {
       process.stderr.write(chunk);
     }
+  });
+  recordStage(paths, id, "plan", {
+    status: record.worktreeChanged ? "failed" : record.status === "planned" ? "passed" : record.status,
+    output: {
+      planId: record.planId,
+      exitCode: record.exitCode,
+      worktreeChanged: record.worktreeChanged,
+      planPath: record.planPath,
+      outputPath: record.outputPath
+    },
+    artifacts: [record.planPath, record.outputPath],
+    reason: record.worktreeChanged ? "planning changed the task worktree" : record.status === "failed" ? "planning agent failed" : null
   });
   console.log(`Plan: ${record.status}`);
   console.log(`File: ${record.planPath}`);
@@ -2329,11 +2363,29 @@ async function checkTask(
     throw new DevtaskError("No check commands configured. Use devtask config check <command...>");
   }
 
+  recordStage(paths, id, "check", {
+    status: "running",
+    input: {
+      commands: config.verify,
+      worktreePath: meta.worktreePath
+    }
+  });
   console.log(`Running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"} in ${meta.worktreePath}`);
   const record = await runVerification(paths, meta, config.verify, {
     onStepStart: (command, index, total) => {
       console.log(`[${index}/${total}] ${command}`);
     }
+  });
+  recordStage(paths, id, "check", {
+    status: record.status,
+    output: {
+      verificationId: record.verificationId,
+      steps: record.steps.map((step) => ({
+        command: step.command,
+        exitCode: step.exitCode
+      }))
+    },
+    reason: record.status === "failed" ? "one or more check commands failed" : null
   });
   console.log(`Check: ${record.status}`);
   for (const step of record.steps) {
@@ -2359,6 +2411,14 @@ async function reviewTask(
   }
 
   const config = readConfig(paths);
+  recordStage(paths, id, "review", {
+    status: "running",
+    input: {
+      worktreePath: meta.worktreePath,
+      model: meta.model ?? config.codex.model,
+      planPath: planMarkdownPath(paths, id)
+    }
+  });
   console.log(`Running review agent in ${meta.worktreePath}`);
   const record = await runReviewAgent(paths, meta, {
     model: meta.model ?? config.codex.model,
@@ -2374,6 +2434,16 @@ async function reviewTask(
     onStderr: (chunk) => {
       process.stderr.write(chunk);
     }
+  });
+  recordStage(paths, id, "review", {
+    status: record.status,
+    output: {
+      reviewId: record.reviewId,
+      exitCode: record.exitCode,
+      outputPath: record.outputPath
+    },
+    artifacts: [record.outputPath],
+    reason: record.status === "passed" ? null : `review agent ${record.status}`
   });
   console.log(`Review agent: ${record.status}`);
   console.log(`Output: ${record.outputPath}`);
@@ -2407,6 +2477,15 @@ async function openPrForTask(
     throw new DevtaskError(`Task ${id} has no branch commits to publish. Run devtask commit ${id} first.`);
   }
 
+  recordStage(paths, id, "pr", {
+    status: "running",
+    input: {
+      title: options.title ?? meta.id,
+      draft,
+      commitCount,
+      worktreePath: meta.worktreePath
+    }
+  });
   const prUrl = await createPullRequest(meta, {
     title: options.title ?? meta.id,
     body: options.body ?? defaultPrBody(meta),
@@ -2418,6 +2497,13 @@ async function openPrForTask(
     status: "pr-open",
     prUrl,
     updatedAt: new Date().toISOString()
+  });
+  recordStage(paths, id, "pr", {
+    status: "passed",
+    output: {
+      prUrl,
+      draft
+    }
   });
   console.log(prUrl);
   return prUrl;
@@ -2436,15 +2522,35 @@ async function commitTask(
   await runCommandOrThrow("git", ["add", "-A"], { cwd: meta.worktreePath });
   const staged = await runCommand("git", ["diff", "--cached", "--quiet"], { cwd: meta.worktreePath });
   if (staged.exitCode === 0) {
+    recordStage(paths, id, "commit", {
+      status: "skipped",
+      input: {
+        worktreePath: meta.worktreePath
+      },
+      reason: "no staged changes"
+    });
     console.log(`No changes to commit for ${id}`);
     return;
   }
 
   const message = options.message ?? meta.id;
+  recordStage(paths, id, "commit", {
+    status: "running",
+    input: {
+      message,
+      worktreePath: meta.worktreePath
+    }
+  });
   await runCommandOrThrow("git", ["commit", "-m", message], { cwd: meta.worktreePath });
   writeTaskMeta(taskMetaPath(paths, id), {
     ...meta,
     updatedAt: new Date().toISOString()
+  });
+  recordStage(paths, id, "commit", {
+    status: "passed",
+    output: {
+      message
+    }
   });
   console.log(`Committed ${id}`);
 }
@@ -2460,6 +2566,16 @@ async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string
   process.stderr.write(result.stderr);
 
   const status = result.exitCode === 0 ? "ci-passed" : "ci-failed";
+  recordStage(paths, id, "ci", {
+    status: result.exitCode === 0 ? "passed" : "failed",
+    input: {
+      prUrl: meta.prUrl
+    },
+    output: {
+      exitCode: result.exitCode
+    },
+    reason: result.exitCode === 0 ? null : "CI command failed"
+  });
   writeTaskMeta(taskMetaPath(paths, id), {
     ...meta,
     status,
@@ -2486,6 +2602,15 @@ function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options
     updatedAt: new Date().toISOString()
   };
   writeTaskMeta(taskMetaPath(paths, id), next);
+  recordStage(paths, id, "run", {
+    status: "running",
+    input: {
+      command: meta.command,
+      worktreePath: meta.worktreePath,
+      mode: options.tmux ? "attachable" : "plain",
+      tmuxSession: next.tmuxSession
+    }
+  });
 
   const workerPath = fileURLToPath(new URL("./bin/devtask-worker.js", import.meta.url));
   const workerCommand = [process.execPath, workerPath, id, "--root", paths.root];

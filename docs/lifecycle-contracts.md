@@ -27,6 +27,16 @@
 | `ci` | CLI/provider | PR/MR URL | CI status record | passed, failed, or pending |
 | `cleanup` | CLI | task or group id | removed metadata/worktree | removed local task record |
 
+Every executable lifecycle stage also updates:
+
+```text
+.devtask/tasks/<id>/stages.json
+```
+
+This file is the normalized stage ledger. It stores the latest status, inputs, outputs, artifact paths, timestamps, and failure reason for `plan`, `run`, `check`, `review`, `approve`, `commit`, `pr`, and `ci`.
+
+The richer stage artifacts still remain in their stage-specific locations, for example `plans/`, `runs/`, `verifications/`, and `reviews/`. `stages.json` is the small machine-readable contract that lets `board`, `next`, and `advance` reason about the task without scraping logs or provider output.
+
 ## Stage Contracts
 
 ### Create

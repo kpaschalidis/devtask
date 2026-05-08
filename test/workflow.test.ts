@@ -72,6 +72,36 @@ describe("workflow recommendations", () => {
       automatic: true
     });
   });
+
+  it("can recommend approval from stage contract state", () => {
+    const review = taskReview({ status: "review" });
+    review.stages.stages.check = {
+      stage: "check",
+      status: "passed",
+      startedAt: "2026-05-05T00:00:00.000Z",
+      finishedAt: "2026-05-05T00:00:01.000Z",
+      input: {},
+      output: {},
+      artifacts: [],
+      reason: null
+    };
+    review.stages.stages.review = {
+      stage: "review",
+      status: "passed",
+      startedAt: "2026-05-05T00:00:01.000Z",
+      finishedAt: "2026-05-05T00:00:02.000Z",
+      input: {},
+      output: {},
+      artifacts: [],
+      reason: null
+    };
+
+    expect(recommendNextAction(review, config)).toMatchObject({
+      kind: "approve",
+      command: "devtask approve example",
+      automatic: false
+    });
+  });
 });
 
 function taskReview(options: {
@@ -125,9 +155,15 @@ function taskReview(options: {
           startedAt: "2026-05-05T00:00:00.000Z",
           finishedAt: options.latestReviewAgent.finishedAt,
           exitCode: 0
-        }
+      }
       : null,
     latestPlan: null,
+    stages: {
+      schemaVersion: 1,
+      taskId: "example",
+      updatedAt: "1970-01-01T00:00:00.000Z",
+      stages: {}
+    },
     hasPlan: false,
     planPath: "/tmp/repo/.devtask/tasks/example/plan.md",
     result: null

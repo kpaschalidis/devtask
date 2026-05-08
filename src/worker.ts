@@ -7,6 +7,7 @@ import { readTaskMeta, writeTaskMeta } from "./meta.js";
 import { acquireLock, releaseLock } from "./lock.js";
 import { newRunId, writeRunRecord, type RunStatus } from "./run-record.js";
 import { excludeDevtaskRuntimeFiles } from "./git.js";
+import { recordStage } from "./stage-contracts.js";
 
 export interface WorkerOptions {
   root?: string;
@@ -73,6 +74,17 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
   const stderr = fs.openSync(logPath, "a");
   let status: RunStatus = "success";
   let exitCode: number | null = 0;
+  recordStage(paths, id, "run", {
+    status: "running",
+    startedAt,
+    input: {
+      command: meta.command,
+      worktreePath: meta.worktreePath,
+      promptPath,
+      planPath: planMarkdownPath(paths, id)
+    },
+    artifacts: [logPath]
+  });
 
   try {
     const child = spawn(meta.command, {
@@ -135,6 +147,21 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
     startedAt,
     finishedAt,
     exitCode
+  });
+
+  recordStage(paths, id, "run", {
+    status: nextStatus === "blocked" ? "blocked" : status === "success" ? "passed" : "failed",
+    startedAt,
+    finishedAt,
+    output: {
+      runId,
+      exitCode,
+      resultStatus,
+      nextStatus,
+      failCount: nextFailCount
+    },
+    artifacts: [logPath],
+    reason: status === "failed" ? "worker command failed" : nextStatus === "blocked" ? "task result reported blocked" : null
   });
 
   updateMeta(paths, id, (current) => ({

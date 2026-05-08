@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { readTaskMeta, writeTaskMeta } from "../src/meta.js";
 import { resolvePaths, taskMetaPath } from "../src/paths.js";
 import { runCommandOrThrow } from "../src/process-runner.js";
+import { readStageLedger } from "../src/stage-contracts.js";
 import { createTask } from "../src/task-store.js";
 import { runWorker } from "../src/worker.js";
 import { makeTempRepo } from "./helpers.js";
@@ -35,6 +36,13 @@ describe("worker", () => {
     expect(updated.childPid).toBeNull();
     expect(runs).toHaveLength(1);
     expect(logs).toHaveLength(1);
+    expect(readStageLedger(paths, meta.id).stages.run).toMatchObject({
+      status: "passed",
+      output: {
+        resultStatus: "done",
+        nextStatus: "done"
+      }
+    });
   });
 
   it("harvests worktree-local task state and result after a run", async () => {

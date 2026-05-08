@@ -81,6 +81,9 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   }
 
   if (review.meta.status === "review") {
+    const check = latestStageState(review, "check");
+    const agentReview = latestStageState(review, "review");
+
     if (config.verify.length === 0) {
       return {
         kind: "configure-check",
@@ -90,7 +93,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
       };
     }
 
-    if (!isFresh(review.latestVerification?.finishedAt, review.meta.updatedAt)) {
+    if (!isFresh(check.finishedAt, review.meta.updatedAt)) {
       return {
         kind: "check",
         command: `devtask check ${id}`,
@@ -99,7 +102,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
       };
     }
 
-    if (review.latestVerification?.status === "failed") {
+    if (check.status === "failed") {
       return {
         kind: "continue",
         command: `devtask continue ${id}`,
@@ -108,7 +111,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
       };
     }
 
-    const latestCheckFinishedAt = review.latestVerification?.finishedAt;
+    const latestCheckFinishedAt = check.finishedAt;
     if (!latestCheckFinishedAt) {
       return {
         kind: "check",
@@ -118,7 +121,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
       };
     }
 
-    if (!isFresh(review.latestReviewAgent?.finishedAt, latestCheckFinishedAt)) {
+    if (!isFresh(agentReview.finishedAt, latestCheckFinishedAt)) {
       return {
         kind: "review",
         command: `devtask review ${id}`,
@@ -127,7 +130,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
       };
     }
 
-    if (review.latestReviewAgent?.status === "passed") {
+    if (agentReview.status === "passed") {
       return {
         kind: "approve",
         command: `devtask approve ${id}`,
@@ -202,28 +205,62 @@ export function buildBoardRow(review: TaskReview, config: DevtaskConfig): BoardR
 }
 
 function formatCheckState(review: TaskReview): string {
-  if (!review.latestVerification) {
+  const check = latestStageState(review, "check");
+  if (!check.status) {
     return "-";
   }
 
-  if (!isFresh(review.latestVerification.finishedAt, review.meta.updatedAt)) {
-    return `${review.latestVerification.status}:stale`;
+  if (!isFresh(check.finishedAt, review.meta.updatedAt)) {
+    return `${check.status}:stale`;
   }
 
-  return review.latestVerification.status;
+  return check.status;
 }
 
 function formatReviewState(review: TaskReview): string {
-  if (!review.latestReviewAgent) {
+  const agentReview = latestStageState(review, "review");
+  if (!agentReview.status) {
     return "-";
   }
 
-  const baseline = review.latestVerification?.finishedAt ?? review.meta.updatedAt;
-  if (!isFresh(review.latestReviewAgent.finishedAt, baseline)) {
-    return `${review.latestReviewAgent.status}:stale`;
+  const baseline = latestStageState(review, "check").finishedAt ?? review.meta.updatedAt;
+  if (!isFresh(agentReview.finishedAt, baseline)) {
+    return `${agentReview.status}:stale`;
   }
 
-  return review.latestReviewAgent.status;
+  return agentReview.status;
+}
+
+function latestStageState(
+  review: TaskReview,
+  stage: "check" | "review"
+): { status: "passed" | "failed" | "findings" | null; finishedAt: string | undefined } {
+  if (stage === "check" && review.latestVerification) {
+    return {
+      status: review.latestVerification.status,
+      finishedAt: review.latestVerification.finishedAt
+    };
+  }
+
+  if (stage === "review" && review.latestReviewAgent) {
+    return {
+      status: review.latestReviewAgent.status,
+      finishedAt: review.latestReviewAgent.finishedAt
+    };
+  }
+
+  const contract = review.stages.stages[stage];
+  if (contract?.status === "passed" || contract?.status === "failed" || contract?.status === "findings") {
+    return {
+      status: contract.status,
+      finishedAt: contract.finishedAt ?? undefined
+    };
+  }
+
+  return {
+    status: null,
+    finishedAt: undefined
+  };
 }
 
 function isFresh(finishedAt: string | undefined, baseline: string): boolean {
