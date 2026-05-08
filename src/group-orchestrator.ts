@@ -3,7 +3,7 @@ import path from "node:path";
 import type { DevtaskConfig } from "./config.js";
 import { buildCodexCommand } from "./config.js";
 import { groupDir, type TaskGroup } from "./group-store.js";
-import { planMarkdownPath, resolvePaths, taskMarkdownPath, type DevtaskPaths } from "./paths.js";
+import { planMarkdownPath, resolvePaths, taskDir, taskMarkdownPath, type DevtaskPaths, worktreePath } from "./paths.js";
 import { runCommand } from "./process-runner.js";
 import { newRunId } from "./run-record.js";
 
@@ -61,7 +61,13 @@ export async function runGroupOrchestrator(
   const prompt = buildGroupOrchestrationPrompt(paths, group, orchestrationPath);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
-  const command = buildCodexCommand({ model: config.codex.model, fullAuto: config.codex.fullAuto, skipGitRepoCheck: true });
+  const previousArtifact = artifactSnapshot(orchestrationPath);
+  const command = buildCodexCommand({
+    model: config.codex.model,
+    fullAuto: config.codex.fullAuto,
+    skipGitRepoCheck: true,
+    addDirs: groupOrchestrationAddDirs(group)
+  });
   options.onStart?.({ command, promptPath, outputPath, orchestrationPath });
   const startedAt = new Date().toISOString();
   const output = fs.createWriteStream(outputPath, { flags: "w" });
@@ -84,7 +90,8 @@ export async function runGroupOrchestrator(
   });
   await closeStream(output);
   const finishedAt = new Date().toISOString();
-  const status = result.exitCode === 0 && readTextIfExists(orchestrationPath).trim() ? "planned" : "failed";
+  const status =
+    result.exitCode === 0 && isFreshOrchestrationArtifact(orchestrationPath, previousArtifact) ? "planned" : "failed";
 
   const record: GroupOrchestrationRecord = {
     schemaVersion: 1,
@@ -105,6 +112,17 @@ export async function runGroupOrchestrator(
 
 export function buildGroupOrchestrationPromptForTest(paths: DevtaskPaths, group: TaskGroup, orchestrationPath: string): string {
   return buildGroupOrchestrationPrompt(paths, group, orchestrationPath);
+}
+
+export function groupOrchestrationAddDirsForTest(group: TaskGroup): string[] {
+  return groupOrchestrationAddDirs(group);
+}
+
+export function isFreshOrchestrationArtifactForTest(
+  filePath: string,
+  previous: { exists: boolean; mtimeMs: number | null }
+): boolean {
+  return isFreshOrchestrationArtifact(filePath, previous);
 }
 
 function buildGroupOrchestrationPrompt(paths: DevtaskPaths, group: TaskGroup, orchestrationPath: string): string {
@@ -180,4 +198,47 @@ function closeStream(stream: fs.WriteStream): Promise<void> {
     stream.once("error", reject);
     stream.end(resolve);
   });
+}
+
+function groupOrchestrationAddDirs(group: TaskGroup): string[] {
+  const dirs = new Set<string>();
+  for (const repo of group.repos) {
+    const repoPaths = resolvePaths(repo.path);
+    dirs.add(taskDir(repoPaths, repo.taskId));
+    const worktree = worktreePath(repoPaths, repo.taskId);
+    if (fs.existsSync(worktree)) {
+      dirs.add(worktree);
+    }
+  }
+  return [...dirs];
+}
+
+function artifactSnapshot(filePath: string): { exists: boolean; mtimeMs: number | null } {
+  try {
+    return {
+      exists: true,
+      mtimeMs: fs.statSync(filePath).mtimeMs
+    };
+  } catch {
+    return {
+      exists: false,
+      mtimeMs: null
+    };
+  }
+}
+
+function isFreshOrchestrationArtifact(filePath: string, previous: { exists: boolean; mtimeMs: number | null }): boolean {
+  const content = readTextIfExists(filePath).trim();
+  if (!content) {
+    return false;
+  }
+
+  let currentMtimeMs: number;
+  try {
+    currentMtimeMs = fs.statSync(filePath).mtimeMs;
+  } catch {
+    return false;
+  }
+
+  return !previous.exists || previous.mtimeMs === null || currentMtimeMs > previous.mtimeMs;
 }

@@ -108,4 +108,11 @@ describe("config", () => {
   it("can build Codex commands for non-git workspace execution", () => {
     expect(buildCodexCommand({ skipGitRepoCheck: true })).toContain("--skip-git-repo-check");
   });
+
+  it("can add explicit Codex sandbox directories", () => {
+    const command = buildCodexCommand({ addDirs: ["/tmp/repo task/.devtask/tasks/example"] });
+
+    expect(command).toContain("--add-dir \"$DEVTASK_TASK_DIR\"");
+    expect(command).toContain("--add-dir '/tmp/repo task/.devtask/tasks/example'");
+  });
 });

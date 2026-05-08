@@ -3,12 +3,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildGroupOrchestrationPromptForTest,
+  groupOrchestrationAddDirsForTest,
   groupOrchestrationPath,
   hasGroupOrchestration,
+  isFreshOrchestrationArtifactForTest,
   readGroupOrchestration
 } from "../src/group-orchestrator.js";
 import { addRepoToGroup, createGroup } from "../src/group-store.js";
-import { planMarkdownPath, resolvePaths } from "../src/paths.js";
+import { planMarkdownPath, resolvePaths, taskDir, worktreePath } from "../src/paths.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("group orchestrator", () => {
@@ -63,5 +65,42 @@ describe("group orchestrator", () => {
     expect(prompt).toContain("web");
     expect(prompt).toContain("billing-export-web");
     expect(prompt).toContain("If repo-local plans already exist");
+  });
+
+  it("adds repo task and worktree directories to the Codex sandbox", async () => {
+    const controlRepo = await makeTempRepo({ withCommit: true });
+    const backendRepo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(controlRepo);
+    const group = createGroup(paths, "billing-export", { goal: "Add billing export" });
+    const updated = addRepoToGroup(paths, group.id, {
+      name: "backend",
+      repoPath: backendRepo,
+      taskId: "billing-export-backend"
+    });
+    const backendPaths = resolvePaths(backendRepo);
+    fs.mkdirSync(taskDir(backendPaths, "billing-export-backend"), { recursive: true });
+    fs.mkdirSync(worktreePath(backendPaths, "billing-export-backend"), { recursive: true });
+
+    expect(groupOrchestrationAddDirsForTest(updated)).toEqual([
+      taskDir(backendPaths, "billing-export-backend"),
+      worktreePath(backendPaths, "billing-export-backend")
+    ]);
+  });
+
+  it("rejects stale orchestration artifacts", async () => {
+    const controlRepo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(controlRepo);
+    createGroup(paths, "feature-x");
+    const artifactPath = groupOrchestrationPath(paths, "feature-x");
+    fs.writeFileSync(artifactPath, "# Old Plan\n");
+    const previous = { exists: true, mtimeMs: fs.statSync(artifactPath).mtimeMs };
+
+    expect(isFreshOrchestrationArtifactForTest(artifactPath, previous)).toBe(false);
+
+    const nextMtime = new Date(previous.mtimeMs + 1000);
+    fs.writeFileSync(artifactPath, "# New Plan\n");
+    fs.utimesSync(artifactPath, nextMtime, nextMtime);
+
+    expect(isFreshOrchestrationArtifactForTest(artifactPath, previous)).toBe(true);
   });
 });
