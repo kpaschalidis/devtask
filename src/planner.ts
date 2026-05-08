@@ -36,6 +36,7 @@ export async function runPlanAgent(
   options: {
     model?: string | null;
     fullAuto?: boolean;
+    groupOrchestration?: string | null;
     onStart?: (start: PlanAgentStart) => void;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
@@ -54,7 +55,7 @@ export async function runPlanAgent(
   removeIfExists(runtimePlanPath);
   removeIfExists(runtimeStatePath);
   removeIfExists(runtimeResultPath);
-  const prompt = buildPlanPrompt(meta, runtimePlanPath, planPath);
+  const prompt = buildPlanPrompt(meta, runtimePlanPath, planPath, options.groupOrchestration ?? null);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const beforeStatus = await readGitStatus(meta.worktreePath);
@@ -146,11 +147,16 @@ export function hasTaskPlan(paths: DevtaskPaths, id: string): boolean {
   return readTextIfExists(planMarkdownPath(paths, id)).trim().length > 0;
 }
 
-export function buildPlanPromptForTest(meta: TaskMeta, writablePlanPath: string, finalPlanPath = writablePlanPath): string {
-  return buildPlanPrompt(meta, writablePlanPath, finalPlanPath);
+export function buildPlanPromptForTest(
+  meta: TaskMeta,
+  writablePlanPath: string,
+  finalPlanPath = writablePlanPath,
+  groupOrchestration: string | null = null
+): string {
+  return buildPlanPrompt(meta, writablePlanPath, finalPlanPath, groupOrchestration);
 }
 
-function buildPlanPrompt(meta: TaskMeta, writablePlanPath: string, finalPlanPath: string): string {
+function buildPlanPrompt(meta: TaskMeta, writablePlanPath: string, finalPlanPath: string, groupOrchestration: string | null): string {
   const task = readTextIfExists(meta.taskPath).trim();
   const state = readTextIfExists(meta.statePath).trim();
   return [
@@ -165,6 +171,10 @@ function buildPlanPrompt(meta: TaskMeta, writablePlanPath: string, finalPlanPath
     "Current state:",
     "",
     state || "(state file is empty)",
+    "",
+    "Group orchestration context:",
+    "",
+    groupOrchestration?.trim() || "(no group orchestration context provided)",
     "",
     "Goal:",
     "Create an implementation plan only. Do not modify source code, tests, docs, config, package files, generated files, git state, or any other repository file.",

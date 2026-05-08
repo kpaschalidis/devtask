@@ -118,11 +118,12 @@ devtask jira group APP-123 \
   --repo backend=./backend:app-123-backend \
   --repo web=./web:app-123-web
 
+devtask group orchestrate app-123
 devtask group plan app-123
 devtask group run app-123
 ```
 
-Jira artifacts are written under `.devtask/sources/jira/`. V1 does not guess affected repositories from ticket text; pass every repo explicitly with `--repo name=path:task-id`.
+Jira artifacts are written under `.devtask/sources/jira/`. V1 does not guess affected repositories from ticket text; pass every repo explicitly with `--repo name=path:task-id`. `devtask group orchestrate <id>` creates the shared cross-repo contract before repo-local planning starts.
 
 If a worker command exits successfully but does not write a terminal `result.json`, devtask moves the task to `review` instead of looping forever. If the worker writes `{"status":"done"}`, devtask marks the worker run as `done`.
 
@@ -310,6 +311,7 @@ devtask group logs billing-export
 devtask group logs billing-export --repo backend -f
 devtask group attach billing-export --repo backend
 devtask group steer billing-export --repo backend "Keep this scoped to backend conventions."
+devtask group orchestrate billing-export
 devtask group plan billing-export
 devtask group check billing-export
 devtask group review billing-export
@@ -323,7 +325,9 @@ devtask group remove billing-export frontend
 devtask group cleanup billing-export --dry-run
 ```
 
-`devtask group board` shows every repo task with status, latest check, latest review, PR state, and next command. `devtask group advance` runs safe next steps across repos, using the same single-repo task lifecycle. It still stops at human approval, review findings, failed checks, and ambiguous states.
+`devtask group board` shows every repo task with lifecycle stage, status, latest check, latest review, PR state, and next command. `devtask group advance` runs safe next steps across repos, using the same single-repo task lifecycle. It still stops at human approval, review findings, failed checks, and ambiguous states.
+
+`devtask group orchestrate <id>` creates or refreshes `.devtask/groups/<id>/orchestration.md`. The orchestration plan is the shared cross-repo contract: affected repos, responsibilities, dependencies, ownership boundaries, validation plan, risks, and open questions. `devtask group plan <id>` automatically feeds this orchestration context into each repo-local planning agent when it exists.
 
 `devtask group plan <id>`, `devtask group check <id>`, and `devtask group review <id>` run the same repo-local lifecycle across every repo in the group. Use `--repo <name>` to run only one member.
 
@@ -341,7 +345,7 @@ devtask group cleanup billing-export --dry-run
 
 `devtask group cleanup <id>` removes every member task worktree and metadata directory, then removes the group metadata. Use `--dry-run` first. It refuses running tasks and dirty worktrees unless you pass `--force`.
 
-V1 groups do not do cross-repo handoff generation, dependency ordering, grouped PR creation, or grouped CI fixing. Those belong above the basic coordination layer.
+V1 groups do not execute dependency ordering, grouped PR creation, or grouped CI fixing automatically. Those belong above the basic coordination layer.
 
 ## Task Layout
 

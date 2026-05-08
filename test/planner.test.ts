@@ -61,4 +61,22 @@ describe("planner artifacts", () => {
     expect(prompt).toContain("Do not invent requirements");
     expect(prompt).toContain("Add health-check endpoint");
   });
+
+  it("includes group orchestration context when provided", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(repo);
+    const meta = await createTask(paths, "group-task", {
+      goal: "Implement frontend part"
+    });
+
+    const prompt = buildPlanPromptForTest(
+      meta,
+      path.join(meta.worktreePath, ".devtask_plan.md"),
+      planMarkdownPath(paths, meta.id),
+      "Backend owns PATCH /model/:id accepting musicReleaseId: null."
+    );
+
+    expect(prompt).toContain("Group orchestration context:");
+    expect(prompt).toContain("Backend owns PATCH /model/:id accepting musicReleaseId: null.");
+  });
 });

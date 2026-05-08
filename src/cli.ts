@@ -26,6 +26,7 @@ import { runReviewAgent } from "./review-agent.js";
 import { runPlanAgent } from "./planner.js";
 import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
 import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroups, removeRepoFromGroup } from "./group-store.js";
+import { readGroupOrchestration, runGroupOrchestrator } from "./group-orchestrator.js";
 import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
 import { assertValidTaskId } from "./task-id.js";
 import {
@@ -747,6 +748,40 @@ export function createCli(): Command {
     });
 
   group
+    .command("orchestrate")
+    .description("Create or refresh the cross-repo orchestration plan for a group.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const groupData = getGroup(paths, id);
+        const config = readConfig(paths);
+        console.log(`Running group orchestrator for ${groupData.id}`);
+        const record = await runGroupOrchestrator(paths, groupData, config, {
+          onStart: (start) => {
+            console.log(`Prompt: ${start.promptPath}`);
+            console.log(`Orchestration: ${start.orchestrationPath}`);
+            console.log(`Output: ${start.outputPath}`);
+            console.log(`Command: ${start.command}`);
+          },
+          onStdout: (chunk) => {
+            process.stdout.write(chunk);
+          },
+          onStderr: (chunk) => {
+            process.stderr.write(chunk);
+          }
+        });
+        console.log(`Orchestration: ${record.status}`);
+        console.log(`File: ${record.orchestrationPath}`);
+        if (record.status === "failed") {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
     .command("add")
     .description("Add a repository to a group and create its repo-local task.")
     .argument("<id>")
@@ -1007,7 +1042,7 @@ export function createCli(): Command {
           console.log(`${repo.name}/${repo.taskId}`);
           const repoPaths = resolvePaths(repo.path);
           try {
-            await planTask(repoPaths, repo.taskId);
+            await planTask(repoPaths, repo.taskId, { groupOrchestration: readGroupOrchestration(paths, id) });
           } catch (error) {
             failed = true;
             printNonFatalError(error);
@@ -2479,7 +2514,11 @@ async function advanceTask(paths: ReturnType<typeof resolvePaths>, id: string, n
   }
 }
 
-async function planTask(paths: ReturnType<typeof resolvePaths>, id: string): Promise<void> {
+async function planTask(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  options: { groupOrchestration?: string | null } = {}
+): Promise<void> {
   const meta = getTask(paths, id);
   if (meta.status === "running") {
     throw new DevtaskError(`Task ${id} is running; stop it before planning`);
@@ -2501,6 +2540,7 @@ async function planTask(paths: ReturnType<typeof resolvePaths>, id: string): Pro
     const planRecord = await runPlanAgent(paths, meta, {
       model: meta.model ?? config.codex.model,
       fullAuto: config.codex.fullAuto,
+      groupOrchestration: options.groupOrchestration,
       onStart: (start) => {
         console.log(`Prompt: ${start.promptPath}`);
         console.log(`Plan: ${start.planPath}`);

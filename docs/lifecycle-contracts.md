@@ -16,7 +16,8 @@
 | Stage | Owner | Main inputs | Main artifacts | Exit |
 | --- | --- | --- | --- | --- |
 | `create` | CLI | task id, goal, repo config, optional model/command | task directory, worktree, branch, metadata | created task |
-| `plan` | agent or human | ticket/context/assets, repo structure, optional group goal | plan document, state updates | planned or blocked |
+| `orchestrate` | group agent or human | group goal, source artifacts, repo list | group orchestration contract | planned or failed |
+| `plan` | agent or human | ticket/context/assets, repo structure, optional group orchestration | plan document, state updates | planned or blocked |
 | `run` | coding agent | task prompt, state, optional plan, existing diff | code/docs changes, logs, state, result | review, done, blocked, failed |
 | `inspect` | CLI/human | metadata, logs, result, diff, artifacts | terminal summary | next decision |
 | `check` | configured commands | task worktree, repo check config | verification record | passed or failed |
@@ -285,6 +286,7 @@ Group metadata stores:
 
 - group id
 - group goal
+- optional orchestration plan
 - member repo name
 - member repo path
 - member task id
@@ -296,11 +298,13 @@ Each member repo still owns:
 - branch
 - check, review, approve, commit, PR, and CI artifacts
 
-Group commands such as `devtask group plan <id>`, `devtask group check <id>`, `devtask group review <id>`, `devtask group approve <id>`, `devtask group commit <id>`, and `devtask group pr <id>` fan out repo-local lifecycle commands. Use `--repo <name>` to target one member.
+`devtask group orchestrate <id>` creates `.devtask/groups/<id>/orchestration.md`, the shared cross-repo contract for repo-local planners. It should define affected repos, responsibilities, explicit dependencies, ownership boundaries, validation strategy, risks, and open questions.
+
+Group commands such as `devtask group plan <id>`, `devtask group check <id>`, `devtask group review <id>`, `devtask group approve <id>`, `devtask group commit <id>`, and `devtask group pr <id>` fan out repo-local lifecycle commands. Use `--repo <name>` to target one member. When orchestration exists, `devtask group plan <id>` feeds it into every repo-local planning prompt.
 
 `devtask group attach <id> --repo <name>` and `devtask group steer <id> --repo <name> "message"` target one repo task. Group steering is intentionally one-repo-at-a-time in V1.
 
-V1 groups do not yet provide dependency ordering, cross-repo handoff generation, grouped CI repair, or a single combined PR object. Those belong above the current coordination layer.
+V1 groups do not yet execute dependency ordering automatically, grouped CI repair, or a single combined PR object. Those belong above the current coordination layer.
 
 ## Command Mapping
 
@@ -327,6 +331,7 @@ devtask group create <id> --goal-file goal.md \
   --repo api=../api:<task-id-api> \
   --repo web=../web:<task-id-web>
 
+devtask group orchestrate <id>
 devtask group plan <id>
 devtask group run <id>
 devtask group attach <id> --repo api
