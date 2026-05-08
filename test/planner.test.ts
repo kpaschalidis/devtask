@@ -44,10 +44,15 @@ describe("planner artifacts", () => {
       goal: "Add health-check endpoint"
     });
 
-    const prompt = buildPlanPromptForTest(meta, planMarkdownPath(paths, meta.id));
+    const writablePlanPath = path.join(meta.worktreePath, ".devtask_plan.md");
+    const finalPlanPath = planMarkdownPath(paths, meta.id);
+    const prompt = buildPlanPromptForTest(meta, writablePlanPath, finalPlanPath);
 
     expect(prompt).toContain("You are in the devtask planning stage.");
-    expect(prompt).toContain("The only file you may write is the devtask plan artifact");
+    expect(prompt).toContain("The only file you may write is this worktree-local devtask plan artifact");
+    expect(prompt).toContain(writablePlanPath);
+    expect(prompt).toContain(finalPlanPath);
+    expect(prompt).toContain("Do not update task state during planning");
     expect(prompt).toContain("Before writing the plan:");
     expect(prompt).toContain("Relevant Existing Files");
     expect(prompt).toContain("Current Behavior / Current Structure");

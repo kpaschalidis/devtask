@@ -48,7 +48,13 @@ export async function runPlanAgent(
   const promptPath = path.join(plansDir, `${planId}.prompt.md`);
   const outputPath = path.join(plansDir, `${planId}.md`);
   const planPath = planMarkdownPath(paths, meta.id);
-  const prompt = buildPlanPrompt(meta, planPath);
+  const runtimePlanPath = path.join(meta.worktreePath, ".devtask_plan.md");
+  const runtimeStatePath = path.join(meta.worktreePath, ".devtask_plan_state.md");
+  const runtimeResultPath = path.join(meta.worktreePath, ".devtask_plan_result.json");
+  removeIfExists(runtimePlanPath);
+  removeIfExists(runtimeStatePath);
+  removeIfExists(runtimeResultPath);
+  const prompt = buildPlanPrompt(meta, runtimePlanPath, planPath);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const beforeStatus = await readGitStatus(meta.worktreePath);
@@ -62,9 +68,9 @@ export async function runPlanAgent(
       ...process.env,
       DEVTASK_TASK_DIR: taskDir(paths, meta.id),
       DEVTASK_TASK_PATH: promptPath,
-      DEVTASK_PLAN_PATH: planPath,
-      DEVTASK_STATE_PATH: meta.statePath,
-      DEVTASK_RESULT_PATH: meta.resultPath
+      DEVTASK_PLAN_PATH: runtimePlanPath,
+      DEVTASK_STATE_PATH: runtimeStatePath,
+      DEVTASK_RESULT_PATH: runtimeResultPath
     },
     onStdout: (chunk) => {
       output.write(chunk);
@@ -77,6 +83,11 @@ export async function runPlanAgent(
   });
   await closeStream(output);
   const finishedAt = new Date().toISOString();
+  persistRuntimePlan(runtimePlanPath, planPath);
+  persistRuntimeResult(runtimeResultPath, meta.resultPath);
+  removeIfExists(runtimePlanPath);
+  removeIfExists(runtimeStatePath);
+  removeIfExists(runtimeResultPath);
   const afterStatus = await readGitStatus(meta.worktreePath);
   const worktreeChanged = beforeStatus !== afterStatus;
   const planContent = readTextIfExists(planPath).trim();
@@ -135,11 +146,11 @@ export function hasTaskPlan(paths: DevtaskPaths, id: string): boolean {
   return readTextIfExists(planMarkdownPath(paths, id)).trim().length > 0;
 }
 
-export function buildPlanPromptForTest(meta: TaskMeta, planPath: string): string {
-  return buildPlanPrompt(meta, planPath);
+export function buildPlanPromptForTest(meta: TaskMeta, writablePlanPath: string, finalPlanPath = writablePlanPath): string {
+  return buildPlanPrompt(meta, writablePlanPath, finalPlanPath);
 }
 
-function buildPlanPrompt(meta: TaskMeta, planPath: string): string {
+function buildPlanPrompt(meta: TaskMeta, writablePlanPath: string, finalPlanPath: string): string {
   const task = readTextIfExists(meta.taskPath).trim();
   const state = readTextIfExists(meta.statePath).trim();
   return [
@@ -157,7 +168,9 @@ function buildPlanPrompt(meta: TaskMeta, planPath: string): string {
     "",
     "Goal:",
     "Create an implementation plan only. Do not modify source code, tests, docs, config, package files, generated files, git state, or any other repository file.",
-    `The only file you may write is the devtask plan artifact: ${planPath}.`,
+    `The only file you may write is this worktree-local devtask plan artifact: ${writablePlanPath}.`,
+    `Devtask will persist that plan to: ${finalPlanPath}.`,
+    "Do not update task state during planning, even if the task instructions mention state updates.",
     "",
     "Before writing the plan:",
     "- Inspect the repository structure.",
@@ -185,8 +198,8 @@ function buildPlanPrompt(meta: TaskMeta, planPath: string): string {
     "- Do not include code patches unless a small interface sketch is necessary to remove ambiguity.",
     "- Make the plan precise enough that another agent can implement it without re-discovering the whole task.",
     "",
-    "If the task is blocked, write a short blocked plan and set result.json to {\"status\":\"blocked\",\"reason\":\"...\"}.",
-    "Otherwise, leave result.json as pending and ensure the plan file is complete."
+    "If the task is blocked, write a short blocked plan and set $DEVTASK_RESULT_PATH to {\"status\":\"blocked\",\"reason\":\"...\"}.",
+    "Otherwise, leave $DEVTASK_RESULT_PATH unchanged and ensure the plan file is complete."
   ].join("\n");
 }
 
@@ -209,6 +222,35 @@ function readTextIfExists(filePath: string): string {
     return fs.readFileSync(filePath, "utf8");
   } catch {
     return "";
+  }
+}
+
+function persistRuntimePlan(runtimePlanPath: string, planPath: string): void {
+  const plan = readTextIfExists(runtimePlanPath);
+  if (!plan.trim()) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(planPath), { recursive: true });
+  fs.writeFileSync(planPath, plan.endsWith("\n") ? plan : `${plan}\n`);
+}
+
+function persistRuntimeResult(runtimeResultPath: string, resultPath: string): void {
+  if (!fs.existsSync(runtimeResultPath)) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(resultPath), { recursive: true });
+  fs.copyFileSync(runtimeResultPath, resultPath);
+}
+
+function removeIfExists(filePath: string): void {
+  try {
+    fs.unlinkSync(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
 }
 
