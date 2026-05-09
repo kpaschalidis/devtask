@@ -263,7 +263,6 @@ export function createCli(): Command {
     .action(() => {
       try {
         const paths = resolveWorkspacePaths();
-        initializeWorkspace(paths);
         const targets = listWorkspaceTargets(paths);
         if (targets.length === 0) {
           console.log("No workspace targets");
@@ -282,7 +281,6 @@ export function createCli(): Command {
     .action((id: string) => {
       try {
         const paths = resolveWorkspacePaths();
-        initializeWorkspace(paths);
         console.log(JSON.stringify(getWorkspaceTarget(paths, id), null, 2));
       } catch (error) {
         printError(error);

@@ -26,7 +26,7 @@ export interface AddWorkspaceTargetOptions {
 }
 
 export function listWorkspaceTargets(paths: DevtaskPaths): WorkspaceTarget[] {
-  return readTargetsFile(paths).targets.sort((a, b) => a.id.localeCompare(b.id));
+  return [...readTargetsFile(paths).targets].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export function getWorkspaceTarget(paths: DevtaskPaths, id: string): WorkspaceTarget {
@@ -40,9 +40,10 @@ export function getWorkspaceTarget(paths: DevtaskPaths, id: string): WorkspaceTa
 export function addWorkspaceTarget(paths: DevtaskPaths, options: AddWorkspaceTargetOptions): WorkspaceTarget {
   assertValidTargetId(options.id);
   const repoPaths = resolvePaths(resolveWorkspaceRelativePath(paths, options.repoPath));
+  const repoPath = fs.realpathSync(repoPaths.root);
   const scope = normalizeScope(options.scope);
   const kind = normalizeOptionalString(options.kind);
-  const scopePath = scope ? path.join(repoPaths.root, scope) : repoPaths.root;
+  const scopePath = scope ? path.join(repoPath, scope) : repoPath;
   if (!fs.existsSync(scopePath)) {
     throw new DevtaskError(`Workspace target scope does not exist: ${scopePath}`);
   }
@@ -52,15 +53,15 @@ export function addWorkspaceTarget(paths: DevtaskPaths, options: AddWorkspaceTar
     throw new DevtaskError(`Workspace target ${options.id} already exists`);
   }
 
-  const duplicate = file.targets.find((target) => target.repoPath === repoPaths.root && target.scope === scope);
+  const duplicate = file.targets.find((target) => target.repoPath === repoPath && target.scope === scope);
   if (duplicate) {
-    throw new DevtaskError(`Workspace target ${duplicate.id} already uses repo/scope ${formatRepoScope(repoPaths.root, scope)}`);
+    throw new DevtaskError(`Workspace target ${duplicate.id} already uses repo/scope ${formatRepoScope(repoPath, scope)}`);
   }
 
   const now = new Date().toISOString();
   const target: WorkspaceTarget = {
     id: options.id,
-    repoPath: repoPaths.root,
+    repoPath,
     scope,
     kind,
     createdAt: now,
@@ -121,12 +122,16 @@ function parseTarget(value: unknown): WorkspaceTarget {
 
   const id = requireString(value, "id");
   assertValidTargetId(id);
-  const repoPath = requireString(value, "repoPath");
+  const repoPath = fs.realpathSync(resolvePaths(requireString(value, "repoPath")).root);
+  const scope = value.scope === null || value.scope === undefined ? null : normalizeScope(requireString(value, "scope"));
+  if (scope && !fs.existsSync(path.join(repoPath, scope))) {
+    throw new DevtaskError(`Invalid workspace target metadata: scope does not exist for ${id}`);
+  }
   return {
     id,
     repoPath,
-    scope: value.scope === null || value.scope === undefined ? null : requireString(value, "scope"),
-    kind: value.kind === null || value.kind === undefined ? null : requireString(value, "kind"),
+    scope,
+    kind: value.kind === null || value.kind === undefined ? null : normalizeOptionalString(requireString(value, "kind")),
     createdAt: requireString(value, "createdAt"),
     updatedAt: requireString(value, "updatedAt")
   };
