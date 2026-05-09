@@ -48,6 +48,13 @@ import {
   writeJiraSourceArtifacts,
   type JiraIssue
 } from "./jira.js";
+import {
+  addWorkspaceTarget,
+  getWorkspaceTarget,
+  listWorkspaceTargets,
+  removeWorkspaceTarget,
+  type WorkspaceTarget
+} from "./workspace-targets.js";
 
 interface PrOptions {
   title?: string;
@@ -241,6 +248,84 @@ export function createCli(): Command {
         });
         console.log("Jira config:");
         console.log(JSON.stringify(jira, null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  const workspace = program.command("workspace").description("Manage workspace-level devtask configuration.");
+  const workspaceTarget = workspace.command("target").description("Manage workspace targets used by work-item orchestration.");
+
+  workspaceTarget
+    .command("list")
+    .alias("ls")
+    .description("List workspace targets.")
+    .action(() => {
+      try {
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
+        const targets = listWorkspaceTargets(paths);
+        if (targets.length === 0) {
+          console.log("No workspace targets");
+          return;
+        }
+        printWorkspaceTargets(targets);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  workspaceTarget
+    .command("show")
+    .description("Show one workspace target.")
+    .argument("<id>")
+    .action((id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
+        console.log(JSON.stringify(getWorkspaceTarget(paths, id), null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  workspaceTarget
+    .command("add")
+    .description("Add a repo or repo scope as an orchestration target.")
+    .argument("<id>")
+    .argument("<repo-path>")
+    .option("--scope <path>", "Optional path inside the target repo")
+    .option("--kind <kind>", "Optional target kind, for example api, frontend, docs")
+    .action((id: string, repoPath: string, options: { scope?: string; kind?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
+        const target = addWorkspaceTarget(paths, {
+          id,
+          repoPath,
+          scope: options.scope,
+          kind: options.kind
+        });
+        console.log(`Added target ${target.id}`);
+        console.log(`Repo: ${target.repoPath}`);
+        console.log(`Scope: ${target.scope ?? "."}`);
+        console.log(`Kind: ${target.kind ?? "-"}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  workspaceTarget
+    .command("remove")
+    .alias("rm")
+    .description("Remove a workspace target.")
+    .argument("<id>")
+    .action((id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
+        const removed = removeWorkspaceTarget(paths, id);
+        console.log(`Removed target ${removed.id}`);
       } catch (error) {
         printError(error);
       }
@@ -2034,6 +2119,13 @@ function printTable(headers: string[], rows: string[][]): void {
   for (const row of rows) {
     console.log(row.map((value, index) => value.padEnd(widths[index])).join("  "));
   }
+}
+
+function printWorkspaceTargets(targets: WorkspaceTarget[]): void {
+  printTable(
+    ["ID", "KIND", "REPO", "SCOPE"],
+    targets.map((target) => [target.id, target.kind ?? "-", target.repoPath, target.scope ?? "."])
+  );
 }
 
 function displayWidth(value: string): number {

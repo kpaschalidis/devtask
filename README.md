@@ -249,6 +249,17 @@ devtask scripts install
 
 Workspace mode stores group metadata and helper scripts in the product folder's `.devtask/` directory. Repo-local task commands still run inside the member git repositories. Run `devtask init` inside each member repo to configure its runtime mode, checks, and provider-local task storage.
 
+Register workspace targets to describe the repos or repo scopes that future work-item orchestration can reason about:
+
+```bash
+devtask workspace target add backend ./backend --kind api
+devtask workspace target add dragonfly ./dragonfly --kind frontend
+devtask workspace target add api . --scope packages/api --kind api
+devtask workspace target list
+```
+
+A target is a stable orchestration address. It can point at a whole repo in a polyrepo workspace, or at a scoped folder inside a monorepo. Existing task and group commands still work; targets are the inventory layer for the work-item flow.
+
 Remove a task worktree and metadata when you no longer need the local task record:
 
 ```bash
