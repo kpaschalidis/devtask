@@ -527,9 +527,13 @@ export function createCli(): Command {
         for (const task of plan.skipped) {
           console.log(`${task.target}/${task.taskId}: skipped (${task.reason})`);
         }
-        for (const task of plan.ready) {
+        const readyTasks = plan.ready.map((task) => {
           const repoPaths = resolvePaths(task.repoPath);
-          printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, resolveRunRuntime(repoPaths, options)), "Running");
+          const runtime = resolveRunRuntime(repoPaths, options);
+          return { task, repoPaths, runtime };
+        });
+        for (const { task, repoPaths, runtime } of readyTasks) {
+          printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
         }
         if (plan.ready.length === 0 && plan.skipped.length === 0) {
           console.log(`No materialized tasks for work item ${id}`);
@@ -709,7 +713,7 @@ export function createCli(): Command {
           })
         );
         printWorkPrPreflight(preflights, draft ? "draft" : "ready");
-        if (preflights.some(({ meta, preflight }) => !isPrPreflightReady(meta, preflight, draft))) {
+        if (preflights.some(({ meta, preflight }) => !isWorkPrPreflightReady(meta, preflight, draft))) {
           process.exit(1);
         }
 
@@ -2958,11 +2962,12 @@ function printWorkPrPreflight(
 ): void {
   console.log("Preflight:");
   printTable(
-    ["TARGET", "TASK", "STATUS", "PROVIDER", "ACCESS", "CLEAN", "COMMITS", "MODE", "PR"],
+    ["TARGET", "TASK", "STATUS", "LIFECYCLE", "PROVIDER", "ACCESS", "CLEAN", "COMMITS", "MODE", "PR"],
     rows.map(({ task, meta, preflight }) => [
       task.target,
       task.taskId,
       meta.status,
+      isWorkPrLifecycleReady(meta) ? "ok" : "blocked",
       preflight.provider,
       preflight.access,
       preflight.clean ? "ok" : "dirty",
@@ -2987,6 +2992,17 @@ function isPrPreflightReady(meta: ReturnType<typeof getTask>, preflight: ScmPref
     return true;
   }
   return preflight.access === "ok" && preflight.clean && preflight.commits > 0 && (!draft || preflight.draftSupported);
+}
+
+function isWorkPrPreflightReady(meta: ReturnType<typeof getTask>, preflight: ScmPreflight, draft: boolean): boolean {
+  if (meta.status === "pr-open" && meta.prUrl) {
+    return true;
+  }
+  return isWorkPrLifecycleReady(meta) && isPrPreflightReady(meta, preflight, draft);
+}
+
+function isWorkPrLifecycleReady(meta: ReturnType<typeof getTask>): boolean {
+  return meta.status === "approved" || meta.status === "ci-failed" || (meta.status === "pr-open" && Boolean(meta.prUrl));
 }
 
 async function buildGroupBoardRows(paths: ReturnType<typeof resolvePaths>, id: string): Promise<GroupBoardRow[]> {
