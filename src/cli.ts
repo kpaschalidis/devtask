@@ -58,6 +58,7 @@ import {
 import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 import { runWorkPlanner } from "./work-planner.js";
 import { approveWorkPlan } from "./work-materializer.js";
+import { buildWorkBoardRows } from "./work-board.js";
 
 interface PrOptions {
   title?: string;
@@ -406,6 +407,24 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         console.log(JSON.stringify(getWorkItem(paths, id), null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("board")
+    .description("Show work-item planning/materialization state and repo task next commands.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const rows = await buildWorkBoardRows(paths, item);
+        printTable(
+          ["TARGET", "TASK", "STAGE", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
+          rows.map((row) => [row.target, row.task, row.stage, row.status, row.check, row.review, row.pr, row.updated, row.next])
+        );
       } catch (error) {
         printError(error);
       }

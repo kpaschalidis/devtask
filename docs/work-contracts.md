@@ -246,6 +246,30 @@ Graph contract:
 }
 ```
 
+### `devtask work board <id>`
+
+Shows the current work-level stage and, after materialization, the repo-local task lifecycle state for each target task.
+
+Inputs:
+
+- `.devtask/work/<work-id>/work.json`
+- `.devtask/work/<work-id>/plan.md`, if present
+- `.devtask/work/<work-id>/graph.json`, if present
+- `.devtask/work/<work-id>/materialization.json`, if present
+- repo-local task metadata and stage artifacts for materialized tasks
+
+Artifacts:
+
+- none
+
+Rules:
+
+- must be read-only
+- before materialization, must show the next work-level command
+- after materialization, must show one row per repo-local task
+- repo task next commands must be executable from the workspace by including the target repo directory
+- must not infer affected targets beyond the approved materialization artifact
+
 ### `devtask work approve-plan <id>`
 
 Approves the proposed graph and materializes repo-local tasks.
@@ -489,8 +513,8 @@ Current implementation only persists `created` on `work.json`; richer status sho
 
 Beside real testing, the next implementation focus should be:
 
-1. `devtask work board <id>` to show materialized task state in one place.
-2. `devtask work repo-plan <id>` or `devtask work plan-tasks <id>` to generate repo-specific plans from the approved graph.
-3. `devtask work run <id>` to execute materialized tasks with dependency awareness.
+1. `devtask work repo-plan <id>` or `devtask work plan-tasks <id>` to generate repo-specific plans from the approved graph.
+2. `devtask work run <id>` to execute materialized tasks with dependency awareness.
+3. `devtask work check/review/approve <id>` to lift repo-local lifecycle gates to the work-item level.
 
-`work board` should come before more automation because it gives the developer a reliable cockpit for the new work-item flow.
+`work board` now provides the first cockpit for the new work-item flow; the next steps should make the cockpit actionable without hiding human gates.

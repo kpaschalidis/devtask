@@ -93,6 +93,15 @@ export function readWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
   return readAndValidateWorkGraph(paths, workId);
 }
 
+export function readWorkMaterialization(paths: DevtaskPaths, workId: string): WorkMaterialization | null {
+  const materializationPath = workItemMaterializationPath(paths, workId);
+  if (!fs.existsSync(materializationPath)) {
+    return null;
+  }
+
+  return parseWorkMaterialization(JSON.parse(fs.readFileSync(materializationPath, "utf8")) as unknown, workId);
+}
+
 function readAndValidateWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
   const graphPath = workGraphPath(paths, workId);
   if (!fs.existsSync(graphPath)) {
@@ -101,11 +110,48 @@ function readAndValidateWorkGraph(paths: DevtaskPaths, workId: string): WorkGrap
   return parseWorkGraph(JSON.parse(fs.readFileSync(graphPath, "utf8")) as unknown, workId);
 }
 
+function parseWorkMaterialization(value: unknown, expectedWorkId: string): WorkMaterialization {
+  if (!isRecord(value) || value.schemaVersion !== 1) {
+    throw new DevtaskError("Invalid work materialization: schemaVersion must be 1");
+  }
+  const workId = requireString(value, "workId", "work materialization");
+  if (workId !== expectedWorkId) {
+    throw new DevtaskError(`Invalid work materialization: workId ${workId} does not match ${expectedWorkId}`);
+  }
+  if (!Array.isArray(value.tasks)) {
+    throw new DevtaskError("Invalid work materialization: tasks must be an array");
+  }
+
+  return {
+    schemaVersion: 1,
+    workId,
+    approvedGraphPath: requireString(value, "approvedGraphPath", "work materialization"),
+    materializedAt: requireString(value, "materializedAt", "work materialization"),
+    tasks: value.tasks.map(parseMaterializedWorkTask)
+  };
+}
+
+function parseMaterializedWorkTask(value: unknown): MaterializedWorkTask {
+  if (!isRecord(value)) {
+    throw new DevtaskError("Invalid work materialization: task must be an object");
+  }
+
+  return {
+    graphTaskId: requireString(value, "graphTaskId", "work materialization"),
+    target: requireString(value, "target", "work materialization"),
+    repoPath: requireString(value, "repoPath", "work materialization"),
+    scope: parseNullableString(value.scope, "scope"),
+    taskId: requireString(value, "taskId", "work materialization"),
+    branch: requireString(value, "branch", "work materialization"),
+    worktreePath: requireString(value, "worktreePath", "work materialization")
+  };
+}
+
 function parseWorkGraph(value: unknown, expectedWorkId: string): WorkGraph {
   if (!isRecord(value) || value.schemaVersion !== 1) {
     throw new DevtaskError("Invalid work graph: schemaVersion must be 1");
   }
-  const workId = requireString(value, "workId");
+  const workId = requireString(value, "workId", "work graph");
   if (workId !== expectedWorkId) {
     throw new DevtaskError(`Invalid work graph: workId ${workId} does not match ${expectedWorkId}`);
   }
@@ -127,12 +173,12 @@ function parseWorkGraphTask(value: unknown): WorkGraphTask {
   if (!isRecord(value)) {
     throw new DevtaskError("Invalid work graph: task must be an object");
   }
-  const id = requireString(value, "id");
+  const id = requireString(value, "id", "work graph");
   assertValidTaskId(id);
   return {
     id,
-    target: requireString(value, "target"),
-    goal: requireString(value, "goal"),
+    target: requireString(value, "target", "work graph"),
+    goal: requireString(value, "goal", "work graph"),
     owns: parseStringArray(value.owns, "owns"),
     dependsOn: parseStringArray(value.dependsOn, "dependsOn")
   };
@@ -265,10 +311,20 @@ function parseStringArray(value: unknown, field: string): string[] {
   });
 }
 
-function requireString(record: Record<string, unknown>, field: string): string {
+function parseNullableString(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new DevtaskError(`Invalid work materialization: ${field} must be a string or null`);
+  }
+  return value;
+}
+
+function requireString(record: Record<string, unknown>, field: string, artifact = "work graph"): string {
   const value = record[field];
   if (typeof value !== "string" || !value.trim()) {
-    throw new DevtaskError(`Invalid work graph: ${field} must be a non-empty string`);
+    throw new DevtaskError(`Invalid ${artifact}: ${field} must be a non-empty string`);
   }
   return value.trim();
 }

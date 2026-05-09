@@ -141,6 +141,14 @@ It should:
 
 It should not run agents.
 
+### 3.5. Work Board
+
+```bash
+devtask work board <id>
+```
+
+Shows the current work item and repo-task state from durable artifacts. Before materialization it points to `work plan` or `work approve-plan`; after materialization it shows one row per repo-local task with the next executable command.
+
 ### 4. Repo Plan
 
 Each materialized repo task gets a repo-specific plan.
