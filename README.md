@@ -275,12 +275,13 @@ devtask work review CPS-549
 devtask work approve CPS-549
 devtask work commit CPS-549
 devtask work pr CPS-549 --ready
+devtask work ci CPS-549
 devtask work board CPS-549
 devtask work list
 devtask work show CPS-549
 ```
 
-A work item stores the original source under `.devtask/work/<id>/` and is the foundation for the planned work-item flow: source input, target selection, orchestration graph, repo/scope tasks, review, PRs, and CI follow-up. `devtask work plan <id>` writes a human plan to `.devtask/work/<id>/plan.md` and a proposed machine-readable graph to `.devtask/work/<id>/graph.json`; it does not create repo tasks yet. `devtask work board <id>` shows the work item's current stage and, after materialization, each repo-local task with its next command. `devtask work approve-plan <id>` validates the graph, freezes it as `.devtask/work/<id>/approved-graph.json`, creates repo-local task worktrees, and records the mapping in `.devtask/work/<id>/materialization.json`. `devtask work repo-plan <id>` turns the approved graph into repo-local task plans and marks those tasks ready to run. `devtask work run <id>` starts ready repo tasks and waits on graph dependencies. `devtask work check/review/approve <id>` lift the repo-local quality gates to the work item. `devtask work commit/pr <id>` publish the materialized repo tasks.
+A work item stores the original source under `.devtask/work/<id>/` and is the foundation for the planned work-item flow: source input, target selection, orchestration graph, repo/scope tasks, review, PRs, and CI follow-up. `devtask work plan <id>` writes a human plan to `.devtask/work/<id>/plan.md` and a proposed machine-readable graph to `.devtask/work/<id>/graph.json`; it does not create repo tasks yet. `devtask work board <id>` shows the work item's current stage and, after materialization, each repo-local task with its next command. `devtask work approve-plan <id>` validates the graph, freezes it as `.devtask/work/<id>/approved-graph.json`, creates repo-local task worktrees, and records the mapping in `.devtask/work/<id>/materialization.json`. `devtask work repo-plan <id>` turns the approved graph into repo-local task plans and marks those tasks ready to run. `devtask work run <id>` starts ready repo tasks and waits on graph dependencies. `devtask work check/review/approve <id>` lift the repo-local quality gates to the work item. `devtask work commit/pr/ci <id>` publish and inspect the materialized repo task PRs.
 
 Remove a task worktree and metadata when you no longer need the local task record:
 

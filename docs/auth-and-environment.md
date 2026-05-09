@@ -52,6 +52,7 @@ Used by:
 
 - `devtask pr <task>` for Bitbucket Cloud repos
 - `devtask group pr <group>` for Bitbucket Cloud repo members
+- `devtask ci <task>` and `devtask work ci <work>` for Bitbucket Pipelines status
 
 Required environment:
 
@@ -64,7 +65,10 @@ These are account-level environment variables. You set them once in the shell th
 
 For Bitbucket REST API calls, `BITBUCKET_EMAIL` must be your Atlassian account email. It is not the workspace name, repo name, or necessarily your Bitbucket username.
 
-The API token needs repository and pull request scopes. At minimum, use scopes that allow reading/writing repositories and reading/writing pull requests.
+The API token needs scopes for the provider operations you use:
+
+- PR creation: repository read/write and pull request read/write
+- CI checks: pipeline read
 
 Bitbucket API tokens are sent as HTTP Basic auth using:
 

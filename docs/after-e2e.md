@@ -62,7 +62,7 @@ Priorities:
 
 ## CI And Fix Loop
 
-`work ci` should be implemented before `ci-watch`.
+`work ci` should stay simpler than `ci-watch`.
 
 `work ci`:
 

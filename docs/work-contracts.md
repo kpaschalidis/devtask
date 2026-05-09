@@ -467,9 +467,30 @@ Rules:
 - must refuse branches with no commits
 - must preserve provider-neutral core workflow
 
-### Future: `devtask work ci <id>` and `devtask work ci-watch <id>`
+### `devtask work ci <id>`
 
-Checks or monitors CI for published PRs/MRs.
+Checks CI for published PRs/MRs once.
+
+Inputs:
+
+- materialization record
+- repo-local PR URLs
+- provider CI status
+
+Artifacts:
+
+- repo-local CI records
+
+Rules:
+
+- must not poll indefinitely
+- must not attempt fixes
+- failed repo CI should fail the work-level command
+- must preserve repo-local CI details
+
+### Future: `devtask work ci-watch <id>`
+
+Monitors CI for published PRs/MRs.
 
 Inputs:
 
@@ -514,8 +535,8 @@ Current implementation only persists `created` on `work.json`; richer status sho
 
 Beside real testing, the next implementation focus should be:
 
-1. work-level CI commands that operate from durable publication artifacts.
-2. CI watch/fix loop with retry limits.
-3. dependency policy configuration for work-level run, if `done` proves too strict in practice.
+1. CI watch/fix loop with retry limits.
+2. dependency policy configuration for work-level run, if `done` proves too strict in practice.
+3. work-level durability/recovery polish.
 
 `work board` now provides the first cockpit for the new work-item flow; the next steps should make the cockpit actionable without hiding human gates.

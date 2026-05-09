@@ -27,6 +27,13 @@ export interface ScmPreflight {
   draftSupported: boolean;
 }
 
+export interface CiCheckResult {
+  provider: ScmProvider;
+  status: "passed" | "failed";
+  detail: string;
+  url: string | null;
+}
+
 export async function createProviderPullRequest(worktreePath: string, options: PullRequestOptions): Promise<string> {
   const remote = await detectRemoteInfo(worktreePath);
 
@@ -37,6 +44,19 @@ export async function createProviderPullRequest(worktreePath: string, options: P
       return createBitbucketPullRequest(worktreePath, remote, options);
     case "gitlab":
       return createGitLabMergeRequest(worktreePath, options);
+  }
+}
+
+export async function checkProviderCi(worktreePath: string, prUrl: string, branch: string): Promise<CiCheckResult> {
+  const remote = await detectRemoteInfo(worktreePath);
+
+  switch (remote.provider) {
+    case "github":
+      return checkGitHubCi(worktreePath, prUrl);
+    case "bitbucket":
+      return checkBitbucketCi(remote, branch);
+    case "gitlab":
+      throw new DevtaskError("GitLab CI checks are not supported yet");
   }
 }
 
@@ -106,6 +126,70 @@ export async function preflightScmForPullRequest(
   }
 }
 
+async function checkGitHubCi(worktreePath: string, prUrl: string): Promise<CiCheckResult> {
+  const result = await runCommand("gh", ["pr", "checks", prUrl], { cwd: worktreePath });
+  const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
+  return {
+    provider: "github",
+    status: result.exitCode === 0 ? "passed" : "failed",
+    detail: output || `gh pr checks exited ${result.exitCode}`,
+    url: prUrl
+  };
+}
+
+async function checkBitbucketCi(remote: RemoteInfo, branch: string): Promise<CiCheckResult> {
+  const username = process.env.BITBUCKET_EMAIL ?? process.env.BITBUCKET_USERNAME;
+  const apiToken = process.env.BITBUCKET_API_TOKEN ?? process.env.BITBUCKET_APP_PASSWORD;
+  if (!username || !apiToken) {
+    throw new DevtaskError("Set BITBUCKET_EMAIL and BITBUCKET_API_TOKEN to check Bitbucket pipelines");
+  }
+
+  const pipeline = await fetchLatestBitbucketPipeline(username, apiToken, remote, branch);
+  const stateName = readNestedString(pipeline, ["state", "name"])?.toLowerCase() ?? "unknown";
+  const resultName = readNestedString(pipeline, ["state", "result", "name"])?.toLowerCase() ?? null;
+  const buildNumber = readNumber(pipeline, "build_number");
+  const url = readNestedString(pipeline, ["links", "html", "href"]);
+  const label = `pipeline ${buildNumber ?? readString(pipeline, "uuid") ?? "unknown"}: state=${stateName}, result=${resultName ?? "-"}`;
+  return {
+    provider: "bitbucket",
+    status: stateName === "completed" && resultName === "successful" ? "passed" : "failed",
+    detail: label,
+    url
+  };
+}
+
+async function fetchLatestBitbucketPipeline(
+  username: string,
+  apiToken: string,
+  remote: RemoteInfo,
+  branch: string
+): Promise<Record<string, unknown>> {
+  const url = new URL(`https://api.bitbucket.org/2.0/repositories/${remote.owner}/${remote.repo}/pipelines`);
+  url.searchParams.set("pagelen", "10");
+  url.searchParams.set("sort", "-created_on");
+  const response = await fetch(url, {
+    headers: {
+      Authorization: bitbucketBasicAuthHeader(username, apiToken),
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new DevtaskError(formatBitbucketApiError("Bitbucket pipeline check", response.status, await response.text()));
+  }
+
+  const payload = (await response.json()) as unknown;
+  if (!isRecord(payload) || !Array.isArray(payload.values)) {
+    throw new DevtaskError("Bitbucket pipelines response was not a paginated list");
+  }
+
+  const pipeline = payload.values.find((value) => isRecord(value) && readNestedString(value, ["target", "ref_name"]) === branch);
+  if (!isRecord(pipeline)) {
+    throw new DevtaskError(`No Bitbucket pipeline found for branch ${branch}`);
+  }
+  return pipeline;
+}
+
 async function createGitHubPullRequest(worktreePath: string, options: PullRequestOptions): Promise<string> {
   await runCommandOrThrow("gh", ["--version"], { cwd: worktreePath });
   await pushBranch(worktreePath, options.branch);
@@ -161,7 +245,7 @@ async function createBitbucketPullRequest(
   });
 
   if (!response.ok) {
-    throw new DevtaskError(formatBitbucketApiError(response.status, await response.text()));
+    throw new DevtaskError(formatBitbucketApiError("Bitbucket PR creation", response.status, await response.text()));
   }
 
   const payload = (await response.json()) as unknown;
@@ -181,7 +265,7 @@ async function verifyBitbucketRepositoryAccess(username: string, apiToken: strin
   });
 
   if (!response.ok) {
-    throw new DevtaskError(formatBitbucketApiError(response.status, await response.text()));
+    throw new DevtaskError(formatBitbucketApiError("Bitbucket repository access check", response.status, await response.text()));
   }
 }
 
@@ -288,25 +372,47 @@ function extractBitbucketPullRequestHref(payload: unknown): string | null {
   return html.href;
 }
 
-function formatBitbucketApiError(status: number, body: string): string {
+function formatBitbucketApiError(action: string, status: number, body: string): string {
   if (status === 401) {
     return [
-      `Bitbucket PR creation failed: ${status} ${body}`,
+      `${action} failed: ${status} ${body}`,
       "",
       "Check Bitbucket auth:",
       "- BITBUCKET_EMAIL must be your Atlassian account email, not the workspace or repo name.",
       "- BITBUCKET_API_TOKEN must be the generated API token value.",
       "- New Bitbucket API tokens can take up to a minute to become active.",
-      "- Token scopes must include repository read/write and pull request read/write.",
-      "- devtask validates access against the target repository before pushing."
+      "- PR creation needs repository read/write and pull request read/write scopes.",
+      "- CI checks need pipeline read scope.",
+      "- devtask validates access against the target repository before pushing or checking CI."
     ].join("\n");
   }
 
-  return `Bitbucket PR creation failed: ${status} ${body}`;
+  return `${action} failed: ${status} ${body}`;
 }
 
 function bitbucketBasicAuthHeader(username: string, apiToken: string): string {
   return `Basic ${Buffer.from(`${username}:${apiToken}`).toString("base64")}`;
+}
+
+function readString(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === "string" ? value : null;
+}
+
+function readNumber(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key];
+  return typeof value === "number" ? value : null;
+}
+
+function readNestedString(value: unknown, path: string[]): string | null {
+  let current = value;
+  for (const part of path) {
+    if (!isRecord(current)) {
+      return null;
+    }
+    current = current[part];
+  }
+  return typeof current === "string" ? current : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

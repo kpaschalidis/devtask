@@ -30,6 +30,7 @@ import { readGroupOrchestration, runGroupOrchestrator } from "./group-orchestrat
 import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
 import { assertValidTaskId } from "./task-id.js";
 import {
+  checkProviderCi,
   countBranchCommits,
   createProviderPullRequest,
   detectRemoteInfo,
@@ -746,6 +747,44 @@ export function createCli(): Command {
           ["TARGET", "TASK", "STATUS", "PR"],
           results.map((result) => [result.target, result.task, result.status, result.pr])
         );
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("ci")
+    .description("Check CI status for materialized repo task PRs.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const tasks = getMaterializedWorkTasks(paths, item);
+        let failed = false;
+
+        for (const [index, task] of tasks.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${task.target}/${task.taskId}`);
+          const repoPaths = resolvePaths(task.repoPath);
+          try {
+            await checkCiForTask(repoPaths, task.taskId);
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+            continue;
+          }
+          const meta = getTask(repoPaths, task.taskId);
+          if (meta.status === "ci-failed") {
+            failed = true;
+          }
+        }
 
         if (failed) {
           process.exit(1);
@@ -3384,20 +3423,25 @@ async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string
     throw new DevtaskError(`Task ${id} has no PR URL`);
   }
 
-  const result = await runCommand("gh", ["pr", "checks", meta.prUrl], { cwd: meta.worktreePath });
-  process.stdout.write(result.stdout);
-  process.stderr.write(result.stderr);
+  const result = await checkProviderCi(meta.worktreePath, meta.prUrl, meta.branch);
+  console.log(`${result.provider}: ${result.detail}`);
+  if (result.url) {
+    console.log(result.url);
+  }
 
-  const status = result.exitCode === 0 ? "ci-passed" : "ci-failed";
+  const status = result.status === "passed" ? "ci-passed" : "ci-failed";
   recordStage(paths, id, "ci", {
-    status: result.exitCode === 0 ? "passed" : "failed",
+    status: result.status,
     input: {
-      prUrl: meta.prUrl
+      prUrl: meta.prUrl,
+      branch: meta.branch
     },
     output: {
-      exitCode: result.exitCode
+      provider: result.provider,
+      detail: result.detail,
+      url: result.url
     },
-    reason: result.exitCode === 0 ? null : "CI command failed"
+    reason: result.status === "passed" ? null : "CI check failed"
   });
   writeTaskMeta(taskMetaPath(paths, id), {
     ...meta,
