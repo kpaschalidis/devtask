@@ -281,6 +281,46 @@ devtask cleanup fix-login
 
 Cleanup refuses running tasks and dirty worktrees unless you pass `--force`.
 
+## Local Cleanup
+
+Use cleanup commands when a local test task, group, or work item is no longer useful. Always preview destructive cleanup first:
+
+```bash
+devtask cleanup <task-id> --dry-run
+devtask group cleanup <group-id> --dry-run
+```
+
+Then run the cleanup:
+
+```bash
+devtask cleanup <task-id>
+devtask group cleanup <group-id>
+```
+
+`devtask cleanup <task-id>` removes that task's local metadata and worktree. `devtask group cleanup <group-id>` removes every member task worktree and metadata directory, then removes the group metadata.
+
+If cleanup refuses because a task is running or the task worktree is dirty, inspect it first:
+
+```bash
+devtask status <task-id>
+git -C .devtask/worktrees/<task-id> status --short
+```
+
+Use `--force` only when you intentionally want to discard the local task worktree state:
+
+```bash
+devtask cleanup <task-id> --force
+devtask group cleanup <group-id> --force
+```
+
+Work items currently store source and planning artifacts only. Remove a local work item manually when you want to reset a work-item test:
+
+```bash
+rm -rf .devtask/work/<work-id>
+```
+
+Do not delete the whole `.devtask/` directory unless you want to reset workspace config, targets, scripts, groups, work items, and source artifacts.
+
 ## Multi-Repo Groups
 
 A group coordinates multiple repo-local tasks from one control root. The control root can be either a git repository initialized with `devtask init` or a non-git product folder initialized with `devtask init --workspace`. Each repo still owns its own `.devtask` state, task worktree, checks, review, PR, and CI lifecycle. The group stores only cross-repo coordination metadata.
