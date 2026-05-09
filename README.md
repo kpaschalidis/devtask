@@ -27,7 +27,7 @@ One installed `devtask` command can be used across all of your local repositorie
 - GitLab PR creation requires GitLab CLI (`glab`) installed and authenticated.
 - tmux recommended for the default attachable runtime, `devtask attach`, and `devtask steer`.
 
-See [Auth And Environment](docs/auth-and-environment.md) for provider auth, environment variables, and optional tools. See [Lifecycle Contracts](docs/lifecycle-contracts.md) for the stage model behind `create`, `run`, `check`, `review`, `approve`, `commit`, `pr`, `ci`, and group workflows.
+See [Auth And Environment](docs/auth-and-environment.md) for provider auth, environment variables, and optional tools. See [Lifecycle Contracts](docs/lifecycle-contracts.md) for the stage model behind `create`, `run`, `check`, `review`, `approve`, `commit`, `pr`, `ci`, and group workflows. See [Target Architecture](docs/target-architecture.md) for the long-term tracker-to-PR work-item model.
 
 Recommended local setup:
 

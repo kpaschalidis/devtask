@@ -3,3 +3,5 @@ dist/
 .devtask/
 coverage/
 .DS_Store
+.env*
+.local-only/
