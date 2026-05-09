@@ -51,15 +51,16 @@ export interface WorkMaterialization {
 }
 
 export async function approveWorkPlan(paths: DevtaskPaths, workItem: WorkItem): Promise<WorkMaterialization> {
-  const graph = readAndValidateWorkGraph(paths, workItem.id);
-  const targets = resolveGraphTargets(paths, graph);
-  preflightMaterialization(targets, graph);
-
   const approvedGraphPath = workItemApprovedGraphPath(paths, workItem.id);
   const materializationPath = workItemMaterializationPath(paths, workItem.id);
   if (fs.existsSync(materializationPath)) {
     throw new DevtaskError(`Work item ${workItem.id} has already been materialized`);
   }
+
+  assertPlanArtifactExists(paths, workItem.id);
+  const graph = readAndValidateWorkGraph(paths, workItem.id);
+  const targets = resolveGraphTargets(paths, graph);
+  preflightMaterialization(targets, graph);
 
   fs.writeFileSync(approvedGraphPath, `${JSON.stringify(graph, null, 2)}\n`);
 
@@ -108,6 +109,13 @@ function readAndValidateWorkGraph(paths: DevtaskPaths, workId: string): WorkGrap
     throw new DevtaskError(`Work graph does not exist: ${graphPath}. Run devtask work plan ${workId} first.`);
   }
   return parseWorkGraph(JSON.parse(fs.readFileSync(graphPath, "utf8")) as unknown, workId);
+}
+
+function assertPlanArtifactExists(paths: DevtaskPaths, workId: string): void {
+  const planPath = workPlanPath(paths, workId);
+  if (!fs.existsSync(planPath) || fs.readFileSync(planPath, "utf8").trim().length === 0) {
+    throw new DevtaskError(`Work plan does not exist: ${planPath}. Run devtask work plan ${workId} first.`);
+  }
 }
 
 function parseWorkMaterialization(value: unknown, expectedWorkId: string): WorkMaterialization {

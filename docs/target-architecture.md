@@ -131,6 +131,7 @@ This is the human gate before materialization.
 
 It should:
 
+- require a human-readable work plan
 - validate graph schema
 - validate target ids
 - validate task ids

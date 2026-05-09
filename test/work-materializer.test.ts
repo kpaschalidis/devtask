@@ -32,6 +32,7 @@ describe("work materializer", () => {
       repoPath: repo,
       kind: "api"
     });
+    fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
     fs.writeFileSync(
       workGraphPath(paths, item.id),
       JSON.stringify(
@@ -116,6 +117,7 @@ describe("work materializer", () => {
       id: "WORK-123",
       title: "Add API behavior"
     });
+    fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
     fs.writeFileSync(
       workGraphPath(paths, item.id),
       JSON.stringify(
@@ -140,5 +142,87 @@ describe("work materializer", () => {
     );
 
     await expect(approveWorkPlan(paths, item)).rejects.toThrow("Workspace target backend does not exist");
+  });
+
+  it("rejects approval when the human-readable plan artifact is missing", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-plan-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Add API behavior"
+    });
+    addWorkspaceTarget(paths, {
+      id: "backend",
+      repoPath: repo,
+      kind: "api"
+    });
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependsOn: []
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+
+    await expect(approveWorkPlan(paths, item)).rejects.toThrow("Run devtask work plan WORK-123 first");
+  });
+
+  it("reports existing materialization before repo task preflight errors", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-existing-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Add API behavior"
+    });
+    addWorkspaceTarget(paths, {
+      id: "backend",
+      repoPath: repo,
+      kind: "api"
+    });
+    fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependsOn: []
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+    await approveWorkPlan(paths, item);
+
+    await expect(approveWorkPlan(paths, item)).rejects.toThrow("has already been materialized");
   });
 });

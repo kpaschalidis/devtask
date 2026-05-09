@@ -112,6 +112,7 @@ describe("work board", () => {
       repoPath: repo,
       kind: "api"
     });
+    fs.writeFileSync(workPlanPath(paths, item.id), "# Plan\n");
     fs.writeFileSync(
       workGraphPath(paths, item.id),
       JSON.stringify(

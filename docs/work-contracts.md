@@ -276,6 +276,7 @@ Approves the proposed graph and materializes repo-local tasks.
 
 Inputs:
 
+- `.devtask/work/<work-id>/plan.md`
 - `.devtask/work/<work-id>/graph.json`
 - workspace target inventory
 - repo-local configuration for each target repo
@@ -290,6 +291,7 @@ Artifacts:
 
 Preconditions:
 
+- human-readable work plan exists
 - graph schema is valid
 - graph `workId` matches the work item
 - all task ids are valid and unique
