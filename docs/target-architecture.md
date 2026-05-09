@@ -367,8 +367,6 @@ Implemented:
 
 Not yet implemented:
 
-- `work approve-plan`
-- materializing graph nodes into repo-local tasks
 - work-level run/check/review/commit/PR fan-out
 - dependency-aware execution
 - CI watch/fix loop

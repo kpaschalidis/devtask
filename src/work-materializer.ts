@@ -1,0 +1,278 @@
+import fs from "node:fs";
+import path from "node:path";
+import { DevtaskError } from "./errors.js";
+import { buildCodexCommand, readConfig } from "./config.js";
+import type { DevtaskPaths } from "./paths.js";
+import {
+  taskMetaPath,
+  workItemDir,
+  workItemApprovedGraphPath,
+  workItemMaterializationPath
+} from "./paths.js";
+import { assertValidTaskId } from "./task-id.js";
+import { createTask, initializeStore } from "./task-store.js";
+import type { TaskMeta } from "./types.js";
+import { getWorkspaceTarget, type WorkspaceTarget } from "./workspace-targets.js";
+import type { WorkItem } from "./work-store.js";
+import { workGraphPath, workPlanPath } from "./work-planner.js";
+
+export interface WorkGraphTask {
+  id: string;
+  target: string;
+  goal: string;
+  owns: string[];
+  dependsOn: string[];
+}
+
+export interface WorkGraph {
+  schemaVersion: 1;
+  workId: string;
+  tasks: WorkGraphTask[];
+  validation: string[];
+  openQuestions: string[];
+}
+
+export interface MaterializedWorkTask {
+  graphTaskId: string;
+  target: string;
+  repoPath: string;
+  scope: string | null;
+  taskId: string;
+  branch: string;
+  worktreePath: string;
+}
+
+export interface WorkMaterialization {
+  schemaVersion: 1;
+  workId: string;
+  approvedGraphPath: string;
+  materializedAt: string;
+  tasks: MaterializedWorkTask[];
+}
+
+export async function approveWorkPlan(paths: DevtaskPaths, workItem: WorkItem): Promise<WorkMaterialization> {
+  const graph = readAndValidateWorkGraph(paths, workItem.id);
+  const targets = resolveGraphTargets(paths, graph);
+  preflightMaterialization(targets, graph);
+
+  const approvedGraphPath = workItemApprovedGraphPath(paths, workItem.id);
+  const materializationPath = workItemMaterializationPath(paths, workItem.id);
+  if (fs.existsSync(materializationPath)) {
+    throw new DevtaskError(`Work item ${workItem.id} has already been materialized`);
+  }
+
+  fs.writeFileSync(approvedGraphPath, `${JSON.stringify(graph, null, 2)}\n`);
+
+  const tasks: MaterializedWorkTask[] = [];
+  for (const graphTask of graph.tasks) {
+    const target = targets.get(graphTask.target);
+    if (!target) {
+      throw new DevtaskError(`Workspace target ${graphTask.target} does not exist`);
+    }
+    const repoPaths = resolveRepoPaths(target);
+    initializeStore(repoPaths);
+    const meta = await createTask(repoPaths, graphTask.id, {
+      goal: buildRepoTaskGoal(paths, workItem, graph, graphTask, target),
+      command: buildMaterializedTaskCommand(paths, repoPaths, workItem)
+    });
+    tasks.push(toMaterializedTask(graphTask, target, meta));
+  }
+
+  const materialization: WorkMaterialization = {
+    schemaVersion: 1,
+    workId: workItem.id,
+    approvedGraphPath,
+    materializedAt: new Date().toISOString(),
+    tasks
+  };
+  fs.writeFileSync(materializationPath, `${JSON.stringify(materialization, null, 2)}\n`);
+  return materialization;
+}
+
+export function readWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
+  return readAndValidateWorkGraph(paths, workId);
+}
+
+function readAndValidateWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
+  const graphPath = workGraphPath(paths, workId);
+  if (!fs.existsSync(graphPath)) {
+    throw new DevtaskError(`Work graph does not exist: ${graphPath}. Run devtask work plan ${workId} first.`);
+  }
+  return parseWorkGraph(JSON.parse(fs.readFileSync(graphPath, "utf8")) as unknown, workId);
+}
+
+function parseWorkGraph(value: unknown, expectedWorkId: string): WorkGraph {
+  if (!isRecord(value) || value.schemaVersion !== 1) {
+    throw new DevtaskError("Invalid work graph: schemaVersion must be 1");
+  }
+  const workId = requireString(value, "workId");
+  if (workId !== expectedWorkId) {
+    throw new DevtaskError(`Invalid work graph: workId ${workId} does not match ${expectedWorkId}`);
+  }
+  if (!Array.isArray(value.tasks)) {
+    throw new DevtaskError("Invalid work graph: tasks must be an array");
+  }
+  const graph: WorkGraph = {
+    schemaVersion: 1,
+    workId,
+    tasks: value.tasks.map(parseWorkGraphTask),
+    validation: parseStringArray(value.validation, "validation"),
+    openQuestions: parseStringArray(value.openQuestions, "openQuestions")
+  };
+  validateGraphReferences(graph);
+  return graph;
+}
+
+function parseWorkGraphTask(value: unknown): WorkGraphTask {
+  if (!isRecord(value)) {
+    throw new DevtaskError("Invalid work graph: task must be an object");
+  }
+  const id = requireString(value, "id");
+  assertValidTaskId(id);
+  return {
+    id,
+    target: requireString(value, "target"),
+    goal: requireString(value, "goal"),
+    owns: parseStringArray(value.owns, "owns"),
+    dependsOn: parseStringArray(value.dependsOn, "dependsOn")
+  };
+}
+
+function validateGraphReferences(graph: WorkGraph): void {
+  const taskIds = new Set<string>();
+  for (const task of graph.tasks) {
+    if (taskIds.has(task.id)) {
+      throw new DevtaskError(`Invalid work graph: duplicate task id ${task.id}`);
+    }
+    taskIds.add(task.id);
+  }
+  for (const task of graph.tasks) {
+    for (const dependency of task.dependsOn) {
+      if (!taskIds.has(dependency)) {
+        throw new DevtaskError(`Invalid work graph: task ${task.id} depends on unknown task ${dependency}`);
+      }
+    }
+  }
+}
+
+function resolveGraphTargets(paths: DevtaskPaths, graph: WorkGraph): Map<string, WorkspaceTarget> {
+  const targets = new Map<string, WorkspaceTarget>();
+  for (const task of graph.tasks) {
+    if (!targets.has(task.target)) {
+      targets.set(task.target, getWorkspaceTarget(paths, task.target));
+    }
+  }
+  return targets;
+}
+
+function preflightMaterialization(targets: Map<string, WorkspaceTarget>, graph: WorkGraph): void {
+  for (const task of graph.tasks) {
+    const target = targets.get(task.target);
+    if (!target) {
+      throw new DevtaskError(`Workspace target ${task.target} does not exist`);
+    }
+    const repoPaths = resolveRepoPaths(target);
+    if (fs.existsSync(taskMetaPath(repoPaths, task.id))) {
+      throw new DevtaskError(`Task ${task.id} already exists in repo ${repoPaths.root}`);
+    }
+  }
+}
+
+function resolveRepoPaths(target: WorkspaceTarget): DevtaskPaths {
+  // Workspace targets are validated and canonicalized when read.
+  return {
+    root: target.repoPath,
+    baseDir: path.join(target.repoPath, ".devtask"),
+    configPath: path.join(target.repoPath, ".devtask", "config.json"),
+    tasksDir: path.join(target.repoPath, ".devtask", "tasks"),
+    worktreesDir: path.join(target.repoPath, ".devtask", "worktrees"),
+    groupsDir: path.join(target.repoPath, ".devtask", "groups"),
+    workDir: path.join(target.repoPath, ".devtask", "work")
+  };
+}
+
+function buildRepoTaskGoal(
+  paths: DevtaskPaths,
+  workItem: WorkItem,
+  graph: WorkGraph,
+  task: WorkGraphTask,
+  target: WorkspaceTarget
+): string {
+  return [
+    `Implement work item ${workItem.id}: ${workItem.source.title}`,
+    "",
+    `Work source artifact: ${workItem.source.artifact}`,
+    `Work plan artifact: ${workPlanPath(paths, workItem.id)}`,
+    `Work graph artifact: ${workGraphPath(paths, workItem.id)}`,
+    `Graph task: ${task.id}`,
+    `Target: ${task.target}`,
+    `Target repo: ${target.repoPath}`,
+    `Target scope: ${target.scope ?? "."}`,
+    "",
+    "## Goal",
+    task.goal,
+    "",
+    "## Ownership",
+    ...task.owns.map((item) => `- ${item}`),
+    "",
+    "## Dependencies",
+    ...(task.dependsOn.length ? task.dependsOn.map((item) => `- ${item}`) : ["- none"]),
+    "",
+    "## Work Graph Context",
+    "",
+    JSON.stringify(
+      {
+        workId: graph.workId,
+        validation: graph.validation,
+        openQuestions: graph.openQuestions
+      },
+      null,
+      2
+    )
+  ].join("\n");
+}
+
+function buildMaterializedTaskCommand(paths: DevtaskPaths, repoPaths: DevtaskPaths, workItem: WorkItem): string {
+  const config = readConfig(repoPaths);
+  return buildCodexCommand({
+    model: config.codex.model,
+    fullAuto: config.codex.fullAuto,
+    addDirs: [workItemDir(paths, workItem.id), path.dirname(workItem.source.artifact)]
+  });
+}
+
+function toMaterializedTask(task: WorkGraphTask, target: WorkspaceTarget, meta: TaskMeta): MaterializedWorkTask {
+  return {
+    graphTaskId: task.id,
+    target: task.target,
+    repoPath: target.repoPath,
+    scope: target.scope,
+    taskId: meta.id,
+    branch: meta.branch,
+    worktreePath: meta.worktreePath
+  };
+}
+
+function parseStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new DevtaskError(`Invalid work graph: ${field} must be an array`);
+  }
+  return value.map((item) => {
+    if (typeof item !== "string" || !item.trim()) {
+      throw new DevtaskError(`Invalid work graph: ${field} must contain only non-empty strings`);
+    }
+    return item.trim();
+  });
+}
+
+function requireString(record: Record<string, unknown>, field: string): string {
+  const value = record[field];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new DevtaskError(`Invalid work graph: ${field} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

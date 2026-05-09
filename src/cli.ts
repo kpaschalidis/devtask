@@ -57,6 +57,7 @@ import {
 } from "./workspace-targets.js";
 import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 import { runWorkPlanner } from "./work-planner.js";
+import { approveWorkPlan } from "./work-materializer.js";
 
 interface PrOptions {
   title?: string;
@@ -440,6 +441,28 @@ export function createCli(): Command {
         console.log(`Graph: ${record.graphPath}`);
         if (record.status === "failed") {
           process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("approve-plan")
+    .description("Approve a work graph and materialize repo-local task worktrees.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const materialization = await approveWorkPlan(paths, item);
+        console.log(`Approved work plan ${id}`);
+        console.log(`Materialization: ${materialization.tasks.length} task(s)`);
+        for (const task of materialization.tasks) {
+          console.log(`${task.target}/${task.taskId}`);
+          console.log(`  Repo: ${task.repoPath}`);
+          console.log(`  Branch: ${task.branch}`);
+          console.log(`  Worktree: ${task.worktreePath}`);
         }
       } catch (error) {
         printError(error);
