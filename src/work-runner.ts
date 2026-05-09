@@ -2,6 +2,7 @@ import { DevtaskError } from "./errors.js";
 import { readTaskMeta } from "./meta.js";
 import type { DevtaskPaths } from "./paths.js";
 import { resolvePaths, taskMetaPath } from "./paths.js";
+import { isProcessAlive } from "./processes.js";
 import type { TaskStatus } from "./types.js";
 import { readApprovedWorkGraph, readWorkMaterialization } from "./work-materializer.js";
 import type { WorkItem } from "./work-store.js";
@@ -64,6 +65,28 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
         repoPath: task.repoPath,
         status: meta.status,
         reason: `waiting for ${blockedDependency}`
+      });
+      continue;
+    }
+
+    if (isProcessAlive(meta.supervisorPid)) {
+      skipped.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        status: meta.status,
+        reason: `already supervised by PID ${meta.supervisorPid}`
+      });
+      continue;
+    }
+
+    if (meta.status === "created") {
+      skipped.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        status: meta.status,
+        reason: "needs repo-plan"
       });
       continue;
     }

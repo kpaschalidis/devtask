@@ -72,6 +72,52 @@ describe("work runner", () => {
       ]
     });
   });
+
+  it("explains tasks that still need repo planning", async () => {
+    const fixture = await makeFixture({ withDependency: false });
+
+    expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
+      ready: [],
+      skipped: [
+        {
+          target: "backend",
+          taskId: "work-123-backend",
+          reason: "needs repo-plan"
+        },
+        {
+          target: "frontend",
+          taskId: "work-123-frontend",
+          reason: "needs repo-plan"
+        }
+      ]
+    });
+  });
+
+  it("does not start tasks that already have a live supervisor", async () => {
+    const fixture = await makeFixture({ withDependency: false });
+    createWorkRepoPlans(fixture.paths, fixture.item);
+    const backendMetaPath = taskMetaPath(fixture.backendPaths, "work-123-backend");
+    writeTaskMeta(backendMetaPath, {
+      ...readTaskMeta(backendMetaPath),
+      supervisorPid: process.pid
+    });
+
+    expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
+      ready: [
+        {
+          target: "frontend",
+          taskId: "work-123-frontend"
+        }
+      ],
+      skipped: [
+        {
+          target: "backend",
+          taskId: "work-123-backend",
+          reason: `already supervised by PID ${process.pid}`
+        }
+      ]
+    });
+  });
 });
 
 async function makeFixture(options: { withDependency: boolean }) {
