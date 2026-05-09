@@ -60,6 +60,7 @@ import { runWorkPlanner } from "./work-planner.js";
 import { approveWorkPlan } from "./work-materializer.js";
 import { buildWorkBoardRows } from "./work-board.js";
 import { createWorkRepoPlans } from "./work-repo-planner.js";
+import { planWorkRun } from "./work-runner.js";
 
 interface PrOptions {
   title?: string;
@@ -506,6 +507,33 @@ export function createCli(): Command {
           ["TARGET", "TASK", "STATUS", "PLAN"],
           results.map((result) => [result.target, result.taskId, result.status, result.planPath])
         );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("run")
+    .description("Run repo-local tasks that are ready in an approved work graph.")
+    .argument("<id>")
+    .option("--attachable", "Run workers inside attachable tmux sessions")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run workers as plain detached background processes")
+    .action((id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const plan = planWorkRun(paths, item);
+        for (const task of plan.skipped) {
+          console.log(`${task.target}/${task.taskId}: skipped (${task.reason})`);
+        }
+        for (const task of plan.ready) {
+          const repoPaths = resolvePaths(task.repoPath);
+          printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, resolveRunRuntime(repoPaths, options)), "Running");
+        }
+        if (plan.ready.length === 0 && plan.skipped.length === 0) {
+          console.log(`No materialized tasks for work item ${id}`);
+        }
       } catch (error) {
         printError(error);
       }

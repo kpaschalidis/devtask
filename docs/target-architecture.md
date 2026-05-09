@@ -181,6 +181,8 @@ devtask work run <id>
 
 Runs repo-local agents in parallel when dependencies allow.
 
+The initial dependency policy is conservative: a task with dependencies waits until each dependency task is `done`.
+
 Each agent works inside its own worktree. A task may use a simple single-agent runtime or a richer team/swarm runtime, but `devtask` remains the lifecycle owner.
 
 ### 6. Check And Review

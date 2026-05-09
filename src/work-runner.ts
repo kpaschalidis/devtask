@@ -1,0 +1,91 @@
+import { DevtaskError } from "./errors.js";
+import { readTaskMeta } from "./meta.js";
+import type { DevtaskPaths } from "./paths.js";
+import { resolvePaths, taskMetaPath } from "./paths.js";
+import type { TaskStatus } from "./types.js";
+import { readApprovedWorkGraph, readWorkMaterialization } from "./work-materializer.js";
+import type { WorkItem } from "./work-store.js";
+
+export interface WorkRunReadyTask {
+  target: string;
+  taskId: string;
+  repoPath: string;
+  status: TaskStatus;
+}
+
+export interface WorkRunSkippedTask {
+  target: string;
+  taskId: string;
+  repoPath: string;
+  status: TaskStatus;
+  reason: string;
+}
+
+export interface WorkRunPlan {
+  ready: WorkRunReadyTask[];
+  skipped: WorkRunSkippedTask[];
+}
+
+const RUNNABLE_STATUSES: TaskStatus[] = ["planned", "paused"];
+const DEPENDENCY_COMPLETE_STATUSES: TaskStatus[] = ["done"];
+
+export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPlan {
+  const materialization = readWorkMaterialization(paths, workItem.id);
+  if (!materialization) {
+    throw new DevtaskError(`Work item ${workItem.id} has not been materialized. Run devtask work approve-plan ${workItem.id} first.`);
+  }
+
+  const graph = readApprovedWorkGraph(paths, workItem.id);
+  const materializedByGraphId = new Map(materialization.tasks.map((task) => [task.graphTaskId, task]));
+  const statusByGraphId = new Map<string, TaskStatus>();
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    statusByGraphId.set(task.graphTaskId, readTaskMeta(taskMetaPath(repoPaths, task.taskId)).status);
+  }
+
+  const ready: WorkRunReadyTask[] = [];
+  const skipped: WorkRunSkippedTask[] = [];
+  for (const graphTask of graph.tasks) {
+    const task = materializedByGraphId.get(graphTask.id);
+    if (!task) {
+      throw new DevtaskError(`Approved graph task ${graphTask.id} has not been materialized`);
+    }
+
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+    const blockedDependency = graphTask.dependsOn.find((dependencyId) => {
+      const dependencyStatus = statusByGraphId.get(dependencyId);
+      return !dependencyStatus || !DEPENDENCY_COMPLETE_STATUSES.includes(dependencyStatus);
+    });
+    if (blockedDependency) {
+      skipped.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        status: meta.status,
+        reason: `waiting for ${blockedDependency}`
+      });
+      continue;
+    }
+
+    if (!RUNNABLE_STATUSES.includes(meta.status)) {
+      skipped.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        status: meta.status,
+        reason: `not runnable from ${meta.status}`
+      });
+      continue;
+    }
+
+    ready.push({
+      target: task.target,
+      taskId: task.taskId,
+      repoPath: task.repoPath,
+      status: meta.status
+    });
+  }
+
+  return { ready, skipped };
+}

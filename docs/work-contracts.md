@@ -340,7 +340,7 @@ Rules:
 - plan should be scoped to the graph node ownership
 - dependencies should be visible in the repo plan
 
-### Future: `devtask work run <id>`
+### `devtask work run <id>`
 
 Runs materialized repo tasks.
 
@@ -360,7 +360,8 @@ Rules:
 
 - may run independent tasks in parallel
 - must respect `dependsOn`
-- must not run a dependent task before dependencies are complete enough for the configured policy
+- must not run a dependent task before dependencies are `done`
+- must only start repo tasks in `planned` or `paused`
 - should support per-task attach/steer through existing repo-local runtime
 
 ### Future: `devtask work check <id>`
@@ -519,8 +520,8 @@ Current implementation only persists `created` on `work.json`; richer status sho
 
 Beside real testing, the next implementation focus should be:
 
-1. `devtask work run <id>` to execute materialized tasks with dependency awareness.
-2. `devtask work check/review/approve <id>` to lift repo-local lifecycle gates to the work-item level.
-3. work-level PR/CI commands that operate from durable publication artifacts.
+1. `devtask work check/review/approve <id>` to lift repo-local lifecycle gates to the work-item level.
+2. work-level PR/CI commands that operate from durable publication artifacts.
+3. dependency policy configuration for work-level run, if `done` proves too strict in practice.
 
 `work board` now provides the first cockpit for the new work-item flow; the next steps should make the cockpit actionable without hiding human gates.
