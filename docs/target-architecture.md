@@ -220,6 +220,119 @@ CI monitoring should:
 - rerun fix loops with limits
 - stop at human gates when judgment is needed
 
+## Durable Artifacts
+
+The workflow should leave inspectable artifacts at every stage. These artifacts are part of the product, not incidental logs.
+
+### Workspace Artifacts
+
+```text
+.devtask/workspace.json
+.devtask/config.json
+.devtask/targets.json
+.devtask/sources/<provider>/<source-id>.json
+.devtask/sources/<provider>/<source-id>.md
+```
+
+Purpose:
+
+- identify the workspace
+- store provider-neutral configuration
+- track target inventory
+- preserve raw and rendered source input
+
+### Work Item Artifacts
+
+```text
+.devtask/work/<work-id>/work.json
+.devtask/work/<work-id>/state.md
+.devtask/work/<work-id>/source.md
+.devtask/work/<work-id>/plan.md
+.devtask/work/<work-id>/graph.json
+.devtask/work/<work-id>/plans/<run-id>.prompt.md
+.devtask/work/<work-id>/plans/<run-id>.md
+.devtask/work/<work-id>/plans/<run-id>.json
+```
+
+Purpose:
+
+- track the durable work item
+- preserve manual work source when applicable
+- store the latest work-level plan
+- store the latest proposed execution graph
+- keep prompt/output/run history for planning attempts
+
+### Approved Graph Artifacts
+
+After `approve-plan`, the work item should also record materialization.
+
+Proposed files:
+
+```text
+.devtask/work/<work-id>/approved-graph.json
+.devtask/work/<work-id>/materialization.json
+```
+
+`approved-graph.json` should freeze the graph the human approved. `materialization.json` should map graph task ids to repo-local tasks, branches, and worktrees.
+
+Example shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "workId": "WORK-123",
+  "tasks": [
+    {
+      "graphTaskId": "api-contract",
+      "target": "backend",
+      "repoPath": "/path/to/backend",
+      "taskId": "work-123-api-contract",
+      "branch": "task/work-123-api-contract",
+      "worktreePath": "/path/to/backend/.devtask/worktrees/work-123-api-contract"
+    }
+  ]
+}
+```
+
+### Repo Task Artifacts
+
+Repo-local tasks keep the existing task lifecycle artifacts:
+
+```text
+<repo>/.devtask/tasks/<task-id>/meta.json
+<repo>/.devtask/tasks/<task-id>/task.md
+<repo>/.devtask/tasks/<task-id>/state.md
+<repo>/.devtask/tasks/<task-id>/result.json
+<repo>/.devtask/tasks/<task-id>/plan.md
+<repo>/.devtask/tasks/<task-id>/runs/<run-id>.json
+<repo>/.devtask/tasks/<task-id>/logs/<run-id>.log
+<repo>/.devtask/tasks/<task-id>/reviews/<run-id>.md
+<repo>/.devtask/tasks/<task-id>/checks/<run-id>.json
+<repo>/.devtask/worktrees/<task-id>/
+```
+
+Purpose:
+
+- track repo-local state
+- preserve the exact task prompt
+- keep repo-specific plan and agent progress
+- retain check/review/run history
+- isolate implementation changes in a worktree
+
+### Publication Artifacts
+
+Once commits and pull requests exist, repo task metadata should track:
+
+```text
+commit SHA(s)
+remote branch
+pull request URL
+CI status snapshots
+review status snapshots
+```
+
+These may live in existing task metadata or stage records, but they should remain queryable from the work item so `devtask work board <id>` can explain the whole workflow state.
+
 ## Responsibility Boundaries
 
 ```text
