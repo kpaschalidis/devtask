@@ -425,7 +425,7 @@ Rules:
 - approves implementation diffs, not planning graph
 - must not publish PRs
 
-### Future: `devtask work commit <id>`
+### `devtask work commit <id>`
 
 Commits materialized task worktree changes.
 
@@ -442,10 +442,10 @@ Artifacts:
 Rules:
 
 - must not push
-- should refuse unapproved work unless forced
+- must reuse repo-local commit policy
 - commit boundaries should match repo-local task ownership
 
-### Future: `devtask work pr <id>`
+### `devtask work pr <id>`
 
 Publishes materialized task branches.
 
@@ -459,7 +459,6 @@ Inputs:
 Artifacts:
 
 - repo-local PR/MR URLs
-- work-level publication summary
 
 Rules:
 
@@ -515,8 +514,8 @@ Current implementation only persists `created` on `work.json`; richer status sho
 
 Beside real testing, the next implementation focus should be:
 
-1. work-level commit and PR commands that operate from durable materialization artifacts.
-2. work-level CI commands that operate from durable publication artifacts.
+1. work-level CI commands that operate from durable publication artifacts.
+2. CI watch/fix loop with retry limits.
 3. dependency policy configuration for work-level run, if `done` proves too strict in practice.
 
 `work board` now provides the first cockpit for the new work-item flow; the next steps should make the cockpit actionable without hiding human gates.

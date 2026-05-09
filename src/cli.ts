@@ -649,6 +649,108 @@ export function createCli(): Command {
       }
     });
 
+  work
+    .command("commit")
+    .description("Commit current worktree changes for materialized repo tasks.")
+    .argument("<id>")
+    .option("-m, --message <message>", "Commit message")
+    .action(async (id: string, options: { message?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const tasks = getMaterializedWorkTasks(paths, item);
+        let failed = false;
+
+        for (const [index, task] of tasks.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${task.target}/${task.taskId}`);
+          const repoPaths = resolvePaths(task.repoPath);
+          try {
+            await commitTask(repoPaths, task.taskId, { message: options.message });
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("pr")
+    .description("Push existing branch commits and open PRs for materialized repo tasks.")
+    .argument("<id>")
+    .option("--title <title>", "PR title")
+    .option("--body <body>", "PR body")
+    .option("--draft", "Create draft PRs")
+    .option("--ready", "Create ready-for-review PRs instead of drafts")
+    .action(async (id: string, options: PrOptions) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const tasks = getMaterializedWorkTasks(paths, item);
+        const draft = resolvePrDraftMode(options);
+        const preflights = await Promise.all(
+          tasks.map(async (task) => {
+            const repoPaths = resolvePaths(task.repoPath);
+            const meta = getTask(repoPaths, task.taskId);
+            return {
+              task,
+              meta,
+              preflight: await preflightScmForPullRequest(meta.worktreePath, { draft })
+            };
+          })
+        );
+        printWorkPrPreflight(preflights, draft ? "draft" : "ready");
+        if (preflights.some(({ meta, preflight }) => !isPrPreflightReady(meta, preflight, draft))) {
+          process.exit(1);
+        }
+
+        let failed = false;
+        const results: Array<{ target: string; task: string; status: string; pr: string }> = [];
+        for (const task of tasks) {
+          const repoPaths = resolvePaths(task.repoPath);
+          const meta = getTask(repoPaths, task.taskId);
+          if (meta.status === "pr-open" && meta.prUrl) {
+            results.push({ target: task.target, task: task.taskId, status: "already-open", pr: meta.prUrl });
+            continue;
+          }
+          try {
+            const prUrl = await openPrForTask(repoPaths, task.taskId, options);
+            results.push({ target: task.target, task: task.taskId, status: "opened", pr: prUrl });
+          } catch (error) {
+            failed = true;
+            results.push({
+              target: task.target,
+              task: task.taskId,
+              status: "failed",
+              pr: error instanceof Error ? error.message.split("\n")[0] : String(error)
+            });
+            printNonFatalError(error);
+          }
+        }
+
+        console.log("");
+        printTable(
+          ["TARGET", "TASK", "STATUS", "PR"],
+          results.map((result) => [result.target, result.task, result.status, result.pr])
+        );
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
   const scripts = program.command("scripts").description("Install and run packaged devtask helper scripts.");
 
   scripts
@@ -2845,6 +2947,36 @@ function printGroupPrPreflight(
     console.log("Preflight details:");
     for (const { repo, preflight } of details) {
       console.log(`${repo.name}/${repo.taskId}: ${preflight.accessDetail}`);
+    }
+  }
+  console.log("");
+}
+
+function printWorkPrPreflight(
+  rows: Array<{ task: NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"][number]; meta: ReturnType<typeof getTask>; preflight: ScmPreflight }>,
+  mode: string
+): void {
+  console.log("Preflight:");
+  printTable(
+    ["TARGET", "TASK", "STATUS", "PROVIDER", "ACCESS", "CLEAN", "COMMITS", "MODE", "PR"],
+    rows.map(({ task, meta, preflight }) => [
+      task.target,
+      task.taskId,
+      meta.status,
+      preflight.provider,
+      preflight.access,
+      preflight.clean ? "ok" : "dirty",
+      preflight.commits > 0 ? "yes" : "no",
+      mode === "draft" && !preflight.draftSupported ? "unsupported" : mode,
+      meta.prUrl ? "open" : "-"
+    ])
+  );
+  const details = rows.filter(({ preflight }) => preflight.accessDetail);
+  if (details.length > 0) {
+    console.log("");
+    console.log("Preflight details:");
+    for (const { task, preflight } of details) {
+      console.log(`${task.target}/${task.taskId}: ${preflight.accessDetail}`);
     }
   }
   console.log("");
