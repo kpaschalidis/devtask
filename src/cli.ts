@@ -57,7 +57,7 @@ import {
 } from "./workspace-targets.js";
 import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 import { runWorkPlanner } from "./work-planner.js";
-import { approveWorkPlan } from "./work-materializer.js";
+import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
 import { buildWorkBoardRows } from "./work-board.js";
 import { createWorkRepoPlans } from "./work-repo-planner.js";
 import { planWorkRun } from "./work-runner.js";
@@ -533,6 +533,116 @@ export function createCli(): Command {
         }
         if (plan.ready.length === 0 && plan.skipped.length === 0) {
           console.log(`No materialized tasks for work item ${id}`);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("check")
+    .description("Run configured checks for materialized repo tasks.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const tasks = getMaterializedWorkTasks(paths, item);
+        let failed = false;
+
+        for (const [index, task] of tasks.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${task.target}/${task.taskId}`);
+          const repoPaths = resolvePaths(task.repoPath);
+          try {
+            await checkTask(repoPaths, task.taskId, { exitOnFailure: false });
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+            continue;
+          }
+          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, task.taskId));
+          if (latest.latestVerification?.status === "failed") {
+            failed = true;
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("review")
+    .description("Run review agents for materialized repo tasks.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const tasks = getMaterializedWorkTasks(paths, item);
+        let failed = false;
+
+        for (const [index, task] of tasks.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          console.log(`${task.target}/${task.taskId}`);
+          const repoPaths = resolvePaths(task.repoPath);
+          try {
+            await reviewTask(repoPaths, task.taskId, { exitOnFindings: false });
+          } catch (error) {
+            failed = true;
+            printNonFatalError(error);
+            continue;
+          }
+          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, task.taskId));
+          if (latest.latestReviewAgent?.status !== "passed") {
+            failed = true;
+          }
+        }
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("approve")
+    .description("Approve materialized repo tasks after policy checks.")
+    .argument("<id>")
+    .option("--force", "Approve even when checks or review are missing or failing")
+    .action(async (id: string, options: { force?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const tasks = getMaterializedWorkTasks(paths, item);
+        let failed = false;
+        const rows: string[][] = [];
+
+        for (const task of tasks) {
+          const repoPaths = resolvePaths(task.repoPath);
+          try {
+            const result = await approveTask(repoPaths, task.taskId, { force: options.force === true });
+            rows.push([task.target, task.taskId, "approved", result]);
+          } catch (error) {
+            failed = true;
+            rows.push([task.target, task.taskId, "failed", error instanceof Error ? error.message.split("\n")[0] : String(error)]);
+          }
+        }
+
+        printTable(["TARGET", "TASK", "STATUS", "DETAIL"], rows);
+
+        if (failed) {
+          process.exit(1);
         }
       } catch (error) {
         printError(error);
@@ -2554,6 +2664,14 @@ function resolveRepoPathForGroup(repoPath: string): ReturnType<typeof resolvePat
     }
     throw error;
   }
+}
+
+function getMaterializedWorkTasks(paths: ReturnType<typeof resolvePaths>, item: WorkItem): NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"] {
+  const materialization = readWorkMaterialization(paths, item.id);
+  if (!materialization) {
+    throw new DevtaskError(`Work item ${item.id} has not been materialized. Run devtask work approve-plan ${item.id} first.`);
+  }
+  return materialization.tasks;
 }
 
 function printGroupLog(

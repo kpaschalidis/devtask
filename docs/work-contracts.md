@@ -364,7 +364,7 @@ Rules:
 - must only start repo tasks in `planned` or `paused`
 - should support per-task attach/steer through existing repo-local runtime
 
-### Future: `devtask work check <id>`
+### `devtask work check <id>`
 
 Runs repo-local validation for materialized tasks.
 
@@ -376,38 +376,34 @@ Inputs:
 Artifacts:
 
 - repo-local verification records
-- work-level aggregate check summary
 
 Rules:
 
-- should fan out across independent tasks
-- should stop or mark blocked when required dependencies fail
+- must run configured repo-local checks
+- missing check config should be explicit
+- failed repo checks should fail the work-level command
 - must preserve repo-local check details
 
-### Future: `devtask work review <id>`
+### `devtask work review <id>`
 
 Runs review across materialized task diffs.
 
 Inputs:
 
-- source artifact
-- approved graph
-- repo-local plans
-- repo-local diffs
-- latest check results
+- materialization record
+- repo-local task metadata and diffs
 
 Artifacts:
 
 - repo-local review records
-- work-level aggregate review summary
 
 Rules:
 
-- review must check each task against its graph ownership boundary
-- review findings should route back to the owning repo task
+- review must be read-only
+- review findings should fail the work-level command
 - review should not fix findings in the same stage
 
-### Future: `devtask work approve <id>`
+### `devtask work approve <id>`
 
 Human approval gate for materialized implementation.
 
@@ -421,7 +417,6 @@ Inputs:
 
 Artifacts:
 
-- work-level approval record
 - repo-local approval status where applicable
 
 Rules:
@@ -520,8 +515,8 @@ Current implementation only persists `created` on `work.json`; richer status sho
 
 Beside real testing, the next implementation focus should be:
 
-1. `devtask work check/review/approve <id>` to lift repo-local lifecycle gates to the work-item level.
-2. work-level PR/CI commands that operate from durable publication artifacts.
+1. work-level commit and PR commands that operate from durable materialization artifacts.
+2. work-level CI commands that operate from durable publication artifacts.
 3. dependency policy configuration for work-level run, if `done` proves too strict in practice.
 
 `work board` now provides the first cockpit for the new work-item flow; the next steps should make the cockpit actionable without hiding human gates.
