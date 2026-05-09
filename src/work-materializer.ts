@@ -94,6 +94,14 @@ export function readWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
   return readAndValidateWorkGraph(paths, workId);
 }
 
+export function readApprovedWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
+  const approvedGraphPath = workItemApprovedGraphPath(paths, workId);
+  if (!fs.existsSync(approvedGraphPath)) {
+    throw new DevtaskError(`Approved work graph does not exist: ${approvedGraphPath}. Run devtask work approve-plan ${workId} first.`);
+  }
+  return parseWorkGraph(JSON.parse(fs.readFileSync(approvedGraphPath, "utf8")) as unknown, workId);
+}
+
 export function readWorkMaterialization(paths: DevtaskPaths, workId: string): WorkMaterialization | null {
   const materializationPath = workItemMaterializationPath(paths, workId);
   if (!fs.existsSync(materializationPath)) {

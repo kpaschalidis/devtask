@@ -152,6 +152,10 @@ Shows the current work item and repo-task state from durable artifacts. Before m
 
 ### 4. Repo Plan
 
+```bash
+devtask work repo-plan <id>
+```
+
 Each materialized repo task gets a repo-specific plan.
 
 The repo planner reads:

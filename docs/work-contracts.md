@@ -312,7 +312,7 @@ Current limitation:
 
 - if task creation fails after preflight, rollback is not yet guaranteed. Future implementation should make materialization transactional or record partial materialization for recovery.
 
-### Future: `devtask work repo-plan <id>`
+### `devtask work repo-plan <id>`
 
 Runs repo-specific planning for materialized tasks.
 
@@ -328,13 +328,17 @@ Inputs:
 Artifacts:
 
 - repo-local `.devtask/tasks/<task-id>/plan.md`
-- repo-local plan run records
+- repo-local plan stage records
 
 Rules:
 
-- repo planner owns exact implementation plan
-- repo planner must stay inside its target ownership boundary
-- should not edit implementation files
+- must not modify runtime code
+- must not create additional repo tasks
+- must use the approved graph, not the mutable proposed graph
+- must mark each repo-local task as `planned`
+- must fail if a repo-local task has moved past planning
+- plan should be scoped to the graph node ownership
+- dependencies should be visible in the repo plan
 
 ### Future: `devtask work run <id>`
 
@@ -515,8 +519,8 @@ Current implementation only persists `created` on `work.json`; richer status sho
 
 Beside real testing, the next implementation focus should be:
 
-1. `devtask work repo-plan <id>` or `devtask work plan-tasks <id>` to generate repo-specific plans from the approved graph.
-2. `devtask work run <id>` to execute materialized tasks with dependency awareness.
-3. `devtask work check/review/approve <id>` to lift repo-local lifecycle gates to the work-item level.
+1. `devtask work run <id>` to execute materialized tasks with dependency awareness.
+2. `devtask work check/review/approve <id>` to lift repo-local lifecycle gates to the work-item level.
+3. work-level PR/CI commands that operate from durable publication artifacts.
 
 `work board` now provides the first cockpit for the new work-item flow; the next steps should make the cockpit actionable without hiding human gates.

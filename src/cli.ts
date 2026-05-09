@@ -59,6 +59,7 @@ import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, t
 import { runWorkPlanner } from "./work-planner.js";
 import { approveWorkPlan } from "./work-materializer.js";
 import { buildWorkBoardRows } from "./work-board.js";
+import { createWorkRepoPlans } from "./work-repo-planner.js";
 
 interface PrOptions {
   title?: string;
@@ -483,6 +484,28 @@ export function createCli(): Command {
           console.log(`  Branch: ${task.branch}`);
           console.log(`  Worktree: ${task.worktreePath}`);
         }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("repo-plan")
+    .description("Create repo-local task plans from an approved work graph.")
+    .argument("<id>")
+    .action((id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const results = createWorkRepoPlans(paths, item);
+        if (results.length === 0) {
+          console.log(`No materialized tasks for work item ${id}`);
+          return;
+        }
+        printTable(
+          ["TARGET", "TASK", "STATUS", "PLAN"],
+          results.map((result) => [result.target, result.taskId, result.status, result.planPath])
+        );
       } catch (error) {
         printError(error);
       }
