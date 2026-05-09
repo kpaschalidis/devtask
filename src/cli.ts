@@ -56,6 +56,7 @@ import {
   type WorkspaceTarget
 } from "./workspace-targets.js";
 import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
+import { runWorkPlanner } from "./work-planner.js";
 
 interface PrOptions {
   title?: string;
@@ -404,6 +405,42 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         console.log(JSON.stringify(getWorkItem(paths, id), null, 2));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("plan")
+    .description("Create or refresh the proposed execution graph for a work item.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const config = readConfig(paths);
+        console.log(`Running work planner for ${item.id}`);
+        const record = await runWorkPlanner(paths, item, config, {
+          onStart: (start) => {
+            console.log(`Prompt: ${start.promptPath}`);
+            console.log(`Plan: ${start.planPath}`);
+            console.log(`Graph: ${start.graphPath}`);
+            console.log(`Output: ${start.outputPath}`);
+            console.log(`Command: ${start.command}`);
+          },
+          onStdout: (chunk) => {
+            process.stdout.write(chunk);
+          },
+          onStderr: (chunk) => {
+            process.stderr.write(chunk);
+          }
+        });
+        console.log(`Plan: ${record.status}`);
+        console.log(`File: ${record.planPath}`);
+        console.log(`Graph: ${record.graphPath}`);
+        if (record.status === "failed") {
+          process.exit(1);
+        }
       } catch (error) {
         printError(error);
       }

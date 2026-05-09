@@ -265,11 +265,12 @@ Create durable work items before deciding whether the work is single-repo, monor
 ```bash
 devtask work create improve-install --title "Improve install docs" --body "Clarify npm link and basic workflow."
 devtask work create CPS-549 --from-jira
+devtask work plan CPS-549
 devtask work list
 devtask work show CPS-549
 ```
 
-A work item stores the original source under `.devtask/work/<id>/` and is the foundation for the planned work-item flow: source input, target selection, orchestration graph, repo/scope tasks, review, PRs, and CI follow-up.
+A work item stores the original source under `.devtask/work/<id>/` and is the foundation for the planned work-item flow: source input, target selection, orchestration graph, repo/scope tasks, review, PRs, and CI follow-up. `devtask work plan <id>` writes a human plan to `.devtask/work/<id>/plan.md` and a proposed machine-readable graph to `.devtask/work/<id>/graph.json`; it does not create repo tasks yet.
 
 Remove a task worktree and metadata when you no longer need the local task record:
 
