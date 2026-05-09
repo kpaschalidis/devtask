@@ -35,7 +35,8 @@ describe("paths", () => {
       configPath: path.join(repo, ".devtask", "config.json"),
       tasksDir: path.join(repo, ".devtask", "tasks"),
       worktreesDir: path.join(repo, ".devtask", "worktrees"),
-      groupsDir: path.join(repo, ".devtask", "groups")
+      groupsDir: path.join(repo, ".devtask", "groups"),
+      workDir: path.join(repo, ".devtask", "work")
     });
   });
 
@@ -54,7 +55,8 @@ describe("paths", () => {
         configPath: path.join(workspace, ".devtask", "config.json"),
         tasksDir: path.join(workspace, ".devtask", "tasks"),
         worktreesDir: path.join(workspace, ".devtask", "worktrees"),
-        groupsDir: path.join(workspace, ".devtask", "groups")
+        groupsDir: path.join(workspace, ".devtask", "groups"),
+        workDir: path.join(workspace, ".devtask", "work")
       });
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true });

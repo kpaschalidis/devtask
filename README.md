@@ -260,6 +260,17 @@ devtask workspace target list
 
 A target is a stable orchestration address. It can point at a whole repo in a polyrepo workspace, or at a scoped folder inside a monorepo. Existing task and group commands still work; targets are the inventory layer for the work-item flow.
 
+Create durable work items before deciding whether the work is single-repo, monorepo scoped, or polyrepo:
+
+```bash
+devtask work create improve-install --title "Improve install docs" --body "Clarify npm link and basic workflow."
+devtask work create CPS-549 --from-jira
+devtask work list
+devtask work show CPS-549
+```
+
+A work item stores the original source under `.devtask/work/<id>/` and is the foundation for the planned work-item flow: source input, target selection, orchestration graph, repo/scope tasks, review, PRs, and CI follow-up.
+
 Remove a task worktree and metadata when you no longer need the local task record:
 
 ```bash

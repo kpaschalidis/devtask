@@ -55,6 +55,7 @@ import {
   removeWorkspaceTarget,
   type WorkspaceTarget
 } from "./workspace-targets.js";
+import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 
 interface PrOptions {
   title?: string;
@@ -324,6 +325,85 @@ export function createCli(): Command {
         initializeWorkspace(paths);
         const removed = removeWorkspaceTarget(paths, id);
         console.log(`Removed target ${removed.id}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  const work = program.command("work").description("Manage durable work items before they become repo tasks.");
+
+  work
+    .command("create")
+    .description("Create a work item from a manual title or Jira issue.")
+    .argument("<id>")
+    .option("--title <title>", "Manual work item title")
+    .option("--body <body>", "Manual work item description")
+    .option("--from-jira", "Fetch the id as a Jira issue and use it as the source")
+    .action(async (id: string, options: { title?: string; body?: string; fromJira?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        initializeWorkspace(paths);
+        let item: WorkItem;
+        if (options.fromJira) {
+          if (options.title || options.body) {
+            throw new DevtaskError("Use either --from-jira or manual --title/--body, not both");
+          }
+          const issue = await fetchJiraIssue(readConfig(paths), id);
+          const artifacts = writeJiraSourceArtifacts(paths, issue);
+          item = createJiraWorkItem(paths, {
+            id: issue.key,
+            key: issue.key,
+            title: issue.summary,
+            url: issue.url,
+            artifact: artifacts.markdownPath
+          });
+          console.log(`Fetched ${issue.key}: ${issue.summary}`);
+          console.log(`Source: ${artifacts.markdownPath}`);
+        } else {
+          if (!options.title) {
+            throw new DevtaskError("Manual work items require --title, or use --from-jira");
+          }
+          item = createManualWorkItem(paths, {
+            id,
+            title: options.title,
+            body: options.body
+          });
+        }
+
+        console.log(`Created work item ${item.id}`);
+        console.log(`Status: ${item.status}`);
+        console.log(`Source: ${item.source.artifact}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("list")
+    .alias("ls")
+    .description("List work items.")
+    .action(() => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const items = listWorkItems(paths);
+        if (items.length === 0) {
+          console.log("No work items");
+          return;
+        }
+        printWorkItems(items);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("show")
+    .description("Show one work item.")
+    .argument("<id>")
+    .action((id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        console.log(JSON.stringify(getWorkItem(paths, id), null, 2));
       } catch (error) {
         printError(error);
       }
@@ -2123,6 +2203,19 @@ function printWorkspaceTargets(targets: WorkspaceTarget[]): void {
   printTable(
     ["ID", "KIND", "REPO", "SCOPE"],
     targets.map((target) => [target.id, target.kind ?? "-", target.repoPath, target.scope ?? "."])
+  );
+}
+
+function printWorkItems(items: WorkItem[]): void {
+  printTable(
+    ["ID", "STATUS", "SOURCE", "TITLE", "UPDATED"],
+    items.map((item) => [
+      item.id,
+      item.status,
+      item.source.type,
+      item.source.title,
+      item.updatedAt
+    ])
   );
 }
 

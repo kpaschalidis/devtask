@@ -9,6 +9,7 @@ export interface DevtaskPaths {
   tasksDir: string;
   worktreesDir: string;
   groupsDir: string;
+  workDir: string;
 }
 
 function buildPaths(root: string): DevtaskPaths {
@@ -20,7 +21,8 @@ function buildPaths(root: string): DevtaskPaths {
     configPath: path.join(baseDir, "config.json"),
     tasksDir: path.join(baseDir, "tasks"),
     worktreesDir: path.join(baseDir, "worktrees"),
-    groupsDir: path.join(baseDir, "groups")
+    groupsDir: path.join(baseDir, "groups"),
+    workDir: path.join(baseDir, "work")
   };
 }
 
@@ -119,4 +121,20 @@ export function workspaceJsonPath(paths: DevtaskPaths): string {
 
 export function workspaceTargetsPath(paths: DevtaskPaths): string {
   return path.join(paths.baseDir, "targets.json");
+}
+
+export function workItemDir(paths: DevtaskPaths, id: string): string {
+  return path.join(paths.workDir, id);
+}
+
+export function workItemJsonPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "work.json");
+}
+
+export function workItemStatePath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "state.md");
+}
+
+export function workItemSourcePath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "source.md");
 }

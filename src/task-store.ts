@@ -30,6 +30,7 @@ export function initializeStore(paths: DevtaskPaths): void {
   fs.mkdirSync(paths.tasksDir, { recursive: true });
   fs.mkdirSync(paths.worktreesDir, { recursive: true });
   fs.mkdirSync(paths.groupsDir, { recursive: true });
+  fs.mkdirSync(paths.workDir, { recursive: true });
   if (!fs.existsSync(paths.configPath)) {
     writeConfig(paths, DEFAULT_CONFIG);
   }
@@ -38,6 +39,7 @@ export function initializeStore(paths: DevtaskPaths): void {
 export function initializeWorkspace(paths: DevtaskPaths): void {
   fs.mkdirSync(paths.baseDir, { recursive: true });
   fs.mkdirSync(paths.groupsDir, { recursive: true });
+  fs.mkdirSync(paths.workDir, { recursive: true });
   fs.mkdirSync(scriptsDir(paths), { recursive: true });
   if (!fs.existsSync(paths.configPath)) {
     writeConfig(paths, DEFAULT_CONFIG);
