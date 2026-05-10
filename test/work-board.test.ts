@@ -7,6 +7,7 @@ import { initializeWorkspace } from "../src/task-store.js";
 import { buildWorkBoardRows } from "../src/work-board.js";
 import { approveWorkPlan } from "../src/work-materializer.js";
 import { workGraphPath, workPlanPath } from "../src/work-planner.js";
+import { createWorkRepoPlans } from "../src/work-repo-planner.js";
 import { createManualWorkItem } from "../src/work-store.js";
 import { addWorkspaceTarget } from "../src/workspace-targets.js";
 import { makeTempRepo } from "./helpers.js";
@@ -27,6 +28,8 @@ describe("work board", () => {
         task: "WORK-123",
         stage: "plan",
         status: "pending",
+        last: "-",
+        blocked: "-",
         next: "devtask work plan WORK-123"
       })
     ]);
@@ -98,7 +101,7 @@ describe("work board", () => {
     ]);
   });
 
-  it("shows materialized repo-local task state with repo-scoped next commands", async () => {
+  it("shows materialized repo-local task state with work-level next commands", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-materialized-"));
     const repo = await makeTempRepo({ withCommit: true });
     const paths = resolveWorkspacePathsForInit(workspace);
@@ -136,7 +139,6 @@ describe("work board", () => {
       )
     );
     await approveWorkPlan(paths, item);
-    const repoPath = fs.realpathSync(repo);
 
     await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
       expect.objectContaining({
@@ -144,7 +146,85 @@ describe("work board", () => {
         task: "work-123-backend",
         stage: "plan",
         status: "pending",
-        next: `(cd ${repoPath} && devtask plan work-123-backend)`
+        blocked: "needs repo-plan",
+        next: "needs repo-plan"
+      })
+    ]);
+  });
+
+  it("shows work-level run commands, latest results, and dependency waiting state", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-dependencies-"));
+    const backendRepo = await makeTempRepo({ withCommit: true });
+    const frontendRepo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Implement work"
+    });
+    addWorkspaceTarget(paths, {
+      id: "backend",
+      repoPath: backendRepo,
+      kind: "api"
+    });
+    addWorkspaceTarget(paths, {
+      id: "frontend",
+      repoPath: frontendRepo,
+      kind: "web"
+    });
+    fs.writeFileSync(workPlanPath(paths, item.id), "# Plan\n");
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependsOn: []
+            },
+            {
+              id: "work-123-frontend",
+              target: "frontend",
+              goal: "Implement frontend behavior.",
+              owns: ["src/**"],
+              dependsOn: ["work-123-backend"]
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+    await approveWorkPlan(paths, item);
+    createWorkRepoPlans(paths, item);
+
+    const rows = await buildWorkBoardRows(paths, item);
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        target: "backend",
+        task: "work-123-backend",
+        stage: "run",
+        status: "ready",
+        last: "plan passed",
+        blocked: "-",
+        next: "devtask work run WORK-123"
+      }),
+      expect.objectContaining({
+        target: "frontend",
+        task: "work-123-frontend",
+        stage: "run",
+        status: "waiting",
+        last: "plan passed",
+        blocked: "waiting for work-123-backend",
+        next: "waiting for work-123-backend"
       })
     ]);
   });

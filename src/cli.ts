@@ -425,8 +425,20 @@ export function createCli(): Command {
         const item = getWorkItem(paths, id);
         const rows = await buildWorkBoardRows(paths, item);
         printTable(
-          ["TARGET", "TASK", "STAGE", "STATUS", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
-          rows.map((row) => [row.target, row.task, row.stage, row.status, row.check, row.review, row.pr, row.updated, row.next])
+          ["TARGET", "TASK", "STAGE", "STATUS", "LAST", "BLOCKED", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
+          rows.map((row) => [
+            row.target,
+            row.task,
+            row.stage,
+            row.status,
+            row.last,
+            row.blocked,
+            row.check,
+            row.review,
+            row.pr,
+            row.updated,
+            row.next
+          ])
         );
       } catch (error) {
         printError(error);
