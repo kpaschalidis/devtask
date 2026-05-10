@@ -2,12 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveWorkspacePathsForInit } from "../src/paths.js";
+import { planMarkdownPath, resolvePaths, resolveWorkspacePathsForInit, taskMetaPath } from "../src/paths.js";
+import { readTaskMeta, writeTaskMeta } from "../src/meta.js";
+import { recordStage } from "../src/stage-contracts.js";
 import { initializeWorkspace } from "../src/task-store.js";
 import { buildWorkBoardRows } from "../src/work-board.js";
-import { approveWorkPlan } from "../src/work-materializer.js";
+import { approveWorkPlan, readWorkMaterialization } from "../src/work-materializer.js";
 import { workGraphPath, workPlanPath } from "../src/work-planner.js";
-import { createWorkRepoPlans } from "../src/work-repo-planner.js";
 import { createManualWorkItem } from "../src/work-store.js";
 import { addWorkspaceTarget } from "../src/workspace-targets.js";
 import { makeTempRepo } from "./helpers.js";
@@ -203,7 +204,7 @@ describe("work board", () => {
       )
     );
     await approveWorkPlan(paths, item);
-    createWorkRepoPlans(paths, item);
+    markMaterializedTasksPlanned(paths, item.id);
 
     const rows = await buildWorkBoardRows(paths, item);
 
@@ -229,3 +230,26 @@ describe("work board", () => {
     ]);
   });
 });
+
+function markMaterializedTasksPlanned(paths: ReturnType<typeof resolveWorkspacePathsForInit>, workId: string): void {
+  const materialization = readWorkMaterialization(paths, workId);
+  if (!materialization) {
+    throw new Error("Expected materialization");
+  }
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+    const planPath = planMarkdownPath(repoPaths, task.taskId);
+    fs.writeFileSync(planPath, "# Plan\n");
+    writeTaskMeta(taskMetaPath(repoPaths, task.taskId), {
+      ...meta,
+      status: "planned",
+      updatedAt: new Date().toISOString()
+    });
+    recordStage(repoPaths, task.taskId, "plan", {
+      status: "passed",
+      output: { planPath },
+      artifacts: [planPath]
+    });
+  }
+}

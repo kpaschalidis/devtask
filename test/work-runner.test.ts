@@ -3,11 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { readTaskMeta, writeTaskMeta } from "../src/meta.js";
-import { resolveWorkspacePathsForInit, taskMetaPath } from "../src/paths.js";
+import { planMarkdownPath, resolvePaths, resolveWorkspacePathsForInit, taskMetaPath } from "../src/paths.js";
+import { recordStage } from "../src/stage-contracts.js";
 import { initializeWorkspace } from "../src/task-store.js";
-import { approveWorkPlan } from "../src/work-materializer.js";
+import { approveWorkPlan, readWorkMaterialization } from "../src/work-materializer.js";
 import { workGraphPath, workPlanPath } from "../src/work-planner.js";
-import { createWorkRepoPlans } from "../src/work-repo-planner.js";
 import { planWorkRun } from "../src/work-runner.js";
 import { createManualWorkItem } from "../src/work-store.js";
 import { addWorkspaceTarget } from "../src/workspace-targets.js";
@@ -16,7 +16,7 @@ import { makeTempRepo } from "./helpers.js";
 describe("work runner", () => {
   it("marks dependency-free planned tasks ready to run", async () => {
     const fixture = await makeFixture({ withDependency: false });
-    createWorkRepoPlans(fixture.paths, fixture.item);
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
 
     expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
       ready: [
@@ -35,7 +35,7 @@ describe("work runner", () => {
 
   it("waits for unfinished dependencies", async () => {
     const fixture = await makeFixture({ withDependency: true });
-    createWorkRepoPlans(fixture.paths, fixture.item);
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
 
     expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
       ready: [
@@ -56,7 +56,7 @@ describe("work runner", () => {
 
   it("allows dependent tasks after dependencies are done", async () => {
     const fixture = await makeFixture({ withDependency: true });
-    createWorkRepoPlans(fixture.paths, fixture.item);
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
     const backendMetaPath = taskMetaPath(fixture.backendPaths, "work-123-backend");
     writeTaskMeta(backendMetaPath, {
       ...readTaskMeta(backendMetaPath),
@@ -75,7 +75,7 @@ describe("work runner", () => {
 
   it("does not block running on validation-only dependencies", async () => {
     const fixture = await makeFixture({ withDependency: false, dependencyType: "validation" });
-    createWorkRepoPlans(fixture.paths, fixture.item);
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
 
     expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
       ready: [
@@ -114,7 +114,7 @@ describe("work runner", () => {
 
   it("does not start tasks that already have a live supervisor", async () => {
     const fixture = await makeFixture({ withDependency: false });
-    createWorkRepoPlans(fixture.paths, fixture.item);
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
     const backendMetaPath = taskMetaPath(fixture.backendPaths, "work-123-backend");
     writeTaskMeta(backendMetaPath, {
       ...readTaskMeta(backendMetaPath),
@@ -215,4 +215,27 @@ function graphDependencies(options: { withDependency: boolean; dependencyType?: 
     ];
   }
   return [];
+}
+
+function markMaterializedTasksPlanned(paths: ReturnType<typeof resolveWorkspacePathsForInit>, workId: string): void {
+  const materialization = readWorkMaterialization(paths, workId);
+  if (!materialization) {
+    throw new Error("Expected materialization");
+  }
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+    const planPath = planMarkdownPath(repoPaths, task.taskId);
+    fs.writeFileSync(planPath, "# Plan\n");
+    writeTaskMeta(taskMetaPath(repoPaths, task.taskId), {
+      ...meta,
+      status: "planned",
+      updatedAt: new Date().toISOString()
+    });
+    recordStage(repoPaths, task.taskId, "plan", {
+      status: "passed",
+      output: { planPath },
+      artifacts: [planPath]
+    });
+  }
 }

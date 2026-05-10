@@ -323,7 +323,7 @@ Current limitation:
 
 ### `devtask work repo-plan <id>`
 
-Runs repo-specific planning for materialized tasks.
+Runs repo-specialist planning agents for materialized tasks.
 
 Inputs:
 
@@ -337,13 +337,16 @@ Inputs:
 Artifacts:
 
 - repo-local `.devtask/tasks/<task-id>/plan.md`
+- repo-local `.devtask/tasks/<task-id>/plans/<run-id>.prompt.md`
+- repo-local `.devtask/tasks/<task-id>/plans/<run-id>.md`
+- repo-local `.devtask/tasks/<task-id>/plans/<run-id>.json`
 - repo-local plan stage records
 
 Rules:
 
 - if a repo task already has a repo-local plan and is still `planned`, must report it as existing instead of overwriting by default
 - `--refresh` may regenerate repo-local plans while tasks are still before execution
-- must not modify runtime code
+- planning agents must not modify runtime code
 - must not create additional repo tasks
 - must use the approved graph, not the mutable proposed graph
 - must mark each repo-local task as `planned`

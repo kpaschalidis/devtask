@@ -35,10 +35,10 @@ This checklist tracks the developer-productivity work needed to move `devtask wo
   - [ ] Make agent-backed stages attachable by default where possible.
   - [ ] Add an opt-out flag.
   - [ ] Support stage-scoped attach commands.
-- [ ] Repo-specialist planning.
-  - [ ] Replace mechanical repo-plan with one constrained planner per repo task.
-  - [ ] Repo planners refine how, not what/where.
-  - [ ] Graph changes become blockers/suggestions, not silent scope expansion.
+- [x] Repo-specialist planning.
+  - [x] Replace mechanical repo-plan with one constrained planner per repo task.
+  - [x] Repo planners refine how, not what/where.
+  - [x] Graph changes become blockers/suggestions, not silent scope expansion.
 
 ## Dependency Semantics
 

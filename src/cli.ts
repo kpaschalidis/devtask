@@ -23,7 +23,7 @@ import { assertCanMark, parseManualStatus } from "./lifecycle.js";
 import { runVerification } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
 import { runReviewAgent } from "./review-agent.js";
-import { runPlanAgent } from "./planner.js";
+import { hasTaskPlan, runPlanAgent } from "./planner.js";
 import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
 import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroups, removeRepoFromGroup } from "./group-store.js";
 import { readGroupOrchestration, runGroupOrchestrator } from "./group-orchestrator.js";
@@ -60,7 +60,6 @@ import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, t
 import { runWorkPlanner, workGraphPath, workPlanPath } from "./work-planner.js";
 import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
 import { buildWorkBoardRows } from "./work-board.js";
-import { createWorkRepoPlans } from "./work-repo-planner.js";
 import { planWorkRun } from "./work-runner.js";
 
 interface PrOptions {
@@ -520,14 +519,14 @@ export function createCli(): Command {
 
   work
     .command("repo-plan")
-    .description("Create repo-local task plans from an approved work graph.")
+    .description("Run repo-specialist planning agents for materialized repo tasks.")
     .argument("<id>")
     .option("--refresh", "Regenerate repo-local task plans before tasks run")
-    .action((id: string, options: { refresh?: boolean }) => {
+    .action(async (id: string, options: { refresh?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const results = createWorkRepoPlans(paths, item, { refresh: options.refresh });
+        const results = await runWorkRepoPlans(paths, item, { refresh: options.refresh });
         if (results.length === 0) {
           console.log(`No materialized tasks for work item ${id}`);
           return;
@@ -2837,6 +2836,44 @@ function getMaterializedWorkTasks(paths: ReturnType<typeof resolvePaths>, item: 
     throw new DevtaskError(`Work item ${item.id} has not been materialized. Run devtask work approve-plan ${item.id} first.`);
   }
   return materialization.tasks;
+}
+
+async function runWorkRepoPlans(
+  paths: ReturnType<typeof resolvePaths>,
+  item: WorkItem,
+  options: { refresh?: boolean }
+): Promise<Array<{ target: string; taskId: string; repoPath: string; planPath: string; status: string }>> {
+  const tasks = getMaterializedWorkTasks(paths, item);
+  const results: Array<{ target: string; taskId: string; repoPath: string; planPath: string; status: string }> = [];
+  for (const task of tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = getTask(repoPaths, task.taskId);
+    if (!["created", "planned", "blocked"].includes(meta.status)) {
+      throw new DevtaskError(`Task ${task.taskId} is ${meta.status}; repo planning is only available before the task runs`);
+    }
+
+    if (!options.refresh && meta.status === "planned" && hasTaskPlan(repoPaths, task.taskId)) {
+      results.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        planPath: planMarkdownPath(repoPaths, task.taskId),
+        status: "existing"
+      });
+      continue;
+    }
+
+    console.log(`${task.target}/${task.taskId}`);
+    await planTask(repoPaths, task.taskId);
+    results.push({
+      target: task.target,
+      taskId: task.taskId,
+      repoPath: task.repoPath,
+      planPath: planMarkdownPath(repoPaths, task.taskId),
+      status: "planned"
+    });
+  }
+  return results;
 }
 
 function runReadyWorkTasks(
