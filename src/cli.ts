@@ -38,7 +38,7 @@ import {
   preflightScmForPullRequest,
   type ScmPreflight
 } from "./scm.js";
-import { recordStage, runStage } from "./stage-contracts.js";
+import { recordStage, runStage, STAGE_NAMES } from "./stage-contracts.js";
 import {
   assertJiraConfigured,
   buildJiraGroupRepoGoal,
@@ -60,7 +60,7 @@ import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, t
 import { runWorkPlanner, workGraphPath, workPlanPath } from "./work-planner.js";
 import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
 import { buildWorkBoardRows } from "./work-board.js";
-import { planWorkRun } from "./work-runner.js";
+import { isWorkTaskRunComplete, planWorkRun } from "./work-runner.js";
 
 interface PrOptions {
   title?: string;
@@ -535,7 +535,7 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const results = await runWorkRepoPlans(paths, item, { refresh: options.refresh });
+        const results = await runWorkRepoPlans(paths, item, options);
         if (results.length === 0) {
           console.log(`No materialized tasks for work item ${id}`);
           return;
@@ -1596,7 +1596,8 @@ export function createCli(): Command {
     .requiredOption("--repo <repo-name>", "Repo to steer")
     .option("-f, --file <path>", "Read feedback from a file")
     .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
-    .action((id: string, messageParts: string[], options: { repo: string; file?: string; lines: number }) => {
+    .option("--stage <stage>", "Steer a stage session such as plan or review")
+    .action((id: string, messageParts: string[], options: { repo: string; file?: string; lines: number; stage?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const repo = selectOneGroupRepo(paths, id, options.repo);
@@ -1605,7 +1606,8 @@ export function createCli(): Command {
           messageParts,
           file: options.file,
           lines: options.lines,
-          messageRoot: paths.root
+          messageRoot: paths.root,
+          stage: options.stage
         });
       } catch (error) {
         printError(error);
@@ -2403,13 +2405,15 @@ export function createCli(): Command {
     .argument("[message...]")
     .option("-f, --file <path>", "Read feedback from a file")
     .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
-    .action((id: string, messageParts: string[], options: { file?: string; lines: number }) => {
+    .option("--stage <stage>", "Steer a stage session such as plan or review")
+    .action((id: string, messageParts: string[], options: { file?: string; lines: number; stage?: string }) => {
       try {
         const paths = resolvePaths();
         steerTask(paths, id, {
           messageParts,
           file: options.file,
-          lines: options.lines
+          lines: options.lines,
+          stage: options.stage
         });
       } catch (error) {
         printError(error);
@@ -2451,6 +2455,7 @@ export function createCli(): Command {
         if (meta.tmuxSession) {
           killTmuxSession(meta.tmuxSession);
         }
+        killTaskStageSessions(paths, id);
         writeTaskMeta(taskMetaPath(paths, id), {
           ...meta,
           status: "cancelled",
@@ -2623,6 +2628,16 @@ function stageTmuxSessionName(paths: ReturnType<typeof resolvePaths>, id: string
   return `${tmuxSessionName(paths, id)}-${stage.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
+function killTaskStageSessions(paths: ReturnType<typeof resolvePaths>, id: string): void {
+  if (!isTmuxAvailable()) {
+    return;
+  }
+
+  for (const stage of STAGE_NAMES) {
+    killTmuxSession(stageTmuxSessionName(paths, id, stage));
+  }
+}
+
 function warnPlainRuntime(): void {
   console.log("Warning: running in plain mode. attach/steer will not be available.");
   console.log("Install tmux and run: devtask config runtime attachable");
@@ -2655,14 +2670,15 @@ function readSteerMessage(root: string, filePath: string | undefined, messagePar
 function steerTask(
   paths: ReturnType<typeof resolvePaths>,
   id: string,
-  options: { messageParts: string[]; file?: string; lines: number; messageRoot?: string }
+  options: { messageParts: string[]; file?: string; lines: number; messageRoot?: string; stage?: string }
 ): void {
   const meta = getTask(paths, id);
-  if (!meta.tmuxSession) {
+  const session = options.stage ? stageTmuxSessionName(paths, id, options.stage) : meta.tmuxSession;
+  if (!session) {
     throw new DevtaskError(`Task ${id} is not running in an attachable session. Use devtask run ${id} after configuring attachable runtime.`);
   }
   const message = readSteerMessage(options.messageRoot ?? paths.root, options.file, options.messageParts);
-  const result = sendToTmuxSessionWithConfirmation(meta.tmuxSession, message, { lines: options.lines });
+  const result = sendToTmuxSessionWithConfirmation(session, message, { lines: options.lines });
   console.log(result.confirmed ? "Message sent; terminal output changed" : "Message sent; no terminal change observed yet");
   if (result.output.trim()) {
     console.log("");
@@ -3036,7 +3052,7 @@ function throwIfWorkRunFailed(paths: ReturnType<typeof resolvePaths>, item: Work
 
 function isWorkRunComplete(paths: ReturnType<typeof resolvePaths>, item: WorkItem): boolean {
   const tasks = getMaterializedWorkTasks(paths, item);
-  return tasks.length > 0 && tasks.every((task) => getTask(resolvePaths(task.repoPath), task.taskId).status === "done");
+  return tasks.length > 0 && tasks.every((task) => isWorkTaskRunComplete(resolvePaths(task.repoPath), task.taskId));
 }
 
 function hasRunningMaterializedTask(paths: ReturnType<typeof resolvePaths>, item: WorkItem): boolean {

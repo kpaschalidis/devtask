@@ -161,6 +161,7 @@ tmux attach -t <printed-session-name>
 
 devtask review fix-login
 devtask attach fix-login --stage review
+devtask steer fix-login --stage review "Please double-check the error path."
 ```
 
 Use `--plain` on `plan`, `review`, `work plan`, `work repo-plan`, or `work review` to run the stage in the current foreground process.

@@ -73,6 +73,47 @@ describe("work runner", () => {
     });
   });
 
+  it("allows dependent tasks after dependencies finish implementation and enter review", async () => {
+    const fixture = await makeFixture({ withDependency: true });
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
+    const backendMetaPath = taskMetaPath(fixture.backendPaths, "work-123-backend");
+    writeTaskMeta(backendMetaPath, {
+      ...readTaskMeta(backendMetaPath),
+      status: "review"
+    });
+
+    expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
+      ready: [
+        {
+          target: "frontend",
+          taskId: "work-123-frontend"
+        }
+      ]
+    });
+  });
+
+  it("allows dependent tasks when the run stage passed", async () => {
+    const fixture = await makeFixture({ withDependency: true });
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
+    const backendMetaPath = taskMetaPath(fixture.backendPaths, "work-123-backend");
+    writeTaskMeta(backendMetaPath, {
+      ...readTaskMeta(backendMetaPath),
+      status: "paused"
+    });
+    recordStage(fixture.backendPaths, "work-123-backend", "run", {
+      status: "passed"
+    });
+
+    expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
+      ready: [
+        {
+          target: "frontend",
+          taskId: "work-123-frontend"
+        }
+      ]
+    });
+  });
+
   it("does not block running on validation-only dependencies", async () => {
     const fixture = await makeFixture({ withDependency: false, dependencyType: "validation" });
     markMaterializedTasksPlanned(fixture.paths, fixture.item.id);

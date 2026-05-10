@@ -3,6 +3,7 @@ import { readTaskMeta } from "./meta.js";
 import type { DevtaskPaths } from "./paths.js";
 import { resolvePaths, taskMetaPath } from "./paths.js";
 import { isProcessAlive } from "./processes.js";
+import { readStageLedger } from "./stage-contracts.js";
 import type { TaskStatus } from "./types.js";
 import { readApprovedWorkGraph, readWorkMaterialization } from "./work-materializer.js";
 import type { WorkItem } from "./work-store.js";
@@ -28,7 +29,8 @@ export interface WorkRunPlan {
 }
 
 const RUNNABLE_STATUSES: TaskStatus[] = ["planned", "paused"];
-const DEPENDENCY_COMPLETE_STATUSES: TaskStatus[] = ["done"];
+const RUN_COMPLETE_STATUSES: TaskStatus[] = ["review", "approved", "pr-open", "ci-running", "ci-failed", "ci-passed", "done"];
+const RUN_FAILED_STATUSES: TaskStatus[] = ["blocked", "failed", "cancelled"];
 
 export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPlan {
   const materialization = readWorkMaterialization(paths, workItem.id);
@@ -58,8 +60,12 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
       if (dependency.type !== "run") {
         return false;
       }
+      const dependencyTask = materializedByGraphId.get(dependency.task);
       const dependencyStatus = statusByGraphId.get(dependency.task);
-      return !dependencyStatus || !DEPENDENCY_COMPLETE_STATUSES.includes(dependencyStatus);
+      if (!dependencyTask || !dependencyStatus) {
+        return true;
+      }
+      return !isWorkTaskRunComplete(resolvePaths(dependencyTask.repoPath), dependencyTask.taskId, dependencyStatus);
     });
     if (blockedDependency) {
       skipped.push({
@@ -79,6 +85,17 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
         repoPath: task.repoPath,
         status: meta.status,
         reason: `already supervised by PID ${meta.supervisorPid}`
+      });
+      continue;
+    }
+
+    if (isWorkTaskRunComplete(repoPaths, task.taskId, meta.status)) {
+      skipped.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        status: meta.status,
+        reason: "run complete"
       });
       continue;
     }
@@ -114,4 +131,18 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
   }
 
   return { ready, skipped };
+}
+
+export function isWorkTaskRunComplete(paths: DevtaskPaths, taskId: string, status?: TaskStatus): boolean {
+  const meta = readTaskMeta(taskMetaPath(paths, taskId));
+  const effectiveStatus = status ?? meta.status;
+  if (isProcessAlive(meta.supervisorPid) || meta.status === "running" || RUN_FAILED_STATUSES.includes(effectiveStatus)) {
+    return false;
+  }
+
+  if (RUN_COMPLETE_STATUSES.includes(effectiveStatus)) {
+    return true;
+  }
+
+  return readStageLedger(paths, taskId).stages.run?.status === "passed";
 }
