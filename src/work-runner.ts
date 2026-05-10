@@ -54,8 +54,11 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
 
     const repoPaths = resolvePaths(task.repoPath);
     const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
-    const blockedDependency = graphTask.dependsOn.find((dependencyId) => {
-      const dependencyStatus = statusByGraphId.get(dependencyId);
+    const blockedDependency = graphTask.dependencies.find((dependency) => {
+      if (dependency.type !== "run") {
+        return false;
+      }
+      const dependencyStatus = statusByGraphId.get(dependency.task);
       return !dependencyStatus || !DEPENDENCY_COMPLETE_STATUSES.includes(dependencyStatus);
     });
     if (blockedDependency) {
@@ -64,7 +67,7 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
         taskId: task.taskId,
         repoPath: task.repoPath,
         status: meta.status,
-        reason: `waiting for ${blockedDependency}`
+        reason: `waiting for ${blockedDependency.task}`
       });
       continue;
     }

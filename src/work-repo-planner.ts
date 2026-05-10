@@ -92,8 +92,13 @@ export function createWorkRepoPlans(
 }
 
 function renderRepoPlan(workItem: WorkItem, workPlan: string, task: WorkGraphTask, allTasks: WorkGraphTask[]): string {
-  const dependencies = task.dependsOn.map((id) => allTasks.find((candidate) => candidate.id === id)).filter((value): value is WorkGraphTask => Boolean(value));
-  const dependents = allTasks.filter((candidate) => candidate.dependsOn.includes(task.id));
+  const dependencies = task.dependencies
+    .map((dependency) => ({
+      dependency,
+      task: allTasks.find((candidate) => candidate.id === dependency.task)
+    }))
+    .filter((value): value is { dependency: (typeof task.dependencies)[number]; task: WorkGraphTask } => Boolean(value.task));
+  const dependents = allTasks.filter((candidate) => candidate.dependencies.some((dependency) => dependency.task === task.id));
   return [
     `# Repo Plan: ${task.id}`,
     "",
@@ -115,7 +120,7 @@ function renderRepoPlan(workItem: WorkItem, workPlan: string, task: WorkGraphTas
     "## Dependencies",
     "",
     ...(dependencies.length
-      ? dependencies.map((dependency) => `- ${dependency.id} (${dependency.target}): ${dependency.goal}`)
+      ? dependencies.map(({ dependency, task: dependencyTask }) => `- ${dependencyTask.id} (${dependency.type}, ${dependencyTask.target}): ${dependencyTask.goal}`)
       : ["- none"]),
     "",
     "## Downstream Tasks",

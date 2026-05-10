@@ -241,7 +241,13 @@ Graph contract:
       "target": "backend",
       "goal": "Repo/scope-local goal",
       "owns": ["path/or/scope/**"],
-      "dependsOn": []
+      "dependencies": [
+        {
+          "task": "other-task-id",
+          "type": "run",
+          "reason": "Generated client must exist before this task can start."
+        }
+      ]
     }
   ],
   "validation": ["validation responsibility"],
@@ -364,8 +370,9 @@ Artifacts:
 Rules:
 
 - may run independent tasks in parallel
-- must respect `dependsOn`
-- must not run a dependent task before dependencies are `done`
+- must respect `run` dependencies
+- must not run a task before its `run` dependencies are `done`
+- must not block execution on `validation`, `approval`, `publish`, or `review` dependencies
 - must only start repo tasks in `planned` or `paused`
 - should support per-task attach/steer through existing repo-local runtime
 

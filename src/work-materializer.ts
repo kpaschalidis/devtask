@@ -16,12 +16,22 @@ import { getWorkspaceTarget, type WorkspaceTarget } from "./workspace-targets.js
 import type { WorkItem } from "./work-store.js";
 import { workGraphPath, workPlanPath } from "./work-planner.js";
 
+export const WORK_DEPENDENCY_TYPES = ["run", "review", "approval", "publish", "validation"] as const;
+export type WorkDependencyType = (typeof WORK_DEPENDENCY_TYPES)[number];
+
+export interface WorkGraphDependency {
+  task: string;
+  type: WorkDependencyType;
+  reason: string | null;
+}
+
 export interface WorkGraphTask {
   id: string;
   target: string;
   goal: string;
   owns: string[];
   dependsOn: string[];
+  dependencies: WorkGraphDependency[];
 }
 
 export interface WorkGraph {
@@ -196,7 +206,8 @@ function parseWorkGraphTask(value: unknown): WorkGraphTask {
     target: requireString(value, "target", "work graph"),
     goal: requireString(value, "goal", "work graph"),
     owns: parseStringArray(value.owns, "owns"),
-    dependsOn: parseStringArray(value.dependsOn, "dependsOn")
+    dependsOn: parseOptionalStringArray(value.dependsOn, "dependsOn"),
+    dependencies: parseWorkGraphDependencies(value.dependencies, value.dependsOn)
   };
 }
 
@@ -209,9 +220,9 @@ function validateGraphReferences(graph: WorkGraph): void {
     taskIds.add(task.id);
   }
   for (const task of graph.tasks) {
-    for (const dependency of task.dependsOn) {
-      if (!taskIds.has(dependency)) {
-        throw new DevtaskError(`Invalid work graph: task ${task.id} depends on unknown task ${dependency}`);
+    for (const dependency of task.dependencies) {
+      if (!taskIds.has(dependency.task)) {
+        throw new DevtaskError(`Invalid work graph: task ${task.id} depends on unknown task ${dependency.task}`);
       }
     }
   }
@@ -278,7 +289,9 @@ function buildRepoTaskGoal(
     ...task.owns.map((item) => `- ${item}`),
     "",
     "## Dependencies",
-    ...(task.dependsOn.length ? task.dependsOn.map((item) => `- ${item}`) : ["- none"]),
+    ...(task.dependencies.length
+      ? task.dependencies.map((dependency) => `- ${dependency.task} (${dependency.type})${dependency.reason ? `: ${dependency.reason}` : ""}`)
+      : ["- none"]),
     "",
     "## Work Graph Context",
     "",
@@ -325,6 +338,72 @@ function parseStringArray(value: unknown, field: string): string[] {
     }
     return item.trim();
   });
+}
+
+function parseOptionalStringArray(value: unknown, field: string): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  return parseStringArray(value, field);
+}
+
+function parseWorkGraphDependencies(dependencies: unknown, legacyDependsOn: unknown): WorkGraphDependency[] {
+  const parsed: WorkGraphDependency[] = [];
+  const seen = new Set<string>();
+
+  for (const task of parseOptionalStringArray(legacyDependsOn, "dependsOn")) {
+    const key = `${task}:run`;
+    seen.add(key);
+    parsed.push({
+      task,
+      type: "run",
+      reason: "legacy dependsOn"
+    });
+  }
+
+  if (dependencies === undefined) {
+    return parsed;
+  }
+  if (!Array.isArray(dependencies)) {
+    throw new DevtaskError("Invalid work graph: dependencies must be an array");
+  }
+
+  for (const value of dependencies) {
+    if (!isRecord(value)) {
+      throw new DevtaskError("Invalid work graph: dependency must be an object");
+    }
+    const task = requireString(value, "task", "work graph dependency");
+    const type = parseWorkDependencyType(value.type);
+    const key = `${task}:${type}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    parsed.push({
+      task,
+      type,
+      reason: parseOptionalReason(value.reason)
+    });
+  }
+
+  return parsed;
+}
+
+function parseWorkDependencyType(value: unknown): WorkDependencyType {
+  if (typeof value !== "string" || !WORK_DEPENDENCY_TYPES.includes(value as WorkDependencyType)) {
+    throw new DevtaskError(`Invalid work graph: dependency type must be one of ${WORK_DEPENDENCY_TYPES.join(", ")}`);
+  }
+  return value as WorkDependencyType;
+}
+
+function parseOptionalReason(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new DevtaskError("Invalid work graph dependency: reason must be a string or null");
+  }
+  return value.trim() || null;
 }
 
 function parseNullableString(value: unknown, field: string): string | null {

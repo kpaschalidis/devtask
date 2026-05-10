@@ -73,6 +73,25 @@ describe("work runner", () => {
     });
   });
 
+  it("does not block running on validation-only dependencies", async () => {
+    const fixture = await makeFixture({ withDependency: false, dependencyType: "validation" });
+    createWorkRepoPlans(fixture.paths, fixture.item);
+
+    expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
+      ready: [
+        {
+          target: "backend",
+          taskId: "work-123-backend"
+        },
+        {
+          target: "frontend",
+          taskId: "work-123-frontend"
+        }
+      ],
+      skipped: []
+    });
+  });
+
   it("explains tasks that still need repo planning", async () => {
     const fixture = await makeFixture({ withDependency: false });
 
@@ -120,7 +139,7 @@ describe("work runner", () => {
   });
 });
 
-async function makeFixture(options: { withDependency: boolean }) {
+async function makeFixture(options: { withDependency: boolean; dependencyType?: "run" | "validation" }) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-runner-"));
   const backendRepo = await makeTempRepo({ withCommit: true });
   const frontendRepo = await makeTempRepo({ withCommit: true });
@@ -162,7 +181,18 @@ async function makeFixture(options: { withDependency: boolean }) {
             target: "frontend",
             goal: "Implement frontend behavior.",
             owns: ["src/**"],
-            dependsOn: options.withDependency ? ["work-123-backend"] : []
+            ...(options.withDependency ? { dependsOn: ["work-123-backend"] } : {}),
+            ...(options.dependencyType
+              ? {
+                  dependencies: [
+                    {
+                      task: "work-123-backend",
+                      type: options.dependencyType,
+                      reason: "Coordinate backend and frontend validation."
+                    }
+                  ]
+                }
+              : {})
           }
         ],
         validation: [],

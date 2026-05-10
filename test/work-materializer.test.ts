@@ -109,6 +109,106 @@ describe("work materializer", () => {
     expect(() => readWorkGraph(paths, item.id)).toThrow("depends on unknown task missing");
   });
 
+  it("accepts typed dependencies and preserves legacy dependsOn as run dependencies", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-typed-deps-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Add API behavior"
+    });
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependsOn: []
+            },
+            {
+              id: "work-123-frontend",
+              target: "frontend",
+              goal: "Implement frontend behavior.",
+              owns: ["src/**"],
+              dependsOn: ["work-123-backend"],
+              dependencies: [
+                {
+                  task: "work-123-backend",
+                  type: "validation",
+                  reason: "Final validation needs both repos."
+                }
+              ]
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+
+    const graph = readWorkGraph(paths, item.id);
+
+    expect(graph.tasks[1]?.dependencies).toEqual([
+      {
+        task: "work-123-backend",
+        type: "run",
+        reason: "legacy dependsOn"
+      },
+      {
+        task: "work-123-backend",
+        type: "validation",
+        reason: "Final validation needs both repos."
+      }
+    ]);
+  });
+
+  it("rejects invalid typed dependency types", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-bad-dep-type-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Add API behavior"
+    });
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependencies: [
+                {
+                  task: "work-123-other",
+                  type: "maybe"
+                }
+              ]
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+
+    expect(() => readWorkGraph(paths, item.id)).toThrow("dependency type must be one of");
+  });
+
   it("rejects unknown target ids during approval", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-target-"));
     const paths = resolveWorkspacePathsForInit(workspace);
