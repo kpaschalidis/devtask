@@ -219,6 +219,9 @@ Output:
 
 Rules:
 
+- if both `plan.md` and `graph.json` already exist, must print existing artifacts and the next command instead of overwriting them
+- `--refresh` may regenerate artifacts only before materialization
+- after materialization, replanning must require explicit cleanup/recreation to avoid desyncing approved graph and repo tasks
 - must not create repo tasks
 - must not create branches or worktrees
 - must not edit target repositories
@@ -332,6 +335,8 @@ Artifacts:
 
 Rules:
 
+- if a repo task already has a repo-local plan and is still `planned`, must report it as existing instead of overwriting by default
+- `--refresh` may regenerate repo-local plans while tasks are still before execution
 - must not modify runtime code
 - must not create additional repo tasks
 - must use the approved graph, not the mutable proposed graph

@@ -57,7 +57,7 @@ import {
   type WorkspaceTarget
 } from "./workspace-targets.js";
 import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
-import { runWorkPlanner } from "./work-planner.js";
+import { runWorkPlanner, workGraphPath, workPlanPath } from "./work-planner.js";
 import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
 import { buildWorkBoardRows } from "./work-board.js";
 import { createWorkRepoPlans } from "./work-repo-planner.js";
@@ -437,10 +437,25 @@ export function createCli(): Command {
     .command("plan")
     .description("Create or refresh the proposed execution graph for a work item.")
     .argument("<id>")
-    .action(async (id: string) => {
+    .option("--refresh", "Regenerate the latest work plan and proposed graph before materialization")
+    .action(async (id: string, options: { refresh?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
+        const materialization = readWorkMaterialization(paths, item.id);
+        if (materialization && options.refresh) {
+          throw new DevtaskError(
+            `Work item ${item.id} has already been materialized. Use repo-local commands or cleanup before replanning.`
+          );
+        }
+        if (materialization) {
+          printMaterializedWorkPlan(paths, item.id, materialization.tasks.length);
+          return;
+        }
+        if (!options.refresh && existingWorkPlanArtifacts(paths, item.id)) {
+          printExistingWorkPlan(paths, item.id);
+          return;
+        }
         const config = readConfig(paths);
         console.log(`Running work planner for ${item.id}`);
         const record = await runWorkPlanner(paths, item, config, {
@@ -495,11 +510,12 @@ export function createCli(): Command {
     .command("repo-plan")
     .description("Create repo-local task plans from an approved work graph.")
     .argument("<id>")
-    .action((id: string) => {
+    .option("--refresh", "Regenerate repo-local task plans before tasks run")
+    .action((id: string, options: { refresh?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const results = createWorkRepoPlans(paths, item);
+        const results = createWorkRepoPlans(paths, item, { refresh: options.refresh });
         if (results.length === 0) {
           console.log(`No materialized tasks for work item ${id}`);
           return;
@@ -2817,6 +2833,29 @@ function getMaterializedWorkTasks(paths: ReturnType<typeof resolvePaths>, item: 
     throw new DevtaskError(`Work item ${item.id} has not been materialized. Run devtask work approve-plan ${item.id} first.`);
   }
   return materialization.tasks;
+}
+
+function existingWorkPlanArtifacts(paths: ReturnType<typeof resolvePaths>, id: string): boolean {
+  return fs.existsSync(workPlanPath(paths, id)) && fs.existsSync(workGraphPath(paths, id));
+}
+
+function printExistingWorkPlan(paths: ReturnType<typeof resolvePaths>, id: string): void {
+  console.log(`Work item ${id} already has a plan.`);
+  console.log(`Plan: ${workPlanPath(paths, id)}`);
+  console.log(`Graph: ${workGraphPath(paths, id)}`);
+  console.log("");
+  console.log(`Next: devtask work approve-plan ${shellQuote(id)}`);
+  console.log(`Use --refresh to regenerate the plan before approval.`);
+}
+
+function printMaterializedWorkPlan(paths: ReturnType<typeof resolvePaths>, id: string, taskCount: number): void {
+  console.log(`Work item ${id} has already been materialized.`);
+  console.log(`Plan: ${workPlanPath(paths, id)}`);
+  console.log(`Graph: ${workGraphPath(paths, id)}`);
+  console.log(`Materialized tasks: ${taskCount}`);
+  console.log("");
+  console.log(`Next: devtask work board ${shellQuote(id)}`);
+  console.log(`Use cleanup before replanning from scratch.`);
 }
 
 function printGroupLog(

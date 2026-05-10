@@ -13,10 +13,14 @@ export interface WorkRepoPlanResult {
   taskId: string;
   repoPath: string;
   planPath: string;
-  status: "planned";
+  status: "planned" | "existing";
 }
 
-export function createWorkRepoPlans(paths: DevtaskPaths, workItem: WorkItem): WorkRepoPlanResult[] {
+export function createWorkRepoPlans(
+  paths: DevtaskPaths,
+  workItem: WorkItem,
+  options: { refresh?: boolean } = {}
+): WorkRepoPlanResult[] {
   const materialization = readWorkMaterialization(paths, workItem.id);
   if (!materialization) {
     throw new DevtaskError(`Work item ${workItem.id} has not been materialized. Run devtask work approve-plan ${workItem.id} first.`);
@@ -43,6 +47,17 @@ export function createWorkRepoPlans(paths: DevtaskPaths, workItem: WorkItem): Wo
     }
 
     const planPath = planMarkdownPath(repoPaths, task.taskId);
+    if (!options.refresh && meta.status === "planned" && fs.existsSync(planPath)) {
+      results.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        planPath,
+        status: "existing"
+      });
+      continue;
+    }
+
     fs.writeFileSync(planPath, renderRepoPlan(workItem, workPlan, graphTask, graph.tasks));
     const plannedAt = new Date().toISOString();
     writeTaskMeta(taskMetaPath(repoPaths, task.taskId), {

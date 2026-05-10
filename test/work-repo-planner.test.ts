@@ -77,6 +77,27 @@ describe("work repo planner", () => {
         planPath: planMarkdownPath(repoPaths, "work-123-backend")
       }
     });
+
+    const secondResults = createWorkRepoPlans(paths, item);
+    expect(secondResults).toEqual([
+      expect.objectContaining({
+        target: "backend",
+        taskId: "work-123-backend",
+        planPath: planMarkdownPath(repoPaths, "work-123-backend"),
+        status: "existing"
+      })
+    ]);
+
+    fs.writeFileSync(planMarkdownPath(repoPaths, "work-123-backend"), "# stale\n");
+    const refreshedResults = createWorkRepoPlans(paths, item, { refresh: true });
+    expect(refreshedResults).toEqual([
+      expect.objectContaining({
+        target: "backend",
+        taskId: "work-123-backend",
+        status: "planned"
+      })
+    ]);
+    expect(fs.readFileSync(planMarkdownPath(repoPaths, "work-123-backend"), "utf8")).toContain("# Repo Plan: work-123-backend");
   });
 
   it("requires approved materialization before repo planning", async () => {
