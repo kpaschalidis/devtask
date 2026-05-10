@@ -347,6 +347,7 @@ Rules:
 - if a repo task already has a repo-local plan and is still `planned`, must report it as existing instead of overwriting by default
 - `--refresh` may regenerate repo-local plans while tasks are still before execution
 - planning agents must not modify runtime code
+- planning agents should run in attachable stage sessions when runtime configuration allows it
 - must not create additional repo tasks
 - must use the approved graph, not the mutable proposed graph
 - must mark each repo-local task as `planned`

@@ -31,10 +31,10 @@ This checklist tracks the developer-productivity work needed to move `devtask wo
   - [x] Wait for running tasks.
   - [x] Start newly unblocked tasks.
   - [x] Stop on failure/blocker with a useful board summary.
-- [ ] Attachable agent stages.
-  - [ ] Make agent-backed stages attachable by default where possible.
-  - [ ] Add an opt-out flag.
-  - [ ] Support stage-scoped attach commands.
+- [x] Attachable agent stages.
+  - [x] Make agent-backed stages attachable by default where possible.
+  - [x] Add an opt-out flag.
+  - [x] Support stage-scoped attach commands.
 - [x] Repo-specialist planning.
   - [x] Replace mechanical repo-plan with one constrained planner per repo task.
   - [x] Repo planners refine how, not what/where.

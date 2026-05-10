@@ -449,7 +449,10 @@ export function createCli(): Command {
     .description("Create or refresh the proposed execution graph for a work item.")
     .argument("<id>")
     .option("--refresh", "Regenerate the latest work plan and proposed graph before materialization")
-    .action(async (id: string, options: { refresh?: boolean }) => {
+    .option("--attachable", "Run the work planning agent inside an attachable tmux session")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run in the current foreground process")
+    .action(async (id: string, options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
@@ -465,6 +468,9 @@ export function createCli(): Command {
         }
         if (!options.refresh && existingWorkPlanArtifacts(paths, item.id)) {
           printExistingWorkPlan(paths, item.id);
+          return;
+        }
+        if (startStageSessionIfRequested(paths, item.id, "work-plan", ["work", "plan", id, "--plain", ...(options.refresh ? ["--refresh"] : [])], options)) {
           return;
         }
         const config = readConfig(paths);
@@ -522,7 +528,10 @@ export function createCli(): Command {
     .description("Run repo-specialist planning agents for materialized repo tasks.")
     .argument("<id>")
     .option("--refresh", "Regenerate repo-local task plans before tasks run")
-    .action(async (id: string, options: { refresh?: boolean }) => {
+    .option("--attachable", "Run repo planning agents inside attachable tmux sessions")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run in the current foreground process")
+    .action(async (id: string, options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
@@ -605,7 +614,10 @@ export function createCli(): Command {
     .command("review")
     .description("Run review agents for materialized repo tasks.")
     .argument("<id>")
-    .action(async (id: string) => {
+    .option("--attachable", "Run review agents inside attachable tmux sessions")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run in the current foreground process")
+    .action(async (id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
@@ -619,6 +631,9 @@ export function createCli(): Command {
           console.log(`${task.target}/${task.taskId}`);
           const repoPaths = resolvePaths(task.repoPath);
           try {
+            if (startStageSessionIfRequested(repoPaths, task.taskId, "review", ["review", task.taskId, "--plain"], options)) {
+              continue;
+            }
             await reviewTask(repoPaths, task.taskId, { exitOnFindings: false });
           } catch (error) {
             failed = true;
@@ -1001,9 +1016,15 @@ export function createCli(): Command {
     .command("plan")
     .description("Run a planning-only agent and store the plan artifact.")
     .argument("<id>")
-    .action(async (id: string) => {
+    .option("--attachable", "Run the planning agent inside an attachable tmux session")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run in the current foreground process")
+    .action(async (id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
       try {
         const paths = resolvePaths();
+        if (startStageSessionIfRequested(paths, id, "plan", ["plan", id, "--plain"], options)) {
+          return;
+        }
         await planTask(paths, id);
       } catch (error) {
         printError(error);
@@ -2188,8 +2209,15 @@ export function createCli(): Command {
     .command("review")
     .description("Run a read-only review agent and store its review artifact.")
     .argument("<id>")
-    .action(async (id: string) => {
+    .option("--attachable", "Run the review agent inside an attachable tmux session")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run in the current foreground process")
+    .action(async (id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
       try {
+        const paths = resolvePaths();
+        if (startStageSessionIfRequested(paths, id, "review", ["review", id, "--plain"], options)) {
+          return;
+        }
         await reviewAction(id);
       } catch (error) {
         printError(error);
@@ -2392,11 +2420,12 @@ export function createCli(): Command {
     .command("attach")
     .description("Attach to a task tmux session.")
     .argument("<id>")
-    .action((id: string) => {
+    .option("--stage <stage>", "Attach to a stage session such as plan or review")
+    .action((id: string, options: { stage?: string }) => {
       try {
         const paths = resolvePaths();
         const meta = getTask(paths, id);
-        const session = meta.tmuxSession ?? tmuxSessionName(paths, id);
+        const session = options.stage ? stageTmuxSessionName(paths, id, options.stage) : meta.tmuxSession ?? tmuxSessionName(paths, id);
         attachTmuxSession(session);
       } catch (error) {
         printError(error);
@@ -2543,6 +2572,55 @@ function resolveRunRuntime(
 
   warnPlainRuntime();
   return { tmux: false };
+}
+
+function startStageSessionIfRequested(
+  paths: ReturnType<typeof resolvePaths>,
+  id: string,
+  stage: string,
+  args: string[],
+  options: { attachable?: boolean; tmux?: boolean; plain?: boolean }
+): boolean {
+  if (!resolveStageAttachable(paths, options)) {
+    return false;
+  }
+
+  const cliPath = process.argv[1];
+  if (!cliPath) {
+    throw new DevtaskError("Unable to determine devtask CLI path for attachable stage session");
+  }
+
+  const session = stageTmuxSessionName(paths, id, stage);
+  startTmuxSession(session, [process.execPath, cliPath, ...args], paths.root);
+  console.log(`Started ${stage} in tmux: ${session}`);
+  console.log(`Attach: tmux attach -t ${shellQuote(session)}`);
+  return true;
+}
+
+function resolveStageAttachable(
+  paths: ReturnType<typeof resolvePaths>,
+  options: { attachable?: boolean; tmux?: boolean; plain?: boolean }
+): boolean {
+  const requestedAttachable = options.attachable === true || options.tmux === true;
+  if (options.plain === true && requestedAttachable) {
+    throw new DevtaskError("Use either --attachable/--tmux or --plain, not both");
+  }
+  if (options.plain === true) {
+    return false;
+  }
+
+  const config = readConfig(paths);
+  if (requestedAttachable || config.runtime.mode === "attachable") {
+    if (!isTmuxAvailable()) {
+      throw new DevtaskError("tmux is required for attachable stage sessions. Install tmux or use --plain.");
+    }
+    return true;
+  }
+  return false;
+}
+
+function stageTmuxSessionName(paths: ReturnType<typeof resolvePaths>, id: string, stage: string): string {
+  return `${tmuxSessionName(paths, id)}-${stage.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
 function warnPlainRuntime(): void {
@@ -2841,7 +2919,7 @@ function getMaterializedWorkTasks(paths: ReturnType<typeof resolvePaths>, item: 
 async function runWorkRepoPlans(
   paths: ReturnType<typeof resolvePaths>,
   item: WorkItem,
-  options: { refresh?: boolean }
+  options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }
 ): Promise<Array<{ target: string; taskId: string; repoPath: string; planPath: string; status: string }>> {
   const tasks = getMaterializedWorkTasks(paths, item);
   const results: Array<{ target: string; taskId: string; repoPath: string; planPath: string; status: string }> = [];
@@ -2864,6 +2942,16 @@ async function runWorkRepoPlans(
     }
 
     console.log(`${task.target}/${task.taskId}`);
+    if (startStageSessionIfRequested(repoPaths, task.taskId, "plan", ["plan", task.taskId, "--plain"], options)) {
+      results.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        planPath: planMarkdownPath(repoPaths, task.taskId),
+        status: "started"
+      });
+      continue;
+    }
     await planTask(repoPaths, task.taskId);
     results.push({
       target: task.target,

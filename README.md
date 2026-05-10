@@ -153,6 +153,18 @@ devtask attach fix-login
 devtask steer fix-login "Adjust the implementation before continuing."
 ```
 
+Agent-backed planning and review stages also use attachable tmux sessions when the repo runtime is attachable:
+
+```bash
+devtask plan fix-login
+tmux attach -t <printed-session-name>
+
+devtask review fix-login
+devtask attach fix-login --stage review
+```
+
+Use `--plain` on `plan`, `review`, `work plan`, `work repo-plan`, or `work review` to run the stage in the current foreground process.
+
 If tmux is not installed, devtask configures plain mode. Plain mode can run background workers, but live `attach` and `steer` are unavailable:
 
 ```bash
