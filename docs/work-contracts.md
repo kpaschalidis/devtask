@@ -374,6 +374,7 @@ Rules:
 - must not run a task before its `run` dependencies are `done`
 - must not block execution on `validation`, `approval`, `publish`, or `review` dependencies
 - must only start repo tasks in `planned` or `paused`
+- `--follow` must keep polling, start newly unblocked tasks, and stop on failure/blocker
 - should support per-task attach/steer through existing repo-local runtime
 
 ### `devtask work check <id>`

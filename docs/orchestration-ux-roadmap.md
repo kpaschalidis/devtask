@@ -26,11 +26,11 @@ This checklist tracks the developer-productivity work needed to move `devtask wo
   - [x] `work run` blocks only on `run` dependencies.
   - [ ] Later stages honor their relevant dependency types.
   - [ ] Commands should skip not-ready tasks with clear reasons.
-- [ ] `work run --follow`.
-  - [ ] Start currently runnable tasks.
-  - [ ] Wait for running tasks.
-  - [ ] Start newly unblocked tasks.
-  - [ ] Stop on failure/blocker with a useful board summary.
+- [x] `work run --follow`.
+  - [x] Start currently runnable tasks.
+  - [x] Wait for running tasks.
+  - [x] Start newly unblocked tasks.
+  - [x] Stop on failure/blocker with a useful board summary.
 - [ ] Attachable agent stages.
   - [ ] Make agent-backed stages attachable by default where possible.
   - [ ] Add an opt-out flag.

@@ -548,24 +548,16 @@ export function createCli(): Command {
     .option("--attachable", "Run workers inside attachable tmux sessions")
     .option("--tmux", "Alias for --attachable")
     .option("--plain", "Run workers as plain detached background processes")
-    .action((id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
+    .option("--follow", "Keep running and start newly unblocked tasks until the run graph settles")
+    .option("--poll <seconds>", "Polling interval for --follow", parsePositiveInteger, 5)
+    .action(async (id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean; follow?: boolean; poll: number }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const plan = planWorkRun(paths, item);
-        for (const task of plan.skipped) {
-          console.log(`${task.target}/${task.taskId}: skipped (${task.reason})`);
-        }
-        const readyTasks = plan.ready.map((task) => {
-          const repoPaths = resolvePaths(task.repoPath);
-          const runtime = resolveRunRuntime(repoPaths, options);
-          return { task, repoPaths, runtime };
-        });
-        for (const { task, repoPaths, runtime } of readyTasks) {
-          printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
-        }
-        if (plan.ready.length === 0 && plan.skipped.length === 0) {
-          console.log(`No materialized tasks for work item ${id}`);
+        if (options.follow) {
+          await followWorkRun(paths, item, options);
+        } else {
+          runReadyWorkTasks(paths, item, options);
         }
       } catch (error) {
         printError(error);
@@ -2847,6 +2839,88 @@ function getMaterializedWorkTasks(paths: ReturnType<typeof resolvePaths>, item: 
   return materialization.tasks;
 }
 
+function runReadyWorkTasks(
+  paths: ReturnType<typeof resolvePaths>,
+  item: WorkItem,
+  options: { attachable?: boolean; tmux?: boolean; plain?: boolean }
+): void {
+  const plan = planWorkRun(paths, item);
+  for (const task of plan.skipped) {
+    console.log(`${task.target}/${task.taskId}: skipped (${task.reason})`);
+  }
+  const readyTasks = plan.ready.map((task) => {
+    const repoPaths = resolvePaths(task.repoPath);
+    const runtime = resolveRunRuntime(repoPaths, options);
+    return { task, repoPaths, runtime };
+  });
+  for (const { task, repoPaths, runtime } of readyTasks) {
+    printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
+  }
+  if (plan.ready.length === 0 && plan.skipped.length === 0) {
+    console.log(`No materialized tasks for work item ${item.id}`);
+  }
+}
+
+async function followWorkRun(
+  paths: ReturnType<typeof resolvePaths>,
+  item: WorkItem,
+  options: { attachable?: boolean; tmux?: boolean; plain?: boolean; poll: number }
+): Promise<void> {
+  const intervalMs = options.poll * 1000;
+  const announcedWaiting = new Set<string>();
+  console.log(`Following work run ${item.id}`);
+
+  while (true) {
+    throwIfWorkRunFailed(paths, item);
+    const plan = planWorkRun(paths, item);
+    for (const task of plan.ready) {
+      const repoPaths = resolvePaths(task.repoPath);
+      const runtime = resolveRunRuntime(repoPaths, options);
+      printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
+    }
+
+    for (const task of plan.skipped) {
+      const key = `${task.target}/${task.taskId}:${task.reason}`;
+      if (!announcedWaiting.has(key)) {
+        announcedWaiting.add(key);
+        console.log(`${task.target}/${task.taskId}: waiting (${task.reason})`);
+      }
+    }
+
+    if (isWorkRunComplete(paths, item)) {
+      console.log(`Work run ${item.id} complete`);
+      return;
+    }
+
+    if (plan.ready.length === 0 && !hasRunningMaterializedTask(paths, item)) {
+      throw new DevtaskError(`Work run ${item.id} cannot advance. Inspect with devtask work board ${item.id}.`);
+    }
+
+    await sleep(intervalMs);
+  }
+}
+
+function throwIfWorkRunFailed(paths: ReturnType<typeof resolvePaths>, item: WorkItem): void {
+  const failed = getMaterializedWorkTasks(paths, item)
+    .map((task) => ({ task, meta: getTask(resolvePaths(task.repoPath), task.taskId) }))
+    .find(({ meta }) => meta.status === "failed" || meta.status === "blocked" || meta.status === "cancelled");
+  if (failed) {
+    throw new DevtaskError(`${failed.task.target}/${failed.task.taskId} is ${failed.meta.status}. Inspect with devtask work board ${item.id}.`);
+  }
+}
+
+function isWorkRunComplete(paths: ReturnType<typeof resolvePaths>, item: WorkItem): boolean {
+  const tasks = getMaterializedWorkTasks(paths, item);
+  return tasks.length > 0 && tasks.every((task) => getTask(resolvePaths(task.repoPath), task.taskId).status === "done");
+}
+
+function hasRunningMaterializedTask(paths: ReturnType<typeof resolvePaths>, item: WorkItem): boolean {
+  return getMaterializedWorkTasks(paths, item).some((task) => {
+    const meta = getTask(resolvePaths(task.repoPath), task.taskId);
+    return meta.status === "running" || isProcessAlive(meta.supervisorPid);
+  });
+}
+
 function existingWorkPlanArtifacts(paths: ReturnType<typeof resolvePaths>, id: string): boolean {
   return fs.existsSync(workPlanPath(paths, id)) && fs.existsSync(workGraphPath(paths, id));
 }
@@ -3609,6 +3683,10 @@ function parsePositiveInteger(value: string): number {
     throw new DevtaskError("Expected a positive integer");
   }
   return parsed;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function tailFile(filePath: string, lineCount: number): string {
