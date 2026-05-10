@@ -105,6 +105,21 @@ devtask work next <id>
 devtask work advance <id>
 ```
 
+## Repo-Specialist Planning
+
+The first E2E flow may keep `work repo-plan` mechanical: it renders repo-local plans from the approved graph and work-level plan.
+
+After the first E2E path is proven, `work repo-plan` should become a parallel repo-specialist planning stage:
+
+- one planning agent per materialized repo task
+- each agent inspects only its target repo/scope
+- each agent receives the approved graph node, work-level plan, source artifact, ownership boundaries, and dependency context
+- repo agents refine **how** to implement inside their repo, not **what/where** the work belongs
+- repo agents must not silently add targets, change dependencies, or broaden ownership
+- if the approved graph is wrong, repo agents should produce a blocker and suggested graph change
+
+This keeps the work-level orchestrator responsible for target selection and dependency shape, while repo specialists improve local implementation quality before coding starts.
+
 ## Policy And Configuration
 
 Hardcoded policy should become explicit configuration only after real usage proves the options.
