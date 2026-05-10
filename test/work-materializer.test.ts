@@ -45,7 +45,7 @@ describe("work materializer", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             }
           ],
           validation: ["npm test"],
@@ -95,7 +95,7 @@ describe("work materializer", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: ["missing"]
+              dependencies: [{ task: "missing", type: "run", reason: "Missing dependency for validation." }]
             }
           ],
           validation: [],
@@ -109,7 +109,7 @@ describe("work materializer", () => {
     expect(() => readWorkGraph(paths, item.id)).toThrow("depends on unknown task missing");
   });
 
-  it("accepts typed dependencies and preserves legacy dependsOn as run dependencies", async () => {
+  it("accepts typed dependencies", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-typed-deps-"));
     const paths = resolveWorkspacePathsForInit(workspace);
     initializeWorkspace(paths);
@@ -129,15 +129,19 @@ describe("work materializer", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             },
             {
               id: "work-123-frontend",
               target: "frontend",
               goal: "Implement frontend behavior.",
               owns: ["src/**"],
-              dependsOn: ["work-123-backend"],
               dependencies: [
+                {
+                  task: "work-123-backend",
+                  type: "run",
+                  reason: "Backend must finish before frontend starts."
+                },
                 {
                   task: "work-123-backend",
                   type: "validation",
@@ -160,7 +164,7 @@ describe("work materializer", () => {
       {
         task: "work-123-backend",
         type: "run",
-        reason: "legacy dependsOn"
+        reason: "Backend must finish before frontend starts."
       },
       {
         task: "work-123-backend",
@@ -230,7 +234,7 @@ describe("work materializer", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             }
           ],
           validation: [],
@@ -270,7 +274,7 @@ describe("work materializer", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             }
           ],
           validation: [],
@@ -311,7 +315,7 @@ describe("work materializer", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             }
           ],
           validation: [],

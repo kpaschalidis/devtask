@@ -30,7 +30,6 @@ export interface WorkGraphTask {
   target: string;
   goal: string;
   owns: string[];
-  dependsOn: string[];
   dependencies: WorkGraphDependency[];
 }
 
@@ -206,8 +205,7 @@ function parseWorkGraphTask(value: unknown): WorkGraphTask {
     target: requireString(value, "target", "work graph"),
     goal: requireString(value, "goal", "work graph"),
     owns: parseStringArray(value.owns, "owns"),
-    dependsOn: parseOptionalStringArray(value.dependsOn, "dependsOn"),
-    dependencies: parseWorkGraphDependencies(value.dependencies, value.dependsOn)
+    dependencies: parseWorkGraphDependencies(value.dependencies)
   };
 }
 
@@ -340,30 +338,10 @@ function parseStringArray(value: unknown, field: string): string[] {
   });
 }
 
-function parseOptionalStringArray(value: unknown, field: string): string[] {
-  if (value === undefined) {
-    return [];
-  }
-  return parseStringArray(value, field);
-}
-
-function parseWorkGraphDependencies(dependencies: unknown, legacyDependsOn: unknown): WorkGraphDependency[] {
+function parseWorkGraphDependencies(dependencies: unknown): WorkGraphDependency[] {
   const parsed: WorkGraphDependency[] = [];
   const seen = new Set<string>();
 
-  for (const task of parseOptionalStringArray(legacyDependsOn, "dependsOn")) {
-    const key = `${task}:run`;
-    seen.add(key);
-    parsed.push({
-      task,
-      type: "run",
-      reason: "legacy dependsOn"
-    });
-  }
-
-  if (dependencies === undefined) {
-    return parsed;
-  }
   if (!Array.isArray(dependencies)) {
     throw new DevtaskError("Invalid work graph: dependencies must be an array");
   }

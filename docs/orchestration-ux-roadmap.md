@@ -15,7 +15,6 @@ This checklist tracks the developer-productivity work needed to move `devtask wo
 - [x] Idempotent stage reruns with explicit `--refresh`.
 - [x] Work board columns for latest result, blocking reason, and work-level next commands.
 - [x] Typed work graph dependencies.
-  - [x] Preserve compatibility with legacy `dependsOn`.
   - [x] Add lifecycle dependency types: `run`, `review`, `approval`, `publish`, `validation`.
   - [x] Make planner output typed dependencies.
   - [x] Make graph validation reject unknown dependency targets and invalid dependency types.
@@ -50,7 +49,5 @@ Typed dependencies describe when one task should wait for another.
 - `approval`: review may happen, but human approval should wait for the dependency.
 - `publish`: PR/MR publishing should wait for the dependency.
 - `validation`: repo-local work can proceed; final work-level validation/completion depends on the relationship.
-
-Legacy `dependsOn` means hard `run` dependency.
 
 Use `run` dependencies sparingly. If two repos can implement against an agreed contract in parallel, prefer `validation` or `approval` dependency instead of blocking execution.

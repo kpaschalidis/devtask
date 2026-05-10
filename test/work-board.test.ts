@@ -128,7 +128,7 @@ describe("work board", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             }
           ],
           validation: ["npm test"],
@@ -185,14 +185,14 @@ describe("work board", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             },
             {
               id: "work-123-frontend",
               target: "frontend",
               goal: "Implement frontend behavior.",
               owns: ["src/**"],
-              dependsOn: ["work-123-backend"]
+              dependencies: [{ task: "work-123-backend", type: "run", reason: "Backend must finish before frontend starts." }]
             }
           ],
           validation: [],

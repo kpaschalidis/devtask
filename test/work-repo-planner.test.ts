@@ -42,7 +42,7 @@ describe("work repo planner", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             }
           ],
           validation: ["npm test"],
@@ -139,7 +139,7 @@ describe("work repo planner", () => {
               target: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
-              dependsOn: []
+              dependencies: []
             }
           ],
           validation: [],

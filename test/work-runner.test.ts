@@ -174,25 +174,14 @@ async function makeFixture(options: { withDependency: boolean; dependencyType?: 
             target: "backend",
             goal: "Implement backend behavior.",
             owns: ["server/**"],
-            dependsOn: []
+            dependencies: []
           },
           {
             id: "work-123-frontend",
             target: "frontend",
             goal: "Implement frontend behavior.",
             owns: ["src/**"],
-            ...(options.withDependency ? { dependsOn: ["work-123-backend"] } : {}),
-            ...(options.dependencyType
-              ? {
-                  dependencies: [
-                    {
-                      task: "work-123-backend",
-                      type: options.dependencyType,
-                      reason: "Coordinate backend and frontend validation."
-                    }
-                  ]
-                }
-              : {})
+            dependencies: graphDependencies(options)
           }
         ],
         validation: [],
@@ -204,4 +193,26 @@ async function makeFixture(options: { withDependency: boolean; dependencyType?: 
   );
   await approveWorkPlan(paths, item);
   return { paths, item, backendPaths, frontendPaths };
+}
+
+function graphDependencies(options: { withDependency: boolean; dependencyType?: "run" | "validation" }) {
+  if (options.dependencyType) {
+    return [
+      {
+        task: "work-123-backend",
+        type: options.dependencyType,
+        reason: "Coordinate backend and frontend validation."
+      }
+    ];
+  }
+  if (options.withDependency) {
+    return [
+      {
+        task: "work-123-backend",
+        type: "run",
+        reason: "Backend must finish before frontend starts."
+      }
+    ];
+  }
+  return [];
 }
