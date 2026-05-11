@@ -106,7 +106,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
       };
     }
 
-    if (!isFresh(check.finishedAt, review.meta.updatedAt)) {
+    if (!isFresh(check.finishedAt, codeChangeBaseline(review))) {
       return {
         kind: "check",
         command: `devtask check ${id}`,
@@ -261,7 +261,7 @@ function describeLifecycle(review: TaskReview): { stage: string; status: string 
 
 function describeReviewLifecycle(review: TaskReview): { stage: string; status: string } {
   const check = latestStageState(review, "check");
-  if (!check.status || !isFresh(check.finishedAt, review.meta.updatedAt)) {
+  if (!check.status || !isFresh(check.finishedAt, codeChangeBaseline(review))) {
     return { stage: "check", status: "pending" };
   }
 
@@ -311,7 +311,7 @@ function formatCheckState(review: TaskReview): string {
     return "-";
   }
 
-  if (!isFresh(check.finishedAt, review.meta.updatedAt)) {
+  if (!isFresh(check.finishedAt, codeChangeBaseline(review))) {
     return `${check.status}:stale`;
   }
 
@@ -330,6 +330,15 @@ function formatReviewState(review: TaskReview): string {
   }
 
   return agentReview.status;
+}
+
+function codeChangeBaseline(review: TaskReview): string {
+  const candidates = [review.stages.stages.run, review.stages.stages.fix]
+    .map((stage) => stage?.finishedAt)
+    .filter((finishedAt): finishedAt is string => Boolean(finishedAt))
+    .sort();
+
+  return candidates.at(-1) ?? review.meta.createdAt;
 }
 
 function latestStageState(

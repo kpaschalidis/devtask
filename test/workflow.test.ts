@@ -200,6 +200,71 @@ describe("workflow recommendations", () => {
     });
   });
 
+  it("does not make checks stale after metadata-only approval", () => {
+    const review = taskReview({
+      status: "approved",
+      updatedAt: "2026-05-05T00:00:05.000Z",
+      latestVerification: {
+        status: "passed",
+        finishedAt: "2026-05-05T00:00:02.000Z"
+      },
+      latestReviewAgent: {
+        status: "passed",
+        finishedAt: "2026-05-05T00:00:03.000Z"
+      },
+      stages: {
+        run: {
+          stage: "run",
+          status: "passed",
+          startedAt: "2026-05-05T00:00:00.000Z",
+          finishedAt: "2026-05-05T00:00:01.000Z",
+          input: {},
+          output: {},
+          artifacts: [],
+          reason: null
+        },
+        check: {
+          stage: "check",
+          status: "passed",
+          startedAt: "2026-05-05T00:00:01.000Z",
+          finishedAt: "2026-05-05T00:00:02.000Z",
+          input: {},
+          output: {},
+          artifacts: [],
+          reason: null
+        },
+        review: {
+          stage: "review",
+          status: "passed",
+          startedAt: "2026-05-05T00:00:02.000Z",
+          finishedAt: "2026-05-05T00:00:03.000Z",
+          input: {},
+          output: {},
+          artifacts: [],
+          reason: null
+        },
+        approve: {
+          stage: "approve",
+          status: "passed",
+          startedAt: "2026-05-05T00:00:04.000Z",
+          finishedAt: "2026-05-05T00:00:05.000Z",
+          input: {},
+          output: {},
+          artifacts: [],
+          reason: null
+        }
+      }
+    });
+
+    expect(buildBoardRow(review, config)).toMatchObject({
+      stage: "pr",
+      status: "pending",
+      check: "passed",
+      review: "passed",
+      next: "devtask pr example"
+    });
+  });
+
   it("can recommend approval from stage contract state", () => {
     const review = taskReview({ status: "review" });
     review.stages.stages.check = {
