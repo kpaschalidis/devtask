@@ -177,16 +177,27 @@ Rules:
 
 ### `devtask work show <id>`
 
-Shows one work item.
+Shows one work item execution summary.
 
 Inputs:
 
 - work id
 - `.devtask/work/<work-id>/work.json`
+- `.devtask/work/<work-id>/plan.md`
+- `.devtask/work/<work-id>/graph.json`
+- `.devtask/work/<work-id>/materialization.json`
+- materialized repo task metadata and stage ledgers
 
 Output:
 
-- work item metadata JSON
+- source metadata
+- tracked work artifacts
+- materialized target task lifecycle rows
+- PR URLs when available
+
+Options:
+
+- `--json`: print raw work item metadata JSON
 
 Rules:
 

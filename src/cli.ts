@@ -418,10 +418,16 @@ export function createCli(): Command {
     .command("show")
     .description("Show one work item.")
     .argument("<id>")
-    .action((id: string) => {
+    .option("--json", "Print raw work item metadata JSON")
+    .action(async (id: string, options: { json?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
-        console.log(JSON.stringify(getWorkItem(paths, id), null, 2));
+        const item = getWorkItem(paths, id);
+        if (options.json) {
+          console.log(JSON.stringify(item, null, 2));
+          return;
+        }
+        await printWorkSummary(paths, item);
       } catch (error) {
         printError(error);
       }
@@ -2872,6 +2878,62 @@ function printWorkItems(items: WorkItem[]): void {
       item.updatedAt
     ])
   );
+}
+
+async function printWorkSummary(paths: ReturnType<typeof resolveWorkspacePaths>, item: WorkItem): Promise<void> {
+  console.log(`Work: ${item.id}`);
+  console.log(`Status: ${item.status}`);
+  console.log(`Source: ${formatWorkSource(item)}`);
+  console.log(`Created: ${item.createdAt}`);
+  console.log(`Updated: ${item.updatedAt}`);
+
+  const planPath = workPlanPath(paths, item.id);
+  const graphPath = workGraphPath(paths, item.id);
+  const materialization = readWorkMaterialization(paths, item.id);
+  console.log("");
+  console.log("Artifacts:");
+  console.log(`  Plan: ${fs.existsSync(planPath) ? planPath : "-"}`);
+  console.log(`  Graph: ${fs.existsSync(graphPath) ? graphPath : "-"}`);
+  console.log(`  Approved graph: ${materialization?.approvedGraphPath ?? "-"}`);
+  console.log(`  Materialized: ${materialization ? materialization.materializedAt : "-"}`);
+
+  const rows = await buildWorkBoardRows(paths, item);
+  console.log("");
+  console.log("Targets:");
+  printTable(
+    ["TARGET", "TASK", "STAGE", "STATUS", "LAST", "CHECK", "REVIEW", "PR", "NEXT"],
+    rows.map((row) => [row.target, row.task, row.stage, row.status, row.last, row.check, row.review, row.pr, row.next])
+  );
+
+  const prRows = collectWorkPrRows(materialization);
+  if (prRows.length > 0) {
+    console.log("");
+    console.log("Pull Requests:");
+    printTable(["TARGET", "TASK", "URL"], prRows);
+  }
+}
+
+function formatWorkSource(item: WorkItem): string {
+  if (item.source.type === "jira") {
+    return `${item.source.key} - ${item.source.title} (${item.source.url})`;
+  }
+  return item.source.title;
+}
+
+function collectWorkPrRows(materialization: ReturnType<typeof readWorkMaterialization>): string[][] {
+  if (!materialization) {
+    return [];
+  }
+
+  const rows: string[][] = [];
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = getTask(repoPaths, task.taskId);
+    if (meta.prUrl) {
+      rows.push([task.target, task.taskId, meta.prUrl]);
+    }
+  }
+  return rows;
 }
 
 function displayWidth(value: string): number {
