@@ -92,7 +92,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
     };
   }
 
-  if (review.meta.status === "review") {
+  if (review.meta.status === "review" || isCompletedRunAwaitingQualityGates(review)) {
     const check = latestStageState(review, "check");
     const agentReview = latestStageState(review, "review");
 
@@ -232,12 +232,12 @@ function describeLifecycle(review: TaskReview): { stage: string; status: string 
   }
 
   const latest = latestStage(review);
-  if (latest) {
+  if (latest && ["running", "failed", "blocked", "findings"].includes(latest.status)) {
     return { stage: latest.stage, status: latest.status };
   }
 
-  if (review.meta.status === "review") {
-    return { stage: "check", status: "pending" };
+  if (review.meta.status === "review" || isCompletedRunAwaitingQualityGates(review)) {
+    return describeReviewLifecycle(review);
   }
 
   if (review.meta.status === "approved") {
@@ -249,6 +249,29 @@ function describeLifecycle(review: TaskReview): { stage: string; status: string 
   }
 
   return { stage: "-", status: review.meta.status };
+}
+
+function describeReviewLifecycle(review: TaskReview): { stage: string; status: string } {
+  const check = latestStageState(review, "check");
+  if (!check.status) {
+    return { stage: "check", status: "pending" };
+  }
+
+  const agentReview = latestStageState(review, "review");
+  if (!agentReview.status) {
+    return { stage: "review", status: "pending" };
+  }
+
+  if (check.status === "passed" && agentReview.status === "passed") {
+    return { stage: "approve", status: "pending" };
+  }
+
+  return { stage: agentReview.status === "findings" ? "review" : "check", status: "pending" };
+}
+
+function isCompletedRunAwaitingQualityGates(review: TaskReview): boolean {
+  const stages = review.stages.stages;
+  return review.meta.status === "done" && stages.run?.status === "passed" && !stages.approve && !stages.pr && !stages.ci;
 }
 
 function latestFailedStage(review: TaskReview): StageName | null {

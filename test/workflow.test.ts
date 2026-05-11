@@ -69,6 +69,33 @@ describe("workflow recommendations", () => {
     });
   });
 
+  it("checks run-complete tasks before treating them as terminal", () => {
+    expect(
+      recommendNextAction(
+        taskReview({
+          status: "done",
+          stages: {
+            run: {
+              stage: "run",
+              status: "passed",
+              startedAt: "2026-05-05T00:00:00.000Z",
+              finishedAt: "2026-05-05T00:00:01.000Z",
+              input: {},
+              output: {},
+              artifacts: [],
+              reason: null
+            }
+          }
+        }),
+        config
+      )
+    ).toMatchObject({
+      kind: "check",
+      command: "devtask check example",
+      automatic: true
+    });
+  });
+
   it("stops at human approval after fresh passing check and review", () => {
     expect(
       recommendNextAction(

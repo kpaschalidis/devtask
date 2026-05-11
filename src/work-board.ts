@@ -42,19 +42,20 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
       const config = readConfig(repoPaths);
       const row = buildBoardRow(await buildTaskReview(repoPaths, getTask(repoPaths, task.taskId)), config);
       const runSkipped = runSkippedByTask.get(task.taskId);
-      const status = row.stage === "run" && runReadyTaskIds.has(task.taskId) ? "ready" : row.stage === "run" && runSkipped ? "waiting" : row.status;
+      const actionableRunSkip = runSkipped?.reason === "run complete" ? null : runSkipped;
+      const status = row.stage === "run" && runReadyTaskIds.has(task.taskId) ? "ready" : row.stage === "run" && actionableRunSkip ? "waiting" : row.status;
       rows.push({
         target: task.target,
         task: row.id,
         stage: row.stage,
         status,
         last: latestStageSummary(readStageLedger(repoPaths, task.taskId)),
-        blocked: runSkipped?.reason ?? "-",
+        blocked: actionableRunSkip?.reason ?? "-",
         check: row.check,
         review: row.review,
         pr: row.pr,
         updated: row.updated,
-        next: runSkipped?.reason ?? workLevelNext(item.id, row.stage, row.next)
+        next: actionableRunSkip?.reason ?? workLevelNext(item.id, row.stage, row.next)
       });
     } catch (error) {
       if (!(error instanceof DevtaskError)) {

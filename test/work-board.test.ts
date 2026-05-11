@@ -229,6 +229,73 @@ describe("work board", () => {
       })
     ]);
   });
+
+  it("shows completed run tasks as ready for work-level checks", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-run-complete-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Implement work"
+    });
+    addWorkspaceTarget(paths, {
+      id: "backend",
+      repoPath: repo,
+      kind: "api"
+    });
+    fs.writeFileSync(workPlanPath(paths, item.id), "# Plan\n");
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependencies: []
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+    await approveWorkPlan(paths, item);
+    markMaterializedTasksPlanned(paths, item.id);
+    const materialization = readWorkMaterialization(paths, item.id);
+    if (!materialization) {
+      throw new Error("Expected materialization");
+    }
+    const task = materialization.tasks[0];
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+    writeTaskMeta(taskMetaPath(repoPaths, task.taskId), {
+      ...meta,
+      status: "done"
+    });
+    recordStage(repoPaths, task.taskId, "run", {
+      status: "passed"
+    });
+
+    await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
+      expect.objectContaining({
+        target: "backend",
+        task: "work-123-backend",
+        stage: "check",
+        status: "pending",
+        last: "run passed",
+        blocked: "-",
+        next: "devtask work check WORK-123"
+      })
+    ]);
+  });
 });
 
 function markMaterializedTasksPlanned(paths: ReturnType<typeof resolveWorkspacePathsForInit>, workId: string): void {
