@@ -24,8 +24,8 @@ describe("task store", () => {
         fullAuto: true
       },
       runtime: {
-        mode: "plain",
-        backend: null
+        mode: "attachable",
+        backend: "tmux"
       },
       runtimeConfigured: false,
       jira: {

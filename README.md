@@ -164,6 +164,14 @@ devtask attach fix-login --stage review
 devtask steer fix-login --stage review "Please double-check the error path."
 ```
 
+Workspace work items expose the same steering path per materialized target:
+
+```bash
+devtask work review CPS-549 --target backend
+devtask work attach CPS-549 --target backend --stage review
+devtask work steer CPS-549 --target backend --stage review "Please double-check the error path."
+```
+
 Use `--plain` on `plan`, `review`, `work plan`, `work repo-plan`, or `work review` to run the stage in the current foreground process.
 
 If tmux is not installed, devtask configures plain mode. Plain mode can run background workers, but live `attach` and `steer` are unavailable:

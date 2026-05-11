@@ -27,8 +27,8 @@ export const DEFAULT_CONFIG: DevtaskConfig = {
     fullAuto: true
   },
   runtime: {
-    mode: "plain",
-    backend: null
+    mode: "attachable",
+    backend: "tmux"
   },
   runtimeConfigured: false,
   jira: {

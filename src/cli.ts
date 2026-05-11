@@ -514,6 +514,33 @@ export function createCli(): Command {
     });
 
   work
+    .command("steer")
+    .description("Send live feedback to one materialized repo task in a work item.")
+    .argument("<id>")
+    .argument("[message...]")
+    .requiredOption("--target <target-id>", "Workspace target to steer")
+    .option("-f, --file <path>", "Read feedback from a file")
+    .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
+    .option("--stage <stage>", "Steer a repo task stage session such as plan or review")
+    .action((id: string, messageParts: string[], options: { target: string; file?: string; lines: number; stage?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const task = selectOneWorkTask(paths, item, options.target);
+        const repoPaths = resolvePaths(task.repoPath);
+        steerTask(repoPaths, task.taskId, {
+          messageParts,
+          file: options.file,
+          lines: options.lines,
+          messageRoot: paths.root,
+          stage: options.stage
+        });
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("plan")
     .description("Create or refresh the proposed execution graph for a work item.")
     .argument("<id>")
