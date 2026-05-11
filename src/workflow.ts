@@ -170,6 +170,16 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   }
 
   if (review.meta.status === "pr-open") {
+    const ci = review.stages.stages.ci;
+    if (ci?.status === "skipped") {
+      return {
+        kind: "none",
+        command: null,
+        reason: ci.reason ?? "CI status is unavailable. Merge or check provider manually.",
+        automatic: false
+      };
+    }
+
     return {
       kind: "ci",
       command: `devtask ci ${id}`,
@@ -253,6 +263,10 @@ function describeLifecycle(review: TaskReview): { stage: string; status: string 
   }
 
   if (review.meta.status === "pr-open") {
+    const ci = review.stages.stages.ci;
+    if (ci?.status === "skipped") {
+      return { stage: "-", status: "ci-skipped" };
+    }
     return { stage: "ci", status: "pending" };
   }
 

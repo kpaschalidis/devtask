@@ -200,6 +200,38 @@ describe("workflow recommendations", () => {
     });
   });
 
+  it("does not keep recommending CI after a skipped CI snapshot", () => {
+    const review = taskReview({
+      status: "pr-open",
+      stages: {
+        ci: {
+          stage: "ci",
+          status: "skipped",
+          startedAt: "2026-05-05T00:00:00.000Z",
+          finishedAt: "2026-05-05T00:00:01.000Z",
+          input: {},
+          output: {
+            provider: "bitbucket",
+            detail: "No Bitbucket pipeline found for branch task/example"
+          },
+          artifacts: [],
+          reason: "CI status is unavailable"
+        }
+      }
+    });
+
+    expect(recommendNextAction(review, config)).toMatchObject({
+      kind: "none",
+      command: null,
+      reason: "CI status is unavailable"
+    });
+    expect(buildBoardRow(review, config)).toMatchObject({
+      stage: "-",
+      status: "ci-skipped",
+      next: "CI status is unavailable"
+    });
+  });
+
   it("does not make checks stale after metadata-only approval", () => {
     const review = taskReview({
       status: "approved",
