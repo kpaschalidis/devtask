@@ -32,6 +32,12 @@ The durable gap is not "run multiple agents". The durable gap is:
 portable, reviewable, provider-neutral engineering workflow orchestration
 ```
 
+The business is not "best AI coding app". The business is:
+
+```text
+workflow infrastructure for teams operating agents in real software delivery environments
+```
+
 ## Market Shape
 
 The market splits into two layers:
@@ -150,6 +156,31 @@ Common limits:
 
 `devtask` should be strongest where the others are structurally weaker.
 
+### Product Definition
+
+`devtask` should be defined as:
+
+```text
+team workflow infrastructure for agent-driven software delivery
+```
+
+That means:
+
+- not another agent shell
+- not a better IDE
+- not a generic autonomous engineer
+- not a proprietary context engine
+
+It means owning the workflow layer around agent runtimes:
+
+- work intake
+- decomposition
+- execution control
+- human gates
+- publishing
+- recovery
+- context and learning artifacts
+
 ### Provider Neutrality
 
 `devtask` should stay neutral across:
@@ -211,6 +242,16 @@ This is a real requirement for teams that do not want fully autonomous execution
 
 This is less flashy than UI, but it is where trust comes from.
 
+Long term, local-first should evolve into:
+
+```text
+local execution
+  + shared artifacts
+  + optional cloud control plane
+```
+
+That preserves provider neutrality and local control while leaving room for team visibility, approvals, and policy later.
+
 ### Reviewable Context And Learning
 
 The future context and self-improvement layers should strengthen the orchestration model:
@@ -258,6 +299,34 @@ Instead it should differentiate on:
 - explicit lifecycle contracts
 - strong human oversight
 - polyrepo decomposition
+- shared workflow artifacts
+- reviewable context and learning
+
+## Buyer And User
+
+The user is not "any developer who wants a better coding assistant".
+
+The primary user is:
+
+- an engineer or tech lead managing real delivery work with agents
+- often across multiple repos or scopes
+- often inside mixed vendor environments
+- often needing explicit review and approval checkpoints
+
+The likely buyer, later, is:
+
+- engineering management
+- platform engineering
+- developer productivity or internal tooling owners
+
+The value is not just faster coding. The value is:
+
+- standard workflow
+- better oversight
+- lower vendor lock-in
+- recoverable automation
+- reusable execution knowledge
+- more predictable ticket-to-PR delivery
 - inspectable context and learning
 
 ## What This Means For Roadmap
@@ -275,6 +344,29 @@ After that:
 - self-improvement with explicit approval
 - work-level CI watch/fix loop
 - UI on top of durable state, not instead of it
+
+The roadmap should keep reinforcing the workflow moat, not drift toward generic runtime chrome.
+
+## Business Conclusion
+
+Continuing `devtask` makes sense because the plan is now narrower than the crowded "AI coding" market.
+
+The crowded business is:
+
+- agent shells
+- IDE copilots
+- generic spec-to-PR tools
+- broad autonomous coding assistants
+
+The more viable business is:
+
+- workflow infrastructure
+- for teams
+- with mixed stacks or vendor neutrality needs
+- with polyrepo delivery complexity
+- with a need for explicit human oversight
+
+That is a smaller category than "AI coding", but it is more defensible and more aligned with the product we are actually building.
 
 ## Decision Rule
 
