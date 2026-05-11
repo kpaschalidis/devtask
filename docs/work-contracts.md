@@ -17,7 +17,7 @@ The goal is to keep the work-item layer predictable before it grows into executi
 
 ### `devtask init --workspace`
 
-Creates a non-git control root for work items, targets, groups, sources, and helper scripts.
+Creates a non-git control root for work items, targets, sources, and helper scripts.
 
 Inputs:
 
@@ -27,7 +27,6 @@ Artifacts:
 
 - `.devtask/workspace.json`
 - `.devtask/config.json`
-- `.devtask/groups/`
 - `.devtask/work/`
 - `.devtask/scripts/`
 

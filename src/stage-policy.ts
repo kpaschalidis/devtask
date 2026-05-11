@@ -11,7 +11,7 @@ export function assertRunReady(meta: TaskMeta): void {
   }
 
   if (meta.status === "created") {
-    throw new DevtaskError(`Task ${meta.id} has not been planned. Run devtask plan ${meta.id} first.`);
+    throw new DevtaskError(`Task ${meta.id} has not been planned. Run devtask task plan ${meta.id} first.`);
   }
 
   if (["approved", "pr-open", "ci-running", "ci-passed", "done", "cancelled"].includes(meta.status)) {
@@ -25,7 +25,7 @@ export function assertCheckReady(paths: DevtaskPaths, meta: TaskMeta): void {
   }
 
   if (!hasPassedRun(paths, meta)) {
-    throw new DevtaskError(`Task ${meta.id} has not completed implementation. Run devtask run ${meta.id} first.`);
+    throw new DevtaskError(`Task ${meta.id} has not completed implementation. Run devtask task run ${meta.id} first.`);
   }
 }
 
@@ -38,7 +38,7 @@ export function assertReviewReady(paths: DevtaskPaths, meta: TaskMeta, config: D
 
   const latest = readLatestVerification(paths, meta.id);
   if (!latest) {
-    throw new DevtaskError(`Task ${meta.id} has not passed checks. Run devtask check ${meta.id} first.`);
+    throw new DevtaskError(`Task ${meta.id} has not passed checks. Run devtask task check ${meta.id} first.`);
   }
 
   if (latest.status !== "passed") {

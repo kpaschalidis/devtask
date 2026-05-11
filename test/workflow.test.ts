@@ -21,7 +21,7 @@ describe("workflow recommendations", () => {
   it("plans new tasks", () => {
     expect(recommendNextAction(taskReview({ status: "created" }), config)).toMatchObject({
       kind: "plan",
-      command: "devtask plan example",
+      command: "devtask task plan example",
       automatic: true
     });
   });
@@ -29,7 +29,7 @@ describe("workflow recommendations", () => {
   it("runs planned tasks", () => {
     expect(recommendNextAction(taskReview({ status: "planned" }), config)).toMatchObject({
       kind: "run",
-      command: "devtask run example",
+      command: "devtask task run example",
       automatic: true
     });
   });
@@ -56,7 +56,7 @@ describe("workflow recommendations", () => {
       )
     ).toMatchObject({
       kind: "plan",
-      command: "devtask plan example",
+      command: "devtask task plan example",
       automatic: false
     });
   });
@@ -64,7 +64,7 @@ describe("workflow recommendations", () => {
   it("checks review tasks before review agent", () => {
     expect(recommendNextAction(taskReview({ status: "review" }), config)).toMatchObject({
       kind: "check",
-      command: "devtask check example",
+      command: "devtask task check example",
       automatic: true
     });
   });
@@ -92,13 +92,13 @@ describe("workflow recommendations", () => {
 
     expect(recommendNextAction(review, config)).toMatchObject({
       kind: "fix",
-      command: "devtask fix example --from check",
+      command: "devtask task fix example --from check",
       automatic: false
     });
     expect(buildBoardRow(review, config)).toMatchObject({
       stage: "fix",
       status: "ready",
-      next: "devtask fix example --from check"
+      next: "devtask task fix example --from check"
     });
   });
 
@@ -138,7 +138,7 @@ describe("workflow recommendations", () => {
       stage: "check",
       status: "pending",
       check: "failed:stale",
-      next: "devtask check example"
+      next: "devtask task check example"
     });
   });
 
@@ -164,7 +164,7 @@ describe("workflow recommendations", () => {
       )
     ).toMatchObject({
       kind: "check",
-      command: "devtask check example",
+      command: "devtask task check example",
       automatic: true
     });
   });
@@ -187,7 +187,7 @@ describe("workflow recommendations", () => {
       )
     ).toMatchObject({
       kind: "approve",
-      command: "devtask approve example",
+      command: "devtask task approve example",
       automatic: false
     });
   });
@@ -195,7 +195,7 @@ describe("workflow recommendations", () => {
   it("opens PRs only after approval", () => {
     expect(recommendNextAction(taskReview({ status: "approved" }), config)).toMatchObject({
       kind: "pr",
-      command: "devtask pr example",
+      command: "devtask task pr example",
       automatic: true
     });
   });
@@ -293,7 +293,7 @@ describe("workflow recommendations", () => {
       status: "pending",
       check: "passed",
       review: "passed",
-      next: "devtask pr example"
+      next: "devtask task pr example"
     });
   });
 
@@ -322,7 +322,7 @@ describe("workflow recommendations", () => {
 
     expect(recommendNextAction(review, config)).toMatchObject({
       kind: "approve",
-      command: "devtask approve example",
+      command: "devtask task approve example",
       automatic: false
     });
   });
@@ -350,7 +350,7 @@ describe("workflow recommendations", () => {
     expect(row).toMatchObject({
       stage: "plan",
       status: "failed",
-      next: "devtask plan example"
+      next: "devtask task plan example"
     });
   });
 });

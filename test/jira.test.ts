@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  buildJiraGroupRepoGoal,
   buildJiraTaskGoal,
   checkJiraAuth,
   fetchJiraIssue,
@@ -94,8 +93,6 @@ describe("jira source integration", () => {
     expect(fs.readFileSync(artifacts.markdownPath, "utf8")).toContain("# APP-123: Add billing export");
     expect(buildJiraTaskGoal(issue, artifacts.markdownPath)).toContain("Jira source artifact");
     expect(buildJiraTaskGoal(issue, artifacts.markdownPath)).toContain("Plain description");
-    expect(buildJiraGroupRepoGoal(issue, "app-123", "backend", artifacts.markdownPath)).toContain("backend part");
-    expect(buildJiraGroupRepoGoal(issue, "app-123", "backend", artifacts.markdownPath)).toContain("Plain description");
   });
 
   it("uses Atlassian gateway URLs when cloudId is configured", async () => {

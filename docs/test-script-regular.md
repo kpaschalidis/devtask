@@ -1,219 +1,121 @@
-# Regular / Monorepo Test Script
+# Regular Repo Test Script
 
-Use this script to test the single-repo `devtask` lifecycle in a safe way. It is designed for docs-only changes.
+Use this as a safe single-repo smoke test. Edit the constants before running commands.
 
-Runnable helper after installing scripts into a target repo:
+## Constants
 
 ```bash
-devtask scripts install
-devtask scripts run smoke-regular help
+TARGET_REPO="/path/to/repo"
+WORK_ID="readme-smoke"
+TARGET_ID="app"
+CHECK_1="npm test"
+CHECK_2="npm run typecheck"
 ```
 
-You can either follow this document manually or edit/pass constants to the helper script.
-
-## Installed Helper Workflow
-
-From any target repo:
+## Setup
 
 ```bash
-cd /path/to/target/repo
-
+cd "$TARGET_REPO"
 devtask init
-devtask scripts install
-devtask scripts list
-ls -la .devtask/scripts
-```
-
-Edit the installed script:
-
-```bash
-vim .devtask/scripts/smoke-regular.sh
-```
-
-Update the constants at the top for the current run:
-
-```bash
-TARGET_REPO="/path/to/target/repo"
-TASK_ID="readme-smoke"
-CHECK_COMMAND_1="npm test"
-CHECK_COMMAND_2="npm run typecheck"
-```
-
-Run the installed script through `devtask`:
-
-```bash
-devtask scripts run smoke-regular setup
-devtask scripts run smoke-regular create
-devtask scripts run smoke-regular run
-devtask scripts run smoke-regular logs
-```
-
-When the worker finishes:
-
-```bash
-devtask scripts run smoke-regular inspect
-devtask scripts run smoke-regular check
-devtask scripts run smoke-regular review
-devtask scripts run smoke-regular cleanup-plan
-```
-
-You can also avoid editing the file by passing environment overrides:
-
-```bash
-TARGET_REPO=/path/to/target/repo TASK_ID=readme-smoke \
-  devtask scripts run smoke-regular setup
-```
-
-## 0. Use The Latest Local CLI
-
-Run this from the `devtask-orchestration` repo:
-
-```bash
-cd /Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration
-nvm use 22
-npm run build
-npm link
-hash -r
-
-devtask --help
-```
-
-Confirm help includes:
-
-```text
-inspect
-board
-next
-check
-review
-advance
-run
-continue
-```
-
-## 1. Pick A Target Repo
-
-Use a repo where a tiny README-only change is safe:
-
-```bash
-cd /path/to/your/repo
-git status --short
-```
-
-If the repo already has unrelated changes, keep that in mind when reviewing the task worktree.
-
-## 2. Initialize And Configure
-
-```bash
-devtask init
-devtask config model gpt-5.2
-devtask config check 'npm test' 'npm run typecheck'
-devtask config show
-```
-
-Adjust the check commands to match the repo. For example, if the repo has only typecheck:
-
-```bash
-devtask config check 'npm run typecheck'
-```
-
-## 3. Create A Safe Task
-
-```bash
-devtask create readme-smoke \
-  --goal "Make one tiny README wording improvement only. Keep changes docs-only and scoped to README.md. Do not change code, package files, config, generated files, or lockfiles."
-```
-
-## 4. Run The Worker
-
-```bash
-devtask run readme-smoke
-devtask board
-devtask logs -f readme-smoke
-```
-
-Stop following logs with `Ctrl-C`. This does not cancel the worker.
-
-## 5. Inspect The Result
-
-```bash
-devtask status readme-smoke
-devtask inspect readme-smoke
-devtask next readme-smoke
-```
-
-Inspect the actual worktree diff:
-
-```bash
-cd .devtask/worktrees/readme-smoke
-git status --short
-git diff
-```
-
-Expected: a small `README.md` diff only.
-
-Return to the repo root:
-
-```bash
-cd -
-```
-
-## 6. Run Checks And Review
-
-```bash
-devtask check readme-smoke
-devtask review readme-smoke
+devtask workspace target add "$TARGET_ID" . --kind app
+devtask config check "$CHECK_1" "$CHECK_2"
+devtask config runtime attachable
 ```
 
 Expected:
 
-- `devtask check` prints each configured command before running it.
-- `devtask review` streams the review agent output and writes a review artifact.
+- `.devtask/config.json` exists
+- `devtask workspace target list` shows one target
 
-## 7. Approve Or Continue
-
-If the diff is acceptable and checks/review passed:
+## Create
 
 ```bash
-devtask mark readme-smoke approved
-devtask board
+devtask work create "$WORK_ID" \
+  --title "Improve README wording" \
+  --body "Make a small README-only wording improvement. Do not change runtime code."
 ```
 
-If checks or review found issues:
+Expected:
+
+- `devtask work list` shows the work item
+- `devtask work show "$WORK_ID"` shows source metadata
+
+## Plan
 
 ```bash
-devtask continue readme-smoke
-devtask logs -f readme-smoke
+devtask work plan "$WORK_ID" --refresh
+devtask work show "$WORK_ID"
 ```
 
-## 8. Optional PR Flow
+Validate:
 
-Only do this if the repo has a remote and you are comfortable creating a draft PR:
+- `.devtask/work/$WORK_ID/plan.md` exists
+- `.devtask/work/$WORK_ID/graph.json` exists
+- graph contains only the configured target
+- task goal is documentation-only
+
+## Approve And Materialize
 
 ```bash
-devtask pr readme-smoke
-devtask ci readme-smoke
+devtask work approve-plan "$WORK_ID"
+devtask work board "$WORK_ID"
 ```
 
-## 9. Cleanup Notes
+Expected:
 
-Inspect before cleanup:
+- one repo task exists
+- next stage is `repo-plan`
+
+## Repo Plan And Run
 
 ```bash
-devtask status readme-smoke
-git worktree list
+devtask work repo-plan "$WORK_ID" --refresh
+devtask work run "$WORK_ID" --follow
+devtask work board "$WORK_ID"
 ```
 
-Preview cleanup:
+Expected:
+
+- repo plan artifact exists
+- worker finishes with staged lifecycle moving toward `check`
+- changed files are limited to README/docs
+
+## Check, Review, Approve
 
 ```bash
-devtask cleanup readme-smoke --dry-run
+devtask work check "$WORK_ID"
+devtask work review "$WORK_ID"
+devtask work approve "$WORK_ID"
+devtask work board "$WORK_ID"
 ```
 
-Remove the task worktree and metadata:
+If checks fail:
 
 ```bash
-devtask cleanup readme-smoke
+devtask work logs "$WORK_ID" --target "$TARGET_ID" --stage check
+devtask work fix "$WORK_ID" --target "$TARGET_ID" --from check
+devtask work check "$WORK_ID" --target "$TARGET_ID"
 ```
 
-Cleanup refuses running tasks and dirty worktrees unless you pass `--force`.
+## Publish
+
+```bash
+devtask work commit "$WORK_ID"
+devtask work pr "$WORK_ID" --ready
+devtask work ci "$WORK_ID"
+devtask work show "$WORK_ID"
+```
+
+Expected:
+
+- PR URL appears in `work show`
+- CI is `passed`, `pending`, `failed`, or `skipped`
+
+## Cleanup
+
+```bash
+devtask work cleanup "$WORK_ID" --dry-run
+devtask work cleanup "$WORK_ID"
+```
+
+Cleanup removes local work/task metadata and worktrees. It does not delete remote PRs or revert commits.
