@@ -147,6 +147,113 @@ Expected providers:
 
 The work-item layer should talk in terms of source artifacts, PRs/MRs, and CI status. It should not encode provider-specific workflow rules directly.
 
+## Context Artifacts
+
+`devtask` should treat context as a durable input to the lifecycle, not as throwaway prompt text.
+
+The near-term goal is not to build a proprietary semantic index. The near-term goal is an inspectable context artifact pipeline.
+
+For each work item, `devtask` should be able to build and persist:
+
+- source context: ticket text, links, assets, comments, and external references
+- workspace context: configured targets, repo paths, scopes, and target kinds
+- repo maps: package structure, key commands, important docs, and local conventions
+- candidate files: likely relevant files per target with reasons
+- dependency hints: APIs, shared packages, frontend/backend contracts, and cross-repo touchpoints
+- instruction context: `AGENTS.md`, `CLAUDE.md`, README, local runbooks, and configured prompts
+- stage context: work plan, approved graph, repo plans, check output, review findings, PR and CI state
+
+The first useful shape is:
+
+```text
+.devtask/work/<id>/context/
+  source.md
+  workspace.md
+  targets.json
+  summary.md
+  repo-map/<target>.md
+  candidate-files/<target>.json
+  instructions/<target>.md
+```
+
+Every agent-backed stage should consume the appropriate context slice:
+
+- `work plan` consumes source, workspace, and target context
+- `work repo-plan` consumes source, work plan, graph node, and repo-local context
+- `work run` consumes the accepted repo plan and target-specific context
+- `work review` consumes source, graph, repo plan, diff, checks, and dependency context
+- future CI fix loops consume failing CI output plus the same accepted context
+
+Avoid starting with a vector database, background index daemon, or opaque memory. Those may become useful later, but the first version should be deterministic, reviewable, and easy to debug.
+
+Longer term, context providers can become pluggable:
+
+- filesystem scanner
+- git history reader
+- source tracker adapter
+- documentation/wiki connector
+- MCP context provider
+- optional semantic search/index provider
+
+The key contract is that context is an artifact with provenance. The developer should be able to inspect what the agent knew and why a repo/file was considered relevant.
+
+## Self-Improvement
+
+`devtask` should learn from completed work, but only through explicit, reviewable artifacts.
+
+Self-improvement should not mean silently changing prompts or policies. It should mean capturing useful lessons and proposing changes that a developer can accept.
+
+Useful inputs:
+
+- review findings
+- check failures
+- CI failures
+- user steering messages
+- manual corrections after agent output
+- files changed after review
+- PR comments
+- repeated blockers across tasks
+
+Possible outputs:
+
+- proposed updates to repo instructions
+- proposed updates to workspace target metadata
+- better check commands
+- recurring dependency or ownership hints
+- reusable task templates
+- review rules that caught real bugs
+- context artifact improvements
+
+The workflow should be explicit:
+
+```bash
+devtask improve suggest <work-id>
+devtask improve apply <suggestion-id>
+```
+
+or, at work level:
+
+```bash
+devtask work improve <id>
+```
+
+The suggestion artifact should explain:
+
+- what happened
+- what pattern was observed
+- what change is proposed
+- which future stage would benefit
+- what file/config would change
+
+Guardrails:
+
+- no silent mutation of prompts, instructions, or config
+- no domain-specific heuristic unless it is stored as project-local, reviewable policy
+- no global memory that cannot be inspected
+- every accepted improvement should be diffable and reversible
+
+The goal is compounding local workflow quality: each completed task can improve future planning, context selection, review quality, and recovery guidance without turning `devtask` into a black box.
+
 ## Long-Term Shape
 
 The long-term model is:
@@ -155,9 +262,11 @@ The long-term model is:
 work item = durable orchestration root
 target graph = approved decomposition
 repo task = execution unit
+context artifacts = inspectable knowledge input
 work board = developer cockpit
 stage ledger = recovery and audit trail
 provider adapters = external integration boundary
+self-improvement = reviewable workflow learning
 ```
 
 The end state is not “more commands”. The end state is fewer decisions for the developer, with explicit human gates and recoverable automation.
