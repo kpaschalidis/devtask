@@ -102,6 +102,46 @@ describe("workflow recommendations", () => {
     });
   });
 
+  it("routes stale failed checks back to check after a fix changed the task", () => {
+    const review = taskReview({
+      status: "done",
+      updatedAt: "2026-05-05T00:00:03.000Z",
+      latestVerification: {
+        status: "failed",
+        finishedAt: "2026-05-05T00:00:01.000Z"
+      },
+      stages: {
+        run: {
+          stage: "run",
+          status: "passed",
+          startedAt: "2026-05-05T00:00:00.000Z",
+          finishedAt: "2026-05-05T00:00:03.000Z",
+          input: {},
+          output: {},
+          artifacts: [],
+          reason: null
+        },
+        fix: {
+          stage: "fix",
+          status: "passed",
+          startedAt: "2026-05-05T00:00:02.000Z",
+          finishedAt: "2026-05-05T00:00:03.000Z",
+          input: {},
+          output: {},
+          artifacts: [],
+          reason: null
+        }
+      }
+    });
+
+    expect(buildBoardRow(review, config)).toMatchObject({
+      stage: "check",
+      status: "pending",
+      check: "failed:stale",
+      next: "devtask check example"
+    });
+  });
+
   it("checks run-complete tasks before treating them as terminal", () => {
     expect(
       recommendNextAction(
@@ -220,6 +260,7 @@ describe("workflow recommendations", () => {
 
 function taskReview(options: {
   status: TaskReview["meta"]["status"];
+  updatedAt?: string;
   latestVerification?: { status: "passed" | "failed"; finishedAt: string };
   latestReviewAgent?: { status: "passed" | "findings" | "failed"; finishedAt: string };
   stages?: TaskReview["stages"]["stages"];
@@ -243,7 +284,7 @@ function taskReview(options: {
       failCount: 0,
       maxRetries: 5,
       createdAt: "2026-05-05T00:00:00.000Z",
-      updatedAt: "2026-05-05T00:00:00.000Z"
+      updatedAt: options.updatedAt ?? "2026-05-05T00:00:00.000Z"
     },
     changedFiles: [],
     latestRun: null,

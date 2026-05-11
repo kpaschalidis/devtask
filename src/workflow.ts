@@ -257,12 +257,16 @@ function describeLifecycle(review: TaskReview): { stage: string; status: string 
 
 function describeReviewLifecycle(review: TaskReview): { stage: string; status: string } {
   const check = latestStageState(review, "check");
-  if (!check.status) {
+  if (!check.status || !isFresh(check.finishedAt, review.meta.updatedAt)) {
     return { stage: "check", status: "pending" };
   }
 
+  if (check.status === "failed") {
+    return { stage: "fix", status: "ready" };
+  }
+
   const agentReview = latestStageState(review, "review");
-  if (!agentReview.status) {
+  if (!agentReview.status || !isFresh(agentReview.finishedAt, check.finishedAt ?? review.meta.updatedAt)) {
     return { stage: "review", status: "pending" };
   }
 
