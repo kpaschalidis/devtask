@@ -174,24 +174,6 @@ export function buildJiraTaskGoal(issue: JiraIssue, sourcePath: string): string 
   ].join("\n");
 }
 
-export function buildJiraGroupRepoGoal(issue: JiraIssue, groupId: string, repoName: string, sourcePath: string): string {
-  return [
-    `Implement the ${repoName} part of Jira issue ${issue.key}: ${issue.summary}`,
-    "",
-    `Group: ${groupId}`,
-    `Jira source artifact: ${sourcePath}`,
-    `Jira URL: ${issue.url}`,
-    "",
-    "This is one repo-local task inside a multi-repo feature group.",
-    "Inspect this repository and implement only the changes that belong here.",
-    "Do not assume other repositories are available in this worktree.",
-    "",
-    "## Jira Issue",
-    "",
-    renderJiraIssueMarkdown(issue).trim()
-  ].join("\n");
-}
-
 function jiraDocumentToText(value: unknown): string {
   if (typeof value === "string") {
     return value;

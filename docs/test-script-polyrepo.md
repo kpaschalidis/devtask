@@ -1,371 +1,146 @@
-# Polyrepo Group Test Script
+# Polyrepo Test Script
 
-Use this script to test `devtask group` with multiple repositories. It is designed for safe README-only tasks.
+Use this as a safe multi-repo smoke test. Edit the constants before running commands.
 
-Runnable helper after installing scripts into a control workspace:
+## Constants
 
 ```bash
+WORKSPACE="/path/to/product"
+REPO_A_ID="backend"
+REPO_A_PATH="./backend"
+REPO_A_KIND="backend"
+REPO_A_CHECK="npm test"
+REPO_B_ID="web"
+REPO_B_PATH="./web"
+REPO_B_KIND="frontend"
+REPO_B_CHECK="npm run build"
+WORK_ID="docs-polyrepo-smoke"
+```
+
+## Workspace Setup
+
+```bash
+cd "$WORKSPACE"
 devtask init --workspace
-devtask scripts install
-devtask scripts run smoke-polyrepo help
+devtask workspace target add "$REPO_A_ID" "$REPO_A_PATH" --kind "$REPO_A_KIND"
+devtask workspace target add "$REPO_B_ID" "$REPO_B_PATH" --kind "$REPO_B_KIND"
+devtask workspace target list
 ```
 
-You can either follow this document manually or edit/pass constants to the helper script.
-
-## Installed Helper Workflow
-
-Install scripts in the control workspace. This can be a non-git product folder that contains the member repos:
+Configure each member repo:
 
 ```bash
-cd /path/to/control/workspace
-
-devtask init --workspace
-devtask scripts install
-devtask scripts list
-ls -la .devtask/scripts
-```
-
-Edit the installed script:
-
-```bash
-vim .devtask/scripts/smoke-polyrepo.sh
-```
-
-Update the constants at the top for the current run:
-
-```bash
-CONTROL_ROOT="/path/to/control/workspace"
-REPO_A_PATH="/path/to/frontend"
-REPO_B_PATH="/path/to/backend"
-```
-
-Run the installed script through `devtask`:
-
-```bash
-devtask scripts run smoke-polyrepo setup
-devtask scripts run smoke-polyrepo create
-devtask scripts run smoke-polyrepo run
-devtask scripts run smoke-polyrepo logs-a
-```
-
-When the workers finish:
-
-```bash
-devtask scripts run smoke-polyrepo inspect
-devtask scripts run smoke-polyrepo check
-devtask scripts run smoke-polyrepo review
-devtask scripts run smoke-polyrepo cleanup-plan
-```
-
-You can also avoid editing the file by passing environment overrides:
-
-```bash
-CONTROL_ROOT=/path/to/control/workspace REPO_A_PATH=/path/to/frontend REPO_B_PATH=/path/to/backend \
-  devtask scripts run smoke-polyrepo setup
-```
-
-## 0. Use The Latest Local CLI
-
-Run this from the `devtask-orchestration` repo:
-
-```bash
-cd /Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration
-nvm use 22
-npm run build
-npm link
-hash -r
-
-devtask group --help
-```
-
-Confirm help includes:
-
-```text
-create
-add
-remove
-inspect
-logs
-check
-review
-board
-next
-run
-advance
-```
-
-## 1. Choose A Control Workspace
-
-The control workspace stores group metadata under its own `.devtask/groups/<id>`. It does not own the member repos' task state. Use `devtask init --workspace` when the control folder is not a git repository.
-
-```bash
-cd /path/to/control/workspace
-devtask init --workspace
-```
-
-For a first test, the control root can still be one of the member repos with normal `devtask init`, but a product folder initialized with `devtask init --workspace` is usually clearer for polyrepo work.
-
-## 2. Choose Member Repos
-
-Pick two local repos where tiny README-only changes are safe:
-
-```bash
-FRONTEND_REPO=/path/to/frontend
-BACKEND_REPO=/path/to/backend
-
-git -C "$FRONTEND_REPO" status --short
-git -C "$BACKEND_REPO" status --short
-```
-
-Each member repo gets its own `.devtask` directory, task metadata, and task worktree.
-
-## 3. Configure Each Member Repo
-
-Set checks per repo. Use commands that are valid for that repo.
-
-```bash
-cd "$FRONTEND_REPO"
+cd "$WORKSPACE/$REPO_A_PATH"
 devtask init
-devtask config model gpt-5.2
-devtask config check 'npm test' 'npm run typecheck'
+devtask config check "$REPO_A_CHECK"
+devtask config runtime attachable
 
-cd "$BACKEND_REPO"
+cd "$WORKSPACE/$REPO_B_PATH"
 devtask init
-devtask config model gpt-5.2
-devtask config check 'npm test' 'npm run typecheck'
+devtask config check "$REPO_B_CHECK"
+devtask config runtime attachable
 ```
 
-If a repo does not have both commands, configure only what exists:
+## Create Work
 
 ```bash
-devtask config check 'npm run typecheck'
+cd "$WORKSPACE"
+devtask work create "$WORK_ID" \
+  --title "Improve agent documentation across selected repos" \
+  --body "Add or improve AGENTS.md guidance in the configured targets. Keep changes documentation-only and repo-specific."
 ```
 
-Return to the control workspace:
+## Work Plan
 
 ```bash
-cd /path/to/control/workspace
+devtask work plan "$WORK_ID" --refresh
+devtask work show "$WORK_ID"
 ```
 
-## 4. Create A Group
+Validate:
+
+- the plan references only configured targets
+- `.devtask/work/$WORK_ID/graph.json` has one task per affected target
+- dependencies are explicit and justified
+- no repo tasks exist yet if the plan is not approved
+
+## Approve And Materialize
 
 ```bash
-cat > docs-polyrepo-smoke-goal.md <<'EOF'
-Test multi-repo group workflow with README-only changes.
-
-Each repo task should inspect its own repository first, make one tiny README wording improvement only, and keep changes docs-only and scoped to README.md.
-EOF
-
-devtask group create docs-polyrepo-smoke \
-  --goal-file docs-polyrepo-smoke-goal.md \
-  --repo "frontend=$FRONTEND_REPO:docs-smoke-frontend" \
-  --repo "backend=$BACKEND_REPO:docs-smoke-backend"
-```
-
-Each `--repo` value is `name=repo-path:task-id`. The command creates the group and the repo-local tasks in one step.
-
-## 5. Inspect Group State
-
-```bash
-devtask group list
-devtask group show docs-polyrepo-smoke
-devtask group board docs-polyrepo-smoke
-devtask group next docs-polyrepo-smoke
-```
-
-Expected: both repo tasks are `created`, with next actions pointing to `devtask run`.
-
-## 6. Run The Group
-
-```bash
-devtask group run docs-polyrepo-smoke
-devtask group board docs-polyrepo-smoke
-```
-
-Follow one repo's logs:
-
-```bash
-devtask group logs docs-polyrepo-smoke --repo frontend -f
-```
-
-Stop following logs with `Ctrl-C`. This does not cancel the worker.
-
-Print all latest logs:
-
-```bash
-devtask group logs docs-polyrepo-smoke
-```
-
-## 7. Inspect Diffs
-
-```bash
-devtask group inspect docs-polyrepo-smoke
-```
-
-Inspect member worktrees directly:
-
-```bash
-cd "$FRONTEND_REPO/.devtask/worktrees/docs-smoke-frontend"
-git status --short
-git diff
-
-cd "$BACKEND_REPO/.devtask/worktrees/docs-smoke-backend"
-git status --short
-git diff
-```
-
-Expected: tiny `README.md` changes only.
-
-Return to the control workspace:
-
-```bash
-cd /path/to/control/workspace
-```
-
-## 8. Run Group Checks And Reviews
-
-Run checks across all group members:
-
-```bash
-devtask group check docs-polyrepo-smoke
-```
-
-Run review across all group members:
-
-```bash
-devtask group review docs-polyrepo-smoke
-```
-
-Run one repo only when iterating:
-
-```bash
-devtask group check docs-polyrepo-smoke --repo frontend
-devtask group review docs-polyrepo-smoke --repo backend
+devtask work approve-plan "$WORK_ID"
+devtask work board "$WORK_ID"
 ```
 
 Expected:
 
-- commands continue across repos
-- output identifies each `repo/task`
-- exit code is nonzero if any repo fails
+- repo-local tasks and worktrees are created inside the member repos
+- board shows one row per materialized target
 
-## 9. Advance Or Manually Approve
-
-Use the board and next actions:
+## Repo Planning And Run
 
 ```bash
-devtask group board docs-polyrepo-smoke
-devtask group next docs-polyrepo-smoke
+devtask work repo-plan "$WORK_ID" --refresh
+devtask work run "$WORK_ID" --follow
+devtask work board "$WORK_ID"
 ```
 
-`group advance` runs safe next actions but stops at human approval:
+Expected:
+
+- ready tasks run in parallel
+- blocked tasks wait for dependencies
+- each target has its own logs and worktree
+
+Inspect one target:
 
 ```bash
-devtask group advance docs-polyrepo-smoke
+devtask work logs "$WORK_ID" --target "$REPO_A_ID" --stage run
+devtask work attach "$WORK_ID" --target "$REPO_A_ID"
 ```
 
-When you accept the diffs, approve the repo tasks from the control workspace:
+## Quality Gates
 
 ```bash
-devtask group approve docs-polyrepo-smoke
+devtask work check "$WORK_ID"
+devtask work review "$WORK_ID"
+devtask work approve "$WORK_ID"
+devtask work board "$WORK_ID"
 ```
 
-Approve only one repo when iterating:
+Target one repo when needed:
 
 ```bash
-devtask group approve docs-polyrepo-smoke --repo frontend
+devtask work check "$WORK_ID" --target "$REPO_A_ID"
+devtask work review "$WORK_ID" --target "$REPO_B_ID"
 ```
 
-Then check the control workspace board:
+## Fix Loop
 
 ```bash
-cd /path/to/control/workspace
-devtask group board docs-polyrepo-smoke
+devtask work logs "$WORK_ID" --target "$REPO_A_ID" --stage check
+devtask work fix "$WORK_ID" --target "$REPO_A_ID" --from check
+devtask work check "$WORK_ID" --target "$REPO_A_ID"
 ```
 
-## 10. Optional PR Flow
-
-Commit any remaining uncommitted task worktree changes from the control workspace:
+## Publish
 
 ```bash
-devtask group commit docs-polyrepo-smoke
+devtask work commit "$WORK_ID"
+devtask work pr "$WORK_ID" --ready
+devtask work ci "$WORK_ID"
+devtask work show "$WORK_ID"
 ```
 
-Create draft PRs across the group:
+Expected:
+
+- each publishable target gets its own PR
+- targets without provider CI can be marked `ci skipped`
+- V1 leaves final review and merge to the developer
+
+## Cleanup
 
 ```bash
-devtask group pr docs-polyrepo-smoke --draft
+devtask work cleanup "$WORK_ID" --dry-run
+devtask work cleanup "$WORK_ID"
 ```
 
-For Bitbucket Cloud repos, draft PRs are not supported. Use ready PRs and provide API credentials:
-
-```bash
-export BITBUCKET_EMAIL="<atlassian-account-email>"
-export BITBUCKET_API_TOKEN="<api-token-with-scopes>"
-devtask group pr docs-polyrepo-smoke --ready
-```
-
-Narrow to one repo when iterating:
-
-```bash
-devtask group commit docs-polyrepo-smoke --repo frontend
-devtask group pr docs-polyrepo-smoke --repo frontend --draft
-```
-
-Repo-level commands are still available from each member repo:
-
-```bash
-cd "$FRONTEND_REPO"
-devtask commit docs-smoke-frontend
-devtask pr docs-smoke-frontend
-devtask ci docs-smoke-frontend
-
-cd "$BACKEND_REPO"
-devtask commit docs-smoke-backend
-devtask pr docs-smoke-backend
-devtask ci docs-smoke-backend
-```
-
-`devtask pr` and `devtask group pr` publish existing commits only. They refuse dirty worktrees instead of committing implicitly.
-
-## 11. Cleanup Notes
-
-Preview full group cleanup:
-
-```bash
-cd /path/to/control/workspace
-devtask group cleanup docs-polyrepo-smoke --dry-run
-```
-
-Remove every member task worktree, every member task metadata directory, and the group metadata:
-
-```bash
-devtask group cleanup docs-polyrepo-smoke
-```
-
-Cleanup refuses running tasks and dirty worktrees unless you pass `--force`.
-
-Remove a repo from the group only:
-
-```bash
-devtask group remove docs-polyrepo-smoke frontend
-```
-
-Remove a repo from the group and delete its repo-local task metadata:
-
-```bash
-devtask group remove docs-polyrepo-smoke backend --delete-task
-```
-
-`group remove` does not remove task worktrees or revert code changes. Remove worktrees manually from each member repo if needed:
-
-```bash
-git -C "$FRONTEND_REPO" worktree remove "$FRONTEND_REPO/.devtask/worktrees/docs-smoke-frontend"
-git -C "$BACKEND_REPO" worktree remove "$BACKEND_REPO/.devtask/worktrees/docs-smoke-backend"
-```
-
-Group metadata lives in the control workspace:
-
-```bash
-rm -rf .devtask/groups/docs-polyrepo-smoke
-```
+Cleanup removes local work metadata, materialized repo task metadata, and worktrees. It does not close PRs or revert commits.

@@ -41,7 +41,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   if (review.meta.status === "running") {
     return {
       kind: "wait",
-      command: `devtask logs -f ${id}`,
+      command: `devtask task logs -f ${id}`,
       reason: "Task is running.",
       automatic: false
     };
@@ -50,7 +50,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   if (review.meta.status === "created") {
     return {
       kind: "plan",
-      command: `devtask plan ${id}`,
+      command: `devtask task plan ${id}`,
       reason: "Task has not been planned.",
       automatic: true
     };
@@ -59,7 +59,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   if (review.meta.status === "planned") {
     return {
       kind: "run",
-      command: `devtask run ${id}`,
+      command: `devtask task run ${id}`,
       reason: "Task has an accepted plan and is ready to run.",
       automatic: true
     };
@@ -68,7 +68,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   if (review.meta.status === "paused") {
     return {
       kind: "continue",
-      command: `devtask continue ${id}`,
+      command: `devtask task continue ${id}`,
       reason: "Task is paused.",
       automatic: true
     };
@@ -79,7 +79,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
     if (failedStage === "plan") {
       return {
         kind: "plan",
-        command: `devtask plan ${id}`,
+        command: `devtask task plan ${id}`,
         reason: "Planning failed and can be retried.",
         automatic: false
       };
@@ -87,7 +87,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
 
     return {
       kind: "continue",
-      command: `devtask continue ${id}`,
+      command: `devtask task continue ${id}`,
       reason: "Worker failed and can be continued after inspection.",
       automatic: false
     };
@@ -109,7 +109,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
     if (!isFresh(check.finishedAt, codeChangeBaseline(review))) {
       return {
         kind: "check",
-        command: `devtask check ${id}`,
+        command: `devtask task check ${id}`,
         reason: "Checks have not passed for the current task state.",
         automatic: true
       };
@@ -118,7 +118,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
     if (check.status === "failed") {
       return {
         kind: "fix",
-        command: `devtask fix ${id} --from check`,
+        command: `devtask task fix ${id} --from check`,
         reason: "Checks failed; run a fix agent with the failed check artifact.",
         automatic: false
       };
@@ -128,7 +128,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
     if (!latestCheckFinishedAt) {
       return {
         kind: "check",
-        command: `devtask check ${id}`,
+        command: `devtask task check ${id}`,
         reason: "Checks have not passed for the current task state.",
         automatic: true
       };
@@ -137,7 +137,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
     if (!isFresh(agentReview.finishedAt, latestCheckFinishedAt)) {
       return {
         kind: "review",
-        command: `devtask review ${id}`,
+        command: `devtask task review ${id}`,
         reason: "Review agent has not reviewed the checked changes.",
         automatic: true
       };
@@ -146,7 +146,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
     if (agentReview.status === "passed") {
       return {
         kind: "approve",
-        command: `devtask approve ${id}`,
+        command: `devtask task approve ${id}`,
         reason: "Checks and agent review passed; human approval is required before PR creation.",
         automatic: false
       };
@@ -154,7 +154,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
 
     return {
       kind: "inspect",
-      command: `devtask inspect ${id}`,
+      command: `devtask task inspect ${id}`,
       reason: "Review agent found issues or failed; inspect the review artifact.",
       automatic: false
     };
@@ -163,7 +163,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   if (review.meta.status === "approved") {
     return {
       kind: "pr",
-      command: `devtask pr ${id}`,
+      command: `devtask task pr ${id}`,
       reason: "Task is approved and ready for a PR.",
       automatic: true
     };
@@ -182,7 +182,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
 
     return {
       kind: "ci",
-      command: `devtask ci ${id}`,
+      command: `devtask task ci ${id}`,
       reason: "PR is open; CI status can be checked.",
       automatic: true
     };
@@ -191,7 +191,7 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
   if (review.meta.status === "ci-failed") {
     return {
       kind: "continue",
-      command: `devtask continue ${id}`,
+      command: `devtask task continue ${id}`,
       reason: "CI failed; continue the task to fix the failure.",
       automatic: false
     };

@@ -8,7 +8,6 @@ export interface DevtaskPaths {
   configPath: string;
   tasksDir: string;
   worktreesDir: string;
-  groupsDir: string;
   workDir: string;
 }
 
@@ -21,7 +20,6 @@ function buildPaths(root: string): DevtaskPaths {
     configPath: path.join(baseDir, "config.json"),
     tasksDir: path.join(baseDir, "tasks"),
     worktreesDir: path.join(baseDir, "worktrees"),
-    groupsDir: path.join(baseDir, "groups"),
     workDir: path.join(baseDir, "work")
   };
 }

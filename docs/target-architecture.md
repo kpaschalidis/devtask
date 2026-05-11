@@ -377,7 +377,6 @@ Implemented:
 - work-level planning
 - proposed `graph.json`
 - repo-local task lifecycle
-- group coordination lifecycle
 - checks, review, approval, commit, PR, and CI primitives
 
 Not yet implemented:

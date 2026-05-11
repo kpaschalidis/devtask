@@ -257,7 +257,6 @@ function resolveRepoPaths(target: WorkspaceTarget): DevtaskPaths {
     configPath: path.join(target.repoPath, ".devtask", "config.json"),
     tasksDir: path.join(target.repoPath, ".devtask", "tasks"),
     worktreesDir: path.join(target.repoPath, ".devtask", "worktrees"),
-    groupsDir: path.join(target.repoPath, ".devtask", "groups"),
     workDir: path.join(target.repoPath, ".devtask", "work")
   };
 }

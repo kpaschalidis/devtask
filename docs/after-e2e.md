@@ -28,17 +28,14 @@ devtask work pr ...
 devtask work ci ...
 ```
 
-Single task commands should remain as repo-local primitives:
+Task commands should remain under `devtask task ...` as repo-local primitives:
 
 - direct debugging
 - manual recovery
-- simple one-repo tasks
 - implementation testing
 - scripting internals
 
-Group commands should become legacy-compatible convenience commands unless they keep a distinct use case. They are still useful for manually assembled multi-repo tasks, but the target direction is that work items replace most group usage because work items own source artifacts, planning, graph approval, and materialization.
-
-Do not remove single task or group commands early. First make `work` clearly better, then decide whether group commands should be deprecated, hidden from the main docs, or kept as advanced commands.
+The public surface should stay work-first. Avoid adding another parallel top-level lifecycle unless it has a distinct execution model that cannot be represented as a work item.
 
 ## Reliability Layer
 
