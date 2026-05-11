@@ -621,17 +621,23 @@ export function createCli(): Command {
     .description("Run configured checks for materialized repo tasks.")
     .argument("<id>")
     .option("--target <target-id>", "Only run checks for one workspace target")
-    .action(async (id: string, options: { target?: string }) => {
+    .option("--verbose", "Stream repo-local check output while checks run")
+    .action(async (id: string, options: { target?: string; verbose?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
         const result = await runWorkWorkflowStage(paths, item, "check", options.target, async (unit) => {
           const repoPaths = resolvePaths(unit.repoPath);
-          await checkTask(repoPaths, unit.taskId, { exitOnFailure: false });
-          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, unit.taskId));
+          const config = readConfig(repoPaths);
+          console.log(`${unit.target}/${unit.taskId}: running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"}`);
+          const verification = await checkTask(repoPaths, unit.taskId, {
+            exitOnFailure: false,
+            verbose: options.verbose === true
+          });
+          console.log(`${unit.target}/${unit.taskId}: ${verification.status}`);
           return {
-            status: latest.latestVerification?.status === "failed" ? "failed" : "passed",
-            detail: latest.latestVerification?.status ?? "passed"
+            status: verification.status === "failed" ? "failed" : "passed",
+            detail: verification.status
           };
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
@@ -3655,8 +3661,8 @@ async function planTask(
 async function checkTask(
   paths: ReturnType<typeof resolvePaths>,
   id: string,
-  options: { exitOnFailure: boolean }
-): Promise<void> {
+  options: { exitOnFailure: boolean; verbose?: boolean }
+): Promise<VerificationRecord> {
   const meta = getTask(paths, id);
   assertCheckReady(paths, meta);
 
@@ -3665,7 +3671,9 @@ async function checkTask(
     throw new DevtaskError("No check commands configured. Use devtask config check <command...>");
   }
 
-  console.log(`Running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"} in ${meta.worktreePath}`);
+  if (options.verbose !== false) {
+    console.log(`Running ${config.verify.length} check command${config.verify.length === 1 ? "" : "s"} in ${meta.worktreePath}`);
+  }
   const record = await runStage(paths, id, "check", {
     input: {
       commands: config.verify,
@@ -3674,7 +3682,9 @@ async function checkTask(
   }, async () => {
     const verificationRecord = await runVerification(paths, meta, config.verify, {
       onStepStart: (command, index, total) => {
-        console.log(`[${index}/${total}] ${command}`);
+        if (options.verbose !== false) {
+          console.log(`[${index}/${total}] ${command}`);
+        }
       }
     });
     return {
@@ -3692,6 +3702,10 @@ async function checkTask(
       }
     };
   });
+  if (options.verbose === false) {
+    return record;
+  }
+
   console.log(`Check: ${record.status}`);
   for (const step of record.steps) {
     console.log(`${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
@@ -3703,6 +3717,7 @@ async function checkTask(
       }
     }
   }
+  return record;
 }
 
 async function reviewTask(
