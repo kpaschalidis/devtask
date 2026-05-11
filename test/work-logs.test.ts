@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCli } from "../src/cli.js";
+import { readConfig, writeConfig } from "../src/config.js";
 import { writeTaskMeta } from "../src/meta.js";
 import { resolvePaths, resolveWorkspacePathsForInit, taskDir, taskMetaPath } from "../src/paths.js";
 import { writeRunRecord } from "../src/run-record.js";
@@ -50,6 +51,35 @@ describe("work logs", () => {
 
     expect(output).toContain("Check output is complete; printing the latest captured verification output instead of following.");
     expect(output).toContain("FAIL npm test");
+  });
+});
+
+describe("work target selection", () => {
+  const originalCwd = process.cwd();
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    vi.restoreAllMocks();
+  });
+
+  it("limits work check to the selected target", async () => {
+    const { workspace } = await createTwoTargetWorkItem();
+    process.chdir(workspace);
+    const output = await runCli(["work", "check", "WORK-123", "--target", "backend"]);
+
+    expect(output).toContain("backend");
+    expect(output).toContain("work-123-backend");
+    expect(output).not.toContain("frontend");
+    expect(output).not.toContain("work-123-frontend");
+  });
+
+  it("rejects unknown selected targets", async () => {
+    const { workspace } = await createTwoTargetWorkItem();
+    process.chdir(workspace);
+
+    const output = await runCli(["work", "check", "WORK-123", "--target", "mobile"]);
+
+    expect(output).toContain("devtask: Work item WORK-123 does not have target mobile");
   });
 });
 
@@ -164,11 +194,96 @@ async function createWorkItemWithFailedCheck(): Promise<{ workspace: string }> {
   return { workspace };
 }
 
+async function createTwoTargetWorkItem(): Promise<{ workspace: string }> {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-target-"));
+  const backendRepo = await makeTempRepo({ withCommit: true });
+  const frontendRepo = await makeTempRepo({ withCommit: true });
+  const paths = resolveWorkspacePathsForInit(workspace);
+  initializeWorkspace(paths);
+  const item = createManualWorkItem(paths, {
+    id: "WORK-123",
+    title: "Implement work"
+  });
+  addWorkspaceTarget(paths, {
+    id: "backend",
+    repoPath: backendRepo,
+    kind: "api"
+  });
+  addWorkspaceTarget(paths, {
+    id: "frontend",
+    repoPath: frontendRepo,
+    kind: "web"
+  });
+  fs.writeFileSync(workPlanPath(paths, item.id), "# Plan\n");
+  fs.writeFileSync(
+    workGraphPath(paths, item.id),
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        workId: item.id,
+        tasks: [
+          {
+            id: "work-123-backend",
+            target: "backend",
+            goal: "Implement backend behavior.",
+            owns: ["server/**"],
+            dependencies: []
+          },
+          {
+            id: "work-123-frontend",
+            target: "frontend",
+            goal: "Implement frontend behavior.",
+            owns: ["src/**"],
+            dependencies: []
+          }
+        ],
+        validation: [],
+        openQuestions: []
+      },
+      null,
+      2
+    )
+  );
+  await approveWorkPlan(paths, item);
+  for (const task of readWorkMaterialization(paths, item.id)?.tasks ?? []) {
+    const repoPaths = resolvePaths(task.repoPath);
+    writeConfig(repoPaths, {
+      ...readConfig(repoPaths),
+      verify: ["node -e \"process.exit(0)\""]
+    });
+    const meta = JSON.parse(fs.readFileSync(taskMetaPath(repoPaths, task.taskId), "utf8"));
+    writeTaskMeta(taskMetaPath(repoPaths, task.taskId), {
+      ...meta,
+      status: "done",
+      updatedAt: "2026-05-11T10:00:00.000Z"
+    });
+    recordStage(repoPaths, task.taskId, "run", {
+      status: "passed",
+      startedAt: "2026-05-11T10:00:00.000Z",
+      finishedAt: "2026-05-11T10:01:00.000Z"
+    });
+  }
+
+  return { workspace };
+}
+
 async function runCli(args: string[]): Promise<string> {
   const lines: string[] = [];
   vi.spyOn(console, "log").mockImplementation((...values: unknown[]) => {
     lines.push(values.map(String).join(" "));
   });
-  await createCli().parseAsync(["node", "devtask", ...args], { from: "node" });
+  vi.spyOn(console, "error").mockImplementation((...values: unknown[]) => {
+    lines.push(values.map(String).join(" "));
+  });
+  vi.spyOn(process, "exit").mockImplementation((code?: string | number | null) => {
+    throw new Error(`process.exit called with ${JSON.stringify(code)}`);
+  });
+  try {
+    await createCli().parseAsync(["node", "devtask", ...args], { from: "node" });
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith("process.exit called with")) {
+      throw error;
+    }
+  }
   return lines.join("\n");
 }

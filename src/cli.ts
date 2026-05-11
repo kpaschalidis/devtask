@@ -75,6 +75,7 @@ interface PrOptions {
   body?: string;
   draft?: boolean;
   ready?: boolean;
+  target?: string;
 }
 
 type LogStage = "current" | "latest" | "run" | "check" | "review";
@@ -619,11 +620,12 @@ export function createCli(): Command {
     .command("check")
     .description("Run configured checks for materialized repo tasks.")
     .argument("<id>")
-    .action(async (id: string) => {
+    .option("--target <target-id>", "Only run checks for one workspace target")
+    .action(async (id: string, options: { target?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const result = await runWorkWorkflowStage(paths, item, "check", async (unit) => {
+        const result = await runWorkWorkflowStage(paths, item, "check", options.target, async (unit) => {
           const repoPaths = resolvePaths(unit.repoPath);
           await checkTask(repoPaths, unit.taskId, { exitOnFailure: false });
           const latest = await buildTaskReview(repoPaths, getTask(repoPaths, unit.taskId));
@@ -648,11 +650,12 @@ export function createCli(): Command {
     .option("--attachable", "Run review agents inside attachable tmux sessions")
     .option("--tmux", "Alias for --attachable")
     .option("--plain", "Run in the current foreground process")
-    .action(async (id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
+    .option("--target <target-id>", "Only run review for one workspace target")
+    .action(async (id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean; target?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const result = await runWorkWorkflowStage(paths, item, "review", async (unit) => {
+        const result = await runWorkWorkflowStage(paths, item, "review", options.target, async (unit) => {
           const repoPaths = resolvePaths(unit.repoPath);
           assertReviewReady(repoPaths, getTask(repoPaths, unit.taskId), readConfig(repoPaths));
           if (startStageSessionIfRequested(repoPaths, unit.taskId, "review", ["review", unit.taskId, "--plain"], options)) {
@@ -679,11 +682,12 @@ export function createCli(): Command {
     .description("Approve materialized repo tasks after policy checks.")
     .argument("<id>")
     .option("--force", "Approve even when checks or review are missing or failing")
-    .action(async (id: string, options: { force?: boolean }) => {
+    .option("--target <target-id>", "Only approve one workspace target")
+    .action(async (id: string, options: { force?: boolean; target?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const result = await runWorkWorkflowStage(paths, item, "approve", async (unit) => {
+        const result = await runWorkWorkflowStage(paths, item, "approve", options.target, async (unit) => {
           const detail = await approveTask(resolvePaths(unit.repoPath), unit.taskId, { force: options.force === true });
           return { status: "passed", detail };
         });
@@ -701,11 +705,12 @@ export function createCli(): Command {
     .description("Commit current worktree changes for materialized repo tasks.")
     .argument("<id>")
     .option("-m, --message <message>", "Commit message")
-    .action(async (id: string, options: { message?: string }) => {
+    .option("--target <target-id>", "Only commit one workspace target")
+    .action(async (id: string, options: { message?: string; target?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const result = await runWorkWorkflowStage(paths, item, "commit", async (unit) => {
+        const result = await runWorkWorkflowStage(paths, item, "commit", options.target, async (unit) => {
           await commitTask(resolvePaths(unit.repoPath), unit.taskId, { message: options.message });
           return { status: "passed", detail: "committed or skipped" };
         });
@@ -726,11 +731,12 @@ export function createCli(): Command {
     .option("--body <body>", "PR body")
     .option("--draft", "Create draft PRs")
     .option("--ready", "Create ready-for-review PRs instead of drafts")
+    .option("--target <target-id>", "Only open a PR for one workspace target")
     .action(async (id: string, options: PrOptions) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const tasks = getMaterializedWorkTasks(paths, item);
+        const tasks = selectWorkTasks(paths, item, options.target);
         const draft = resolvePrDraftMode(options);
         const preflights = await Promise.all(
           tasks.map(async (task) => {
@@ -748,7 +754,7 @@ export function createCli(): Command {
           process.exit(1);
         }
 
-        const result = await runWorkWorkflowStage(paths, item, "pr", async (unit) => {
+        const result = await runWorkWorkflowStage(paths, item, "pr", options.target, async (unit) => {
           const repoPaths = resolvePaths(unit.repoPath);
           const meta = getTask(repoPaths, unit.taskId);
           if (meta.status === "pr-open" && meta.prUrl) {
@@ -773,11 +779,12 @@ export function createCli(): Command {
     .command("ci")
     .description("Check CI status for materialized repo task PRs.")
     .argument("<id>")
-    .action(async (id: string) => {
+    .option("--target <target-id>", "Only check CI for one workspace target")
+    .action(async (id: string, options: { target?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const result = await runWorkWorkflowStage(paths, item, "ci", async (unit) => {
+        const result = await runWorkWorkflowStage(paths, item, "ci", options.target, async (unit) => {
           const repoPaths = resolvePaths(unit.repoPath);
           await checkCiForTask(repoPaths, unit.taskId);
           const meta = getTask(repoPaths, unit.taskId);
@@ -2900,8 +2907,21 @@ function getMaterializedWorkTasks(paths: ReturnType<typeof resolvePaths>, item: 
   return materialization.tasks;
 }
 
-function getWorkWorkflowUnits(paths: ReturnType<typeof resolvePaths>, item: WorkItem): WorkflowUnit[] {
-  return getMaterializedWorkTasks(paths, item).map((task) => ({
+function selectWorkTasks(
+  paths: ReturnType<typeof resolvePaths>,
+  item: WorkItem,
+  target?: string
+): NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"] {
+  const tasks = getMaterializedWorkTasks(paths, item);
+  const selected = target ? tasks.filter((task) => task.target === target) : tasks;
+  if (selected.length === 0) {
+    throw new DevtaskError(target ? `Work item ${item.id} does not have target ${target}` : `Work item ${item.id} has no materialized tasks`);
+  }
+  return selected;
+}
+
+function getWorkWorkflowUnits(paths: ReturnType<typeof resolvePaths>, item: WorkItem, target?: string): WorkflowUnit[] {
+  return selectWorkTasks(paths, item, target).map((task) => ({
     target: task.target,
     taskId: task.taskId,
     repoPath: task.repoPath
@@ -2913,12 +2933,7 @@ function selectWorkLogTasks(
   item: WorkItem,
   target?: string
 ): NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"] {
-  const tasks = getMaterializedWorkTasks(paths, item);
-  const selected = target ? tasks.filter((task) => task.target === target) : tasks;
-  if (selected.length === 0) {
-    throw new DevtaskError(target ? `Work item ${item.id} does not have target ${target}` : `Work item ${item.id} has no materialized tasks`);
-  }
-  return selected;
+  return selectWorkTasks(paths, item, target);
 }
 
 function resolveRequestedLogStage(stage: LogStage, target: string, taskId: string, boardRows: WorkBoardRow[]): LogStage {
@@ -2936,9 +2951,10 @@ async function runWorkWorkflowStage(
   paths: ReturnType<typeof resolvePaths>,
   item: WorkItem,
   stage: WorkflowStageId,
+  target: string | undefined,
   run: (unit: WorkflowUnit) => Promise<{ status: "passed" | "failed" | "skipped" | "started"; detail: string }>
 ): Promise<Awaited<ReturnType<typeof runWorkflowStage>>> {
-  return runWorkflowStage(DEFAULT_DEV_WORKFLOW, getWorkWorkflowUnits(paths, item), {
+  return runWorkflowStage(DEFAULT_DEV_WORKFLOW, getWorkWorkflowUnits(paths, item, target), {
     stage,
     run
   });
