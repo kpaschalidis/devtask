@@ -8,7 +8,7 @@ import { planMarkdownPath, resolvePaths, resolveWorkspacePaths, resolveWorkspace
 import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, initializeWorkspace, listTasks } from "./task-store.js";
-import { buildTaskReview, inspectTaskHealth, readLatestLogPath } from "./task-inspection.js";
+import { buildTaskReview, inspectTaskHealth, readLatestLogPath, readLatestRun } from "./task-inspection.js";
 import {
   attachTmuxSession,
   isTmuxAvailable,
@@ -20,9 +20,9 @@ import {
 } from "./tmux.js";
 import { buildCodexCommand, hasRuntimeConfig, readConfig, writeConfig } from "./config.js";
 import { assertCanMark, parseManualStatus } from "./lifecycle.js";
-import { runVerification } from "./verification.js";
+import { readLatestVerification, runVerification, type VerificationRecord } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
-import { runReviewAgent } from "./review-agent.js";
+import { readLatestReviewAgent, runReviewAgent, type ReviewAgentRecord } from "./review-agent.js";
 import { hasTaskPlan, runPlanAgent } from "./planner.js";
 import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
 import { addRepoToGroup, createGroup, deleteGroup, getGroup, groupDir, listGroups, removeRepoFromGroup } from "./group-store.js";
@@ -76,6 +76,8 @@ interface PrOptions {
   draft?: boolean;
   ready?: boolean;
 }
+
+type LogStage = "latest" | "run" | "check" | "review";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -457,9 +459,10 @@ export function createCli(): Command {
     .description("Print or follow logs for materialized repo tasks in a work item.")
     .argument("<id>")
     .option("--target <target-id>", "Only show logs for one workspace target")
+    .option("--stage <stage>", "Stage output to show: latest, run, check, or review", parseLogStage, "latest")
     .option("-n, --lines <count>", "Number of trailing lines to print", parsePositiveInteger, 120)
     .option("-f, --follow", "Follow one target task log")
-    .action((id: string, options: { target?: string; lines: number; follow?: boolean }) => {
+    .action((id: string, options: { target?: string; stage: LogStage; lines: number; follow?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
@@ -472,7 +475,11 @@ export function createCli(): Command {
           if (index > 0) {
             console.log("");
           }
-          printWorkLog(task.target, task.repoPath, task.taskId, { lines: options.lines, follow: options.follow === true });
+          printWorkLog(task.target, task.repoPath, task.taskId, {
+            stage: options.stage,
+            lines: options.lines,
+            follow: options.follow === true
+          });
         }
       } catch (error) {
         printError(error);
@@ -3111,9 +3118,9 @@ function printWorkLog(
   target: string,
   repoPath: string,
   taskId: string,
-  options: { lines: number; follow: boolean }
+  options: { stage: LogStage; lines: number; follow: boolean }
 ): void {
-  printMaterializedTaskLog(`${target}/${taskId}`, repoPath, taskId, options);
+  printStageTaskLog(`${target}/${taskId}`, repoPath, taskId, options);
 }
 
 function printMaterializedTaskLog(
@@ -3138,6 +3145,112 @@ function printMaterializedTaskLog(
   }
 
   console.log(tailFile(logPath, options.lines));
+}
+
+function printStageTaskLog(
+  label: string,
+  repoPath: string,
+  taskId: string,
+  options: { stage: LogStage; lines: number; follow: boolean }
+): void {
+  const repoPaths = resolvePaths(repoPath);
+  const review = readTaskLogArtifacts(repoPaths, taskId);
+  const stage = options.stage === "latest" ? latestLogStage(review) : options.stage;
+  if (!stage) {
+    console.log(`${label}: no stage logs`);
+    return;
+  }
+
+  if (stage === "run") {
+    if (!review.latestRun) {
+      console.log(`${label}: no run logs`);
+      return;
+    }
+    printFileLog(`${label} run`, review.latestRun.logPath, options);
+    return;
+  }
+
+  if (stage === "review") {
+    if (!review.latestReviewAgent) {
+      console.log(`${label}: no review logs`);
+      return;
+    }
+    printFileLog(`${label} review`, review.latestReviewAgent.outputPath, options);
+    return;
+  }
+
+  if (!review.latestVerification) {
+    console.log(`${label}: no check logs`);
+    return;
+  }
+  if (options.follow) {
+    throw new DevtaskError("Check logs are stored as completed verification output and cannot be followed");
+  }
+
+  console.log(`${label} check`);
+  console.log(`Status: ${review.latestVerification.status}`);
+  console.log(`Started: ${review.latestVerification.startedAt}`);
+  console.log(`Finished: ${review.latestVerification.finishedAt}`);
+  console.log(tailText(renderVerificationOutput(review.latestVerification), options.lines));
+}
+
+function printFileLog(label: string, filePath: string, options: { lines: number; follow: boolean }): void {
+  if (!fs.existsSync(filePath)) {
+    console.log(`${label}: missing log file ${filePath}`);
+    return;
+  }
+
+  console.log(label);
+  console.log(`Log: ${filePath}`);
+  if (options.follow) {
+    followFile(filePath, options.lines);
+    return;
+  }
+  console.log(tailFile(filePath, options.lines));
+}
+
+interface TaskLogArtifacts {
+  latestRun: ReturnType<typeof readLatestRun>;
+  latestVerification: VerificationRecord | null;
+  latestReviewAgent: ReviewAgentRecord | null;
+}
+
+function readTaskLogArtifacts(repoPaths: ReturnType<typeof resolvePaths>, taskId: string): TaskLogArtifacts {
+  getTask(repoPaths, taskId);
+  return {
+    latestRun: readLatestRun(repoPaths, taskId),
+    latestVerification: readLatestVerification(repoPaths, taskId),
+    latestReviewAgent: readLatestReviewAgent(repoPaths, taskId)
+  };
+}
+
+function latestLogStage(review: TaskLogArtifacts): Exclude<LogStage, "latest"> | null {
+  const candidates: Array<{ stage: Exclude<LogStage, "latest">; at: string }> = [];
+  if (review.latestRun) {
+    candidates.push({ stage: "run", at: review.latestRun.finishedAt });
+  }
+  if (review.latestVerification) {
+    candidates.push({ stage: "check", at: review.latestVerification.finishedAt });
+  }
+  if (review.latestReviewAgent) {
+    candidates.push({ stage: "review", at: review.latestReviewAgent.finishedAt });
+  }
+  candidates.sort((a, b) => a.at.localeCompare(b.at));
+  return candidates.at(-1)?.stage ?? null;
+}
+
+function renderVerificationOutput(verification: VerificationRecord): string {
+  return verification.steps
+    .map((step) =>
+      [
+        `${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`,
+        step.stdout ? `stdout:\n${step.stdout.trimEnd()}` : "",
+        step.stderr ? `stderr:\n${step.stderr.trimEnd()}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+    .join("\n\n");
 }
 
 function markTask(paths: ReturnType<typeof resolvePaths>, id: string, status: ReturnType<typeof parseManualStatus>): void {
@@ -3845,12 +3958,23 @@ function parsePositiveInteger(value: string): number {
   return parsed;
 }
 
+function parseLogStage(value: string): LogStage {
+  if (value === "latest" || value === "run" || value === "check" || value === "review") {
+    return value;
+  }
+  throw new DevtaskError(`Expected log stage latest, run, check, or review; got ${value}`);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function tailFile(filePath: string, lineCount: number): string {
   const content = fs.readFileSync(filePath, "utf8");
+  return tailText(content, lineCount);
+}
+
+function tailText(content: string, lineCount: number): string {
   return content.split("\n").slice(-lineCount).join("\n");
 }
 
