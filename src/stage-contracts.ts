@@ -4,7 +4,7 @@ import type { DevtaskPaths } from "./paths.js";
 import { taskDir } from "./paths.js";
 import { DevtaskError } from "./errors.js";
 
-export const STAGE_NAMES = ["plan", "run", "check", "review", "approve", "commit", "pr", "ci"] as const;
+export const STAGE_NAMES = ["plan", "run", "check", "fix", "review", "approve", "commit", "pr", "ci"] as const;
 
 export type StageName = (typeof STAGE_NAMES)[number];
 export type StageStatus = "pending" | "running" | "passed" | "findings" | "failed" | "blocked" | "skipped";

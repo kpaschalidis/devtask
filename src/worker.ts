@@ -8,6 +8,7 @@ import { acquireLock, releaseLock } from "./lock.js";
 import { newRunId, writeRunRecord, type RunStatus } from "./run-record.js";
 import { excludeDevtaskRuntimeFiles } from "./git.js";
 import { recordStage } from "./stage-contracts.js";
+import { clearActiveFixRequest, readActiveFixRequest } from "./fix-request.js";
 
 export interface WorkerOptions {
   root?: string;
@@ -68,6 +69,7 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
   await excludeDevtaskRuntimeFiles(meta.worktreePath);
   prepareRuntimeFiles(meta.statePath, meta.resultPath, runtimeStatePath, runtimeResultPath);
   const promptPath = prepareWorkerPrompt(paths, meta);
+  const fixRequest = readActiveFixRequest(paths, id);
 
   const logPath = path.join(logsDir, `${runId}.log`);
   const stdout = fs.openSync(logPath, "a");
@@ -85,6 +87,18 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
     },
     artifacts: [logPath]
   });
+  if (fixRequest) {
+    recordStage(paths, id, "fix", {
+      status: "running",
+      startedAt,
+      input: {
+        fixId: fixRequest.fixId,
+        source: fixRequest.source,
+        summary: fixRequest.summary
+      },
+      artifacts: [fixRequest.promptPath]
+    });
+  }
 
   try {
     const child = spawn(meta.command, {
@@ -163,6 +177,29 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
     artifacts: [logPath],
     reason: status === "failed" ? "worker command failed" : nextStatus === "blocked" ? "task result reported blocked" : null
   });
+  if (fixRequest) {
+    recordStage(paths, id, "fix", {
+      status: status === "success" ? "passed" : "failed",
+      startedAt,
+      finishedAt,
+      input: {
+        fixId: fixRequest.fixId,
+        source: fixRequest.source,
+        summary: fixRequest.summary
+      },
+      output: {
+        runId,
+        exitCode,
+        resultStatus,
+        nextStatus
+      },
+      artifacts: [fixRequest.promptPath, logPath],
+      reason: status === "success" ? null : "worker command failed while applying fix"
+    });
+    if (status === "success") {
+      clearActiveFixRequest(paths, id);
+    }
+  }
 
   updateMeta(paths, id, (current) => ({
     ...current,
@@ -175,18 +212,23 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
 
 function prepareWorkerPrompt(paths: DevtaskPaths, meta: ReturnType<typeof readTaskMeta>): string {
   const planPath = planMarkdownPath(paths, meta.id);
-  if (!fs.existsSync(planPath)) {
+  const fixRequest = readActiveFixRequest(paths, meta.id);
+  if (!fs.existsSync(planPath) && !fixRequest) {
     return meta.taskPath;
   }
 
   const content = [
     fs.readFileSync(meta.taskPath, "utf8").trimEnd(),
     "",
-    "## Accepted Plan",
+    fs.existsSync(planPath) ? "## Accepted Plan" : "",
     "",
-    fs.readFileSync(planPath, "utf8").trimEnd(),
+    fs.existsSync(planPath) ? fs.readFileSync(planPath, "utf8").trimEnd() : "",
+    "",
+    fixRequest ? "## Active Fix Request" : "",
+    "",
+    fixRequest ? fs.readFileSync(fixRequest.promptPath, "utf8").trimEnd() : "",
     ""
-  ].join("\n");
+  ].filter((line, index, lines) => line !== "" || lines[index - 1] !== "").join("\n");
   const promptPath = path.join(taskDir(paths, meta.id), "runtime-task.md");
   fs.writeFileSync(promptPath, content);
   return promptPath;

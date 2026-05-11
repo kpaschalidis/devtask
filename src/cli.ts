@@ -69,6 +69,7 @@ import {
   type WorkflowStageId,
   type WorkflowUnit
 } from "./workflow-engine.js";
+import { createFixRequestFromCheck } from "./fix-request.js";
 
 interface PrOptions {
   title?: string;
@@ -673,6 +674,35 @@ export function createCli(): Command {
             status: latest.latestReviewAgent?.status === "passed" ? "passed" : "failed",
             detail: latest.latestReviewAgent?.status ?? "missing"
           };
+        });
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        if (workflowStageFailed(result)) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("fix")
+    .description("Run fix agents for materialized repo tasks from explicit failed-stage artifacts.")
+    .argument("<id>")
+    .option("--target <target-id>", "Only fix one workspace target")
+    .option("--from <stage>", "Failed stage to fix", "check")
+    .option("--attachable", "Run fix workers inside attachable tmux sessions")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run fix workers as plain detached background processes")
+    .action(async (id: string, options: { target?: string; from: string; attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const result = await runWorkWorkflowStage(paths, item, "fix", options.target, async (unit) => {
+          const repoPaths = resolvePaths(unit.repoPath);
+          const request = createFixRequest(repoPaths, unit.taskId, options.from);
+          const runtime = resolveRunRuntime(repoPaths, options);
+          printStartedWorker(`${unit.target}/${unit.taskId}`, startWorker(repoPaths, unit.taskId, { ...runtime, fix: true }), "Fixing");
+          return { status: "started", detail: `${request.source}:${request.fixId}` };
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
         if (workflowStageFailed(result)) {
@@ -1704,6 +1734,41 @@ export function createCli(): Command {
     });
 
   group
+    .command("fix")
+    .description("Run fix agents for repo tasks in a group.")
+    .argument("<id>")
+    .option("--repo <repo-name>", "Only fix one repo")
+    .option("--from <stage>", "Failed stage to fix", "check")
+    .action(async (id: string, options: { repo?: string; from: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const repos = selectGroupRepos(paths, id, options.repo);
+        let failed = false;
+        const rows: string[][] = [];
+
+        for (const repo of repos) {
+          const repoPaths = resolvePaths(repo.path);
+          try {
+            const request = createFixRequest(repoPaths, repo.taskId, options.from);
+            const started = startWorker(repoPaths, repo.taskId, { ...resolveRunRuntime(repoPaths, {}), fix: true });
+            rows.push([repo.name, repo.taskId, started.tmuxSession ? "started:tmux" : "started", `${request.source}:${request.fixId}`]);
+          } catch (error) {
+            failed = true;
+            rows.push([repo.name, repo.taskId, "failed", error instanceof Error ? error.message.split("\n")[0] : String(error)]);
+          }
+        }
+
+        printTable(["REPO", "TASK", "STATUS", "DETAIL"], rows);
+
+        if (failed) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  group
     .command("mark")
     .description("Manually mark stopped repo tasks in a group as review, approved, done, blocked, or cancelled.")
     .argument("<id>")
@@ -2208,6 +2273,26 @@ export function createCli(): Command {
     });
 
   program
+    .command("fix")
+    .description("Run a fix agent from an explicit failed-stage artifact.")
+    .argument("<id>")
+    .option("--from <stage>", "Failed stage to fix", "check")
+    .option("--attachable", "Run the fix worker inside an attachable tmux session")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run the fix worker as a plain detached background process")
+    .action((id: string, options: { from: string; attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
+      try {
+        const paths = resolvePaths();
+        const request = createFixRequest(paths, id, options.from);
+        const started = startWorker(paths, id, { ...resolveRunRuntime(paths, options), fix: true });
+        printStartedWorker(id, started, "Fixing");
+        console.log(`Fix: ${request.source}:${request.fixId}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  program
     .command("commit")
     .description("Commit current task worktree changes without pushing or opening a PR.")
     .argument("<id>")
@@ -2459,7 +2544,7 @@ interface StartedWorker {
   tmuxSession: string | null;
 }
 
-function printStartedWorker(id: string, started: StartedWorker, verb: "Running" | "Continuing"): void {
+function printStartedWorker(id: string, started: StartedWorker, verb: "Running" | "Continuing" | "Fixing"): void {
   console.log(`${verb} task ${id}`);
   if (started.tmuxSession) {
     console.log(`tmux: ${started.tmuxSession}`);
@@ -2950,6 +3035,9 @@ function resolveRequestedLogStage(stage: LogStage, target: string, taskId: strin
   if (row?.stage === "run" || row?.stage === "check" || row?.stage === "review") {
     return row.stage;
   }
+  if (row?.stage === "fix") {
+    return "check";
+  }
   return "latest";
 }
 
@@ -2971,6 +3059,14 @@ function printWorkflowStageResult(headers: [string, string, string, string], res
     headers,
     result.results.map((row) => [row.unit.target, row.unit.taskId, row.status, row.detail])
   );
+}
+
+function createFixRequest(paths: ReturnType<typeof resolvePaths>, taskId: string, source: string): ReturnType<typeof createFixRequestFromCheck> {
+  const meta = getTask(paths, taskId);
+  if (source === "check") {
+    return createFixRequestFromCheck(paths, meta);
+  }
+  throw new DevtaskError(`Fix source ${source} is not supported yet. Supported sources: check`);
 }
 
 async function runWorkRepoPlans(
@@ -3535,7 +3631,7 @@ function rewriteCommandForGroup(command: string, groupId: string, repoName: stri
     return command;
   }
 
-  if (["plan", "check", "review", "approve", "commit", "pr"].includes(action)) {
+  if (["plan", "check", "fix", "review", "approve", "commit", "pr"].includes(action)) {
     return `devtask group ${action} ${shellQuote(groupId)} --repo ${shellQuote(repoName)}`;
   }
 
@@ -3909,9 +4005,13 @@ async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string
   });
 }
 
-function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options: { tmux?: boolean } = {}): StartedWorker {
+function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options: { tmux?: boolean; fix?: boolean } = {}): StartedWorker {
   const meta = getTask(paths, id);
-  assertRunReady(meta);
+  if (options.fix) {
+    assertFixReady(meta);
+  } else {
+    assertRunReady(meta);
+  }
   if (isProcessAlive(meta.supervisorPid)) {
     throw new DevtaskError(`Task ${id} is already supervised by PID ${meta.supervisorPid}`);
   }
@@ -4007,6 +4107,15 @@ function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options
   });
 
   return { pid: childPid, tmuxSession: null };
+}
+
+function assertFixReady(meta: ReturnType<typeof getTask>): void {
+  if (meta.status === "running") {
+    throw new DevtaskError(`Task ${meta.id} is already running.`);
+  }
+  if (["approved", "pr-open", "ci-running", "ci-passed", "cancelled"].includes(meta.status)) {
+    throw new DevtaskError(`Task ${meta.id} is ${meta.status} and cannot be fixed.`);
+  }
 }
 
 function parsePositiveInteger(value: string): number {

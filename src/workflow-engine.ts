@@ -1,4 +1,4 @@
-export const DEFAULT_DEV_WORKFLOW_STAGES = ["plan", "run", "check", "review", "approve", "commit", "pr", "ci"] as const;
+export const DEFAULT_DEV_WORKFLOW_STAGES = ["plan", "run", "check", "fix", "review", "approve", "commit", "pr", "ci"] as const;
 
 export type WorkflowStageId = (typeof DEFAULT_DEV_WORKFLOW_STAGES)[number];
 export type WorkflowUnitStatus = "passed" | "failed" | "skipped" | "started";
@@ -44,6 +44,7 @@ export const DEFAULT_DEV_WORKFLOW: WorkflowDefinition = {
     { id: "plan", dependsOn: [], parallel: true, requiresHuman: false },
     { id: "run", dependsOn: ["plan"], parallel: true, requiresHuman: false },
     { id: "check", dependsOn: ["run"], parallel: true, requiresHuman: false },
+    { id: "fix", dependsOn: ["check"], parallel: true, requiresHuman: false },
     { id: "review", dependsOn: ["check"], parallel: true, requiresHuman: false },
     { id: "approve", dependsOn: ["review"], parallel: true, requiresHuman: true },
     { id: "commit", dependsOn: ["approve"], parallel: true, requiresHuman: false },

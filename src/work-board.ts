@@ -124,7 +124,7 @@ function workLevelNext(workId: string, stage: string, fallback: string): string 
   if (stage === "plan") {
     return `devtask work repo-plan ${shellQuote(workId)}`;
   }
-  if (["run", "check", "review", "approve", "commit", "pr", "ci"].includes(stage)) {
+  if (["run", "check", "fix", "review", "approve", "commit", "pr", "ci"].includes(stage)) {
     return `devtask work ${stage} ${shellQuote(workId)}`;
   }
   return fallback;

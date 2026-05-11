@@ -69,6 +69,39 @@ describe("workflow recommendations", () => {
     });
   });
 
+  it("routes failed checks to the fix stage", () => {
+    const review = taskReview({
+      status: "review",
+      latestVerification: {
+        status: "failed",
+        finishedAt: "2026-05-05T00:00:01.000Z"
+      },
+      stages: {
+        check: {
+          stage: "check",
+          status: "failed",
+          startedAt: "2026-05-05T00:00:00.000Z",
+          finishedAt: "2026-05-05T00:00:01.000Z",
+          input: {},
+          output: {},
+          artifacts: [],
+          reason: "checks failed"
+        }
+      }
+    });
+
+    expect(recommendNextAction(review, config)).toMatchObject({
+      kind: "fix",
+      command: "devtask fix example --from check",
+      automatic: false
+    });
+    expect(buildBoardRow(review, config)).toMatchObject({
+      stage: "fix",
+      status: "ready",
+      next: "devtask fix example --from check"
+    });
+  });
+
   it("checks run-complete tasks before treating them as terminal", () => {
     expect(
       recommendNextAction(

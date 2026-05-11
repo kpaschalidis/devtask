@@ -20,6 +20,7 @@ describe("workflow engine", () => {
       "plan",
       "run",
       "check",
+      "fix",
       "review",
       "approve",
       "commit",

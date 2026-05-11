@@ -7,6 +7,7 @@ export type NextActionKind =
   | "run"
   | "continue"
   | "check"
+  | "fix"
   | "review"
   | "approve"
   | "pr"
@@ -116,9 +117,9 @@ export function recommendNextAction(review: TaskReview, config: DevtaskConfig): 
 
     if (check.status === "failed") {
       return {
-        kind: "continue",
-        command: `devtask continue ${id}`,
-        reason: "Checks failed; the worker needs another pass.",
+        kind: "fix",
+        command: `devtask fix ${id} --from check`,
+        reason: "Checks failed; run a fix agent with the failed check artifact.",
         automatic: false
       };
     }
@@ -233,6 +234,9 @@ function describeLifecycle(review: TaskReview): { stage: string; status: string 
 
   const latest = latestStage(review);
   if (latest && ["running", "failed", "blocked", "findings"].includes(latest.status)) {
+    if (latest.stage === "check" && latest.status === "failed") {
+      return { stage: "fix", status: "ready" };
+    }
     return { stage: latest.stage, status: latest.status };
   }
 
