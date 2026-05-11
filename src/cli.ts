@@ -39,6 +39,7 @@ import {
   type ScmPreflight
 } from "./scm.js";
 import { recordStage, runStage, STAGE_NAMES } from "./stage-contracts.js";
+import { assertReviewReady } from "./stage-policy.js";
 import {
   assertJiraConfigured,
   buildJiraGroupRepoGoal,
@@ -631,6 +632,7 @@ export function createCli(): Command {
           console.log(`${task.target}/${task.taskId}`);
           const repoPaths = resolvePaths(task.repoPath);
           try {
+            assertReviewReady(repoPaths, getTask(repoPaths, task.taskId), readConfig(repoPaths));
             if (startStageSessionIfRequested(repoPaths, task.taskId, "review", ["review", task.taskId, "--plain"], options)) {
               continue;
             }
@@ -2217,6 +2219,7 @@ export function createCli(): Command {
     .action(async (id: string, options: { attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
       try {
         const paths = resolvePaths();
+        assertReviewReady(paths, getTask(paths, id), readConfig(paths));
         if (startStageSessionIfRequested(paths, id, "review", ["review", id, "--plain"], options)) {
           return;
         }
@@ -3530,6 +3533,7 @@ async function reviewTask(
   }
 
   const config = readConfig(paths);
+  assertReviewReady(paths, meta, config);
   console.log(`Running review agent in ${meta.worktreePath}`);
   const record = await runStage(paths, id, "review", {
     input: {
