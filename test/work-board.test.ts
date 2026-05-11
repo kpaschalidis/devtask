@@ -281,7 +281,9 @@ describe("work board", () => {
       status: "done"
     });
     recordStage(repoPaths, task.taskId, "run", {
-      status: "passed"
+      status: "passed",
+      startedAt: "2027-05-05T00:00:00.000Z",
+      finishedAt: "2027-05-05T00:00:01.000Z"
     });
 
     await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([

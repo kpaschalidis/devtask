@@ -39,7 +39,7 @@ import {
   type ScmPreflight
 } from "./scm.js";
 import { recordStage, runStage, STAGE_NAMES } from "./stage-contracts.js";
-import { assertReviewReady } from "./stage-policy.js";
+import { assertCheckReady, assertCiReady, assertCommitReady, assertPrReady, assertReviewReady, assertRunReady } from "./stage-policy.js";
 import {
   assertJiraConfigured,
   buildJiraGroupRepoGoal,
@@ -3473,9 +3473,7 @@ async function checkTask(
   options: { exitOnFailure: boolean }
 ): Promise<void> {
   const meta = getTask(paths, id);
-  if (meta.status === "running") {
-    throw new DevtaskError(`Task ${id} is running; stop it before checking`);
-  }
+  assertCheckReady(paths, meta);
 
   const config = readConfig(paths);
   if (config.verify.length === 0) {
@@ -3585,12 +3583,7 @@ async function openPrForTask(
 ): Promise<string> {
   const draft = resolvePrDraftMode(options);
   const meta = getTask(paths, id);
-  if (meta.status === "running") {
-    throw new DevtaskError(`Task ${id} is running; stop it before opening a PR`);
-  }
-  if (!["approved", "ci-failed"].includes(meta.status)) {
-    throw new DevtaskError(`Task ${id} is ${meta.status}; mark it approved before opening a PR`);
-  }
+  assertPrReady(meta);
 
   const uncommitted = await hasUncommittedChanges(meta.worktreePath);
   if (uncommitted) {
@@ -3644,9 +3637,7 @@ async function commitTask(
   options: { message?: string } = {}
 ): Promise<void> {
   const meta = getTask(paths, id);
-  if (meta.status === "running") {
-    throw new DevtaskError(`Task ${id} is running; stop it before committing`);
-  }
+  assertCommitReady(paths, meta);
 
   await runCommandOrThrow("git", ["add", "-A"], { cwd: meta.worktreePath });
   const staged = await runCommand("git", ["diff", "--cached", "--quiet"], { cwd: meta.worktreePath });
@@ -3689,9 +3680,7 @@ async function commitTask(
 
 async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string): Promise<void> {
   const meta = getTask(paths, id);
-  if (!meta.prUrl) {
-    throw new DevtaskError(`Task ${id} has no PR URL`);
-  }
+  assertCiReady(meta);
 
   const result = await checkProviderCi(meta.worktreePath, meta.prUrl, meta.branch);
   console.log(`${result.provider}: ${result.detail}`);
@@ -3722,11 +3711,9 @@ async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string
 
 function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options: { tmux?: boolean } = {}): StartedWorker {
   const meta = getTask(paths, id);
+  assertRunReady(meta);
   if (isProcessAlive(meta.supervisorPid)) {
     throw new DevtaskError(`Task ${id} is already supervised by PID ${meta.supervisorPid}`);
-  }
-  if (meta.status === "done") {
-    throw new DevtaskError(`Task ${id} is ${meta.status} and cannot be run`);
   }
 
   const next = {
