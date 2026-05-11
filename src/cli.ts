@@ -490,6 +490,26 @@ export function createCli(): Command {
     });
 
   work
+    .command("attach")
+    .description("Attach to one materialized repo task's tmux session in a work item.")
+    .argument("<id>")
+    .requiredOption("--target <target-id>", "Workspace target to attach")
+    .option("--stage <stage>", "Attach to a stage session such as plan or review")
+    .action((id: string, options: { target: string; stage?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const task = selectOneWorkTask(paths, item, options.target);
+        const repoPaths = resolvePaths(task.repoPath);
+        const meta = getTask(repoPaths, task.taskId);
+        const session = options.stage ? stageTmuxSessionName(repoPaths, task.taskId, options.stage) : meta.tmuxSession ?? tmuxSessionName(repoPaths, task.taskId);
+        attachTmuxSession(session);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("plan")
     .description("Create or refresh the proposed execution graph for a work item.")
     .argument("<id>")
@@ -3025,6 +3045,14 @@ function selectWorkLogTasks(
   target?: string
 ): NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"] {
   return selectWorkTasks(paths, item, target);
+}
+
+function selectOneWorkTask(
+  paths: ReturnType<typeof resolvePaths>,
+  item: WorkItem,
+  target: string
+): NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"][number] {
+  return selectWorkTasks(paths, item, target)[0]!;
 }
 
 function resolveRequestedLogStage(stage: LogStage, target: string, taskId: string, boardRows: WorkBoardRow[]): LogStage {
