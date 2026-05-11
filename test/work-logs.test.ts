@@ -52,6 +52,16 @@ describe("work logs", () => {
     expect(output).toContain("Check output is complete; printing the latest captured verification output instead of following.");
     expect(output).toContain("FAIL npm test");
   });
+
+  it("treats fix as a first-class log stage", async () => {
+    const { workspace } = await createWorkItemWithFailedCheck();
+    addFixLog(workspace);
+    process.chdir(workspace);
+    const output = await runCli(["work", "logs", "WORK-123", "--target", "backend", "--stage", "fix"]);
+
+    expect(output).toContain("backend/work-123-backend fix");
+    expect(output).toContain("fix log");
+  });
 });
 
 describe("work target selection", () => {
@@ -192,6 +202,26 @@ async function createWorkItemWithFailedCheck(): Promise<{ workspace: string }> {
   );
 
   return { workspace };
+}
+
+function addFixLog(workspace: string): void {
+  const paths = resolveWorkspacePathsForInit(workspace);
+  const materialization = readWorkMaterialization(paths, "WORK-123");
+  if (!materialization) {
+    throw new Error("Expected work materialization");
+  }
+  const task = materialization.tasks[0];
+  const repoPaths = resolvePaths(task.repoPath);
+  const logsDir = path.join(taskDir(repoPaths, task.taskId), "logs");
+  const fixLogPath = path.join(logsDir, "fix.log");
+  fs.writeFileSync(fixLogPath, "fix log\n");
+  recordStage(repoPaths, task.taskId, "fix", {
+    status: "failed",
+    startedAt: "2026-05-11T10:06:00.000Z",
+    finishedAt: "2026-05-11T10:07:00.000Z",
+    artifacts: [fixLogPath],
+    reason: "worker command failed while applying fix"
+  });
 }
 
 async function createTwoTargetWorkItem(): Promise<{ workspace: string }> {

@@ -164,6 +164,8 @@ devtask attach fix-login --stage review
 devtask steer fix-login --stage review "Please double-check the error path."
 ```
 
+`run`, `fix`, `plan`, and `review` are all steerable lifecycle stages. `run` and `fix` share the task's worker session; `plan` and `review` use short-lived stage sessions.
+
 Workspace work items expose the same steering path per materialized target:
 
 ```bash

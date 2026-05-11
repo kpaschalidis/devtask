@@ -38,7 +38,7 @@ import {
   preflightScmForPullRequest,
   type ScmPreflight
 } from "./scm.js";
-import { recordStage, runStage, STAGE_NAMES } from "./stage-contracts.js";
+import { readStageLedger, recordStage, runStage, STAGE_NAMES, type StageName } from "./stage-contracts.js";
 import { assertCheckReady, assertCiReady, assertCommitReady, assertPrReady, assertReviewReady, assertRunReady } from "./stage-policy.js";
 import {
   assertJiraConfigured,
@@ -79,7 +79,8 @@ interface PrOptions {
   target?: string;
 }
 
-type LogStage = "current" | "latest" | "run" | "check" | "review";
+type LogStage = "current" | "latest" | "run" | "check" | "fix" | "review";
+const ATTACHABLE_STAGE_NAMES = ["plan", "run", "fix", "review"] as const satisfies readonly StageName[];
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -461,7 +462,7 @@ export function createCli(): Command {
     .description("Print or follow logs for materialized repo tasks in a work item.")
     .argument("<id>")
     .option("--target <target-id>", "Only show logs for one workspace target")
-    .option("--stage <stage>", "Stage output to show: current, latest, run, check, or review", parseLogStage, "current")
+    .option("--stage <stage>", "Stage output to show: current, latest, run, check, fix, or review", parseLogStage, "current")
     .option("-n, --lines <count>", "Number of trailing lines to print", parsePositiveInteger, 120)
     .option("-f, --follow", "Follow one target task log")
     .action(async (id: string, options: { target?: string; stage: LogStage; lines: number; follow?: boolean }) => {
@@ -494,7 +495,7 @@ export function createCli(): Command {
     .description("Attach to one materialized repo task's tmux session in a work item.")
     .argument("<id>")
     .requiredOption("--target <target-id>", "Workspace target to attach")
-    .option("--stage <stage>", "Attach to a stage session such as plan or review")
+    .option("--stage <stage>", "Attach to a lifecycle stage session such as run, fix, plan, or review")
     .action((id: string, options: { target: string; stage?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
@@ -502,7 +503,7 @@ export function createCli(): Command {
         const task = selectOneWorkTask(paths, item, options.target);
         const repoPaths = resolvePaths(task.repoPath);
         const meta = getTask(repoPaths, task.taskId);
-        const session = options.stage ? stageTmuxSessionName(repoPaths, task.taskId, options.stage) : meta.tmuxSession ?? tmuxSessionName(repoPaths, task.taskId);
+        const session = resolveAttachSession(repoPaths, meta, options.stage);
         if (!tmuxSessionExists(session)) {
           const status = meta.supervisorPid || meta.childPid ? `status: ${meta.status}, supervisor: ${meta.supervisorPid ?? "-"}` : `status: ${meta.status}`;
           throw new DevtaskError(`No attachable session for ${task.target}/${task.taskId} (${status}).`);
@@ -521,7 +522,7 @@ export function createCli(): Command {
     .requiredOption("--target <target-id>", "Workspace target to steer")
     .option("-f, --file <path>", "Read feedback from a file")
     .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
-    .option("--stage <stage>", "Steer a repo task stage session such as plan or review")
+    .option("--stage <stage>", "Steer a lifecycle stage session such as run, fix, plan, or review")
     .action((id: string, messageParts: string[], options: { target: string; file?: string; lines: number; stage?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
@@ -1636,13 +1637,14 @@ export function createCli(): Command {
     .description("Attach to one repo task's tmux session in a group.")
     .argument("<id>")
     .requiredOption("--repo <repo-name>", "Repo to attach")
-    .action((id: string, options: { repo: string }) => {
+    .option("--stage <stage>", "Attach to a lifecycle stage session such as run, fix, plan, or review")
+    .action((id: string, options: { repo: string; stage?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const repo = selectOneGroupRepo(paths, id, options.repo);
         const repoPaths = resolvePaths(repo.path);
         const meta = getTask(repoPaths, repo.taskId);
-        const session = meta.tmuxSession ?? tmuxSessionName(repoPaths, repo.taskId);
+        const session = resolveAttachSession(repoPaths, meta, options.stage);
         if (!tmuxSessionExists(session)) {
           const status = meta.supervisorPid || meta.childPid ? `status: ${meta.status}, supervisor: ${meta.supervisorPid ?? "-"}` : `status: ${meta.status}`;
           throw new DevtaskError(`No attachable session for ${repo.name}/${repo.taskId} (${status}).`);
@@ -1661,7 +1663,7 @@ export function createCli(): Command {
     .requiredOption("--repo <repo-name>", "Repo to steer")
     .option("-f, --file <path>", "Read feedback from a file")
     .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
-    .option("--stage <stage>", "Steer a stage session such as plan or review")
+    .option("--stage <stage>", "Steer a lifecycle stage session such as run, fix, plan, or review")
     .action((id: string, messageParts: string[], options: { repo: string; file?: string; lines: number; stage?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
@@ -2526,7 +2528,7 @@ export function createCli(): Command {
     .argument("[message...]")
     .option("-f, --file <path>", "Read feedback from a file")
     .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
-    .option("--stage <stage>", "Steer a stage session such as plan or review")
+    .option("--stage <stage>", "Steer a lifecycle stage session such as run, fix, plan, or review")
     .action((id: string, messageParts: string[], options: { file?: string; lines: number; stage?: string }) => {
       try {
         const paths = resolvePaths();
@@ -2545,12 +2547,12 @@ export function createCli(): Command {
     .command("attach")
     .description("Attach to a task tmux session.")
     .argument("<id>")
-    .option("--stage <stage>", "Attach to a stage session such as plan or review")
+    .option("--stage <stage>", "Attach to a lifecycle stage session such as run, fix, plan, or review")
     .action((id: string, options: { stage?: string }) => {
       try {
         const paths = resolvePaths();
         const meta = getTask(paths, id);
-        const session = options.stage ? stageTmuxSessionName(paths, id, options.stage) : meta.tmuxSession ?? tmuxSessionName(paths, id);
+        const session = resolveAttachSession(paths, meta, options.stage);
         if (!tmuxSessionExists(session)) {
           const status = meta.supervisorPid || meta.childPid ? `status: ${meta.status}, supervisor: ${meta.supervisorPid ?? "-"}` : `status: ${meta.status}`;
           throw new DevtaskError(`No attachable session for ${id} (${status}).`);
@@ -2753,6 +2755,32 @@ function stageTmuxSessionName(paths: ReturnType<typeof resolvePaths>, id: string
   return `${tmuxSessionName(paths, id)}-${stage.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
+function resolveAttachSession(paths: ReturnType<typeof resolvePaths>, meta: ReturnType<typeof getTask>, stage?: string): string {
+  if (!stage) {
+    return meta.tmuxSession ?? tmuxSessionName(paths, meta.id);
+  }
+  return resolveLifecycleStageSession(paths, meta, stage);
+}
+
+function resolveLifecycleStageSession(paths: ReturnType<typeof resolvePaths>, meta: ReturnType<typeof getTask>, stage: string): string {
+  const stageName = parseLifecycleStage(stage);
+  if (stageName === "run" || stageName === "fix") {
+    return meta.tmuxSession ?? tmuxSessionName(paths, meta.id);
+  }
+  return stageTmuxSessionName(paths, meta.id, stageName);
+}
+
+function parseLifecycleStage(stage: string): StageName {
+  if (STAGE_NAMES.includes(stage as StageName)) {
+    const parsed = stage as StageName;
+    if (ATTACHABLE_STAGE_NAMES.includes(parsed as (typeof ATTACHABLE_STAGE_NAMES)[number])) {
+      return parsed;
+    }
+    throw new DevtaskError(`Stage ${stage} is not attachable. Attachable stages are ${ATTACHABLE_STAGE_NAMES.join(", ")}.`);
+  }
+  throw new DevtaskError(`Expected lifecycle stage ${STAGE_NAMES.join(", ")}; got ${stage}`);
+}
+
 function killTaskStageSessions(paths: ReturnType<typeof resolvePaths>, id: string): void {
   if (!isTmuxAvailable()) {
     return;
@@ -2798,7 +2826,7 @@ function steerTask(
   options: { messageParts: string[]; file?: string; lines: number; messageRoot?: string; stage?: string }
 ): void {
   const meta = getTask(paths, id);
-  const session = options.stage ? stageTmuxSessionName(paths, id, options.stage) : meta.tmuxSession;
+  const session = options.stage ? resolveLifecycleStageSession(paths, meta, options.stage) : meta.tmuxSession;
   if (!session) {
     throw new DevtaskError(`Task ${id} is not running in an attachable session. Use devtask run ${id} after configuring attachable runtime.`);
   }
@@ -3103,7 +3131,7 @@ function resolveRequestedLogStage(stage: LogStage, target: string, taskId: strin
     return row.stage;
   }
   if (row?.stage === "fix") {
-    return "check";
+    return row.status === "running" || row.status === "passed" || row.status === "failed" ? "fix" : "check";
   }
   return "latest";
 }
@@ -3367,6 +3395,16 @@ function printStageTaskLog(
     return;
   }
 
+  if (stage === "fix") {
+    const logPath = latestFixLogPath(repoPaths, taskId);
+    if (!logPath) {
+      console.log(`${label}: no fix logs`);
+      return;
+    }
+    printFileLog(`${label} fix`, logPath, options);
+    return;
+  }
+
   if (stage === "review") {
     if (!review.latestReviewAgent) {
       console.log(`${label}: no review logs`);
@@ -3408,6 +3446,7 @@ function printFileLog(label: string, filePath: string, options: { lines: number;
 
 interface TaskLogArtifacts {
   latestRun: ReturnType<typeof readLatestRun>;
+  latestFixFinishedAt: string | null;
   latestVerification: VerificationRecord | null;
   latestReviewAgent: ReviewAgentRecord | null;
 }
@@ -3416,15 +3455,23 @@ function readTaskLogArtifacts(repoPaths: ReturnType<typeof resolvePaths>, taskId
   getTask(repoPaths, taskId);
   return {
     latestRun: readLatestRun(repoPaths, taskId),
+    latestFixFinishedAt: readStageLedger(repoPaths, taskId).stages.fix?.finishedAt ?? null,
     latestVerification: readLatestVerification(repoPaths, taskId),
     latestReviewAgent: readLatestReviewAgent(repoPaths, taskId)
   };
+}
+
+function latestFixLogPath(paths: ReturnType<typeof resolvePaths>, taskId: string): string | null {
+  return readStageLedger(paths, taskId).stages.fix?.artifacts.find((artifact) => artifact.endsWith(".log")) ?? null;
 }
 
 function latestLogStage(review: TaskLogArtifacts): Exclude<LogStage, "current" | "latest"> | null {
   const candidates: Array<{ stage: Exclude<LogStage, "current" | "latest">; at: string }> = [];
   if (review.latestRun) {
     candidates.push({ stage: "run", at: review.latestRun.finishedAt });
+  }
+  if (review.latestFixFinishedAt) {
+    candidates.push({ stage: "fix", at: review.latestFixFinishedAt });
   }
   if (review.latestVerification) {
     candidates.push({ stage: "check", at: review.latestVerification.finishedAt });
@@ -4194,10 +4241,10 @@ function parsePositiveInteger(value: string): number {
 }
 
 function parseLogStage(value: string): LogStage {
-  if (value === "current" || value === "latest" || value === "run" || value === "check" || value === "review") {
+  if (value === "current" || value === "latest" || value === "run" || value === "check" || value === "fix" || value === "review") {
     return value;
   }
-  throw new DevtaskError(`Expected log stage current, latest, run, check, or review; got ${value}`);
+  throw new DevtaskError(`Expected log stage current, latest, run, check, fix, or review; got ${value}`);
 }
 
 function sleep(ms: number): Promise<void> {
