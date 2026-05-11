@@ -62,6 +62,13 @@ import { runWorkPlanner, workGraphPath, workPlanPath } from "./work-planner.js";
 import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
 import { buildWorkBoardRows } from "./work-board.js";
 import { isWorkTaskRunComplete, planWorkRun } from "./work-runner.js";
+import {
+  DEFAULT_DEV_WORKFLOW,
+  runWorkflowStage,
+  workflowStageFailed,
+  type WorkflowStageId,
+  type WorkflowUnit
+} from "./workflow-engine.js";
 
 interface PrOptions {
   title?: string;
@@ -566,7 +573,7 @@ export function createCli(): Command {
         if (options.follow) {
           await followWorkRun(paths, item, options);
         } else {
-          runReadyWorkTasks(paths, item, options);
+          await runReadyWorkTasks(paths, item, options);
         }
       } catch (error) {
         printError(error);
@@ -581,29 +588,17 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const tasks = getMaterializedWorkTasks(paths, item);
-        let failed = false;
-
-        for (const [index, task] of tasks.entries()) {
-          if (index > 0) {
-            console.log("");
-          }
-          console.log(`${task.target}/${task.taskId}`);
-          const repoPaths = resolvePaths(task.repoPath);
-          try {
-            await checkTask(repoPaths, task.taskId, { exitOnFailure: false });
-          } catch (error) {
-            failed = true;
-            printNonFatalError(error);
-            continue;
-          }
-          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, task.taskId));
-          if (latest.latestVerification?.status === "failed") {
-            failed = true;
-          }
-        }
-
-        if (failed) {
+        const result = await runWorkWorkflowStage(paths, item, "check", async (unit) => {
+          const repoPaths = resolvePaths(unit.repoPath);
+          await checkTask(repoPaths, unit.taskId, { exitOnFailure: false });
+          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, unit.taskId));
+          return {
+            status: latest.latestVerification?.status === "failed" ? "failed" : "passed",
+            detail: latest.latestVerification?.status ?? "passed"
+          };
+        });
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        if (workflowStageFailed(result)) {
           process.exit(1);
         }
       } catch (error) {
@@ -622,33 +617,21 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const tasks = getMaterializedWorkTasks(paths, item);
-        let failed = false;
-
-        for (const [index, task] of tasks.entries()) {
-          if (index > 0) {
-            console.log("");
+        const result = await runWorkWorkflowStage(paths, item, "review", async (unit) => {
+          const repoPaths = resolvePaths(unit.repoPath);
+          assertReviewReady(repoPaths, getTask(repoPaths, unit.taskId), readConfig(repoPaths));
+          if (startStageSessionIfRequested(repoPaths, unit.taskId, "review", ["review", unit.taskId, "--plain"], options)) {
+            return { status: "started", detail: "stage session started" };
           }
-          console.log(`${task.target}/${task.taskId}`);
-          const repoPaths = resolvePaths(task.repoPath);
-          try {
-            assertReviewReady(repoPaths, getTask(repoPaths, task.taskId), readConfig(repoPaths));
-            if (startStageSessionIfRequested(repoPaths, task.taskId, "review", ["review", task.taskId, "--plain"], options)) {
-              continue;
-            }
-            await reviewTask(repoPaths, task.taskId, { exitOnFindings: false });
-          } catch (error) {
-            failed = true;
-            printNonFatalError(error);
-            continue;
-          }
-          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, task.taskId));
-          if (latest.latestReviewAgent?.status !== "passed") {
-            failed = true;
-          }
-        }
-
-        if (failed) {
+          await reviewTask(repoPaths, unit.taskId, { exitOnFindings: false });
+          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, unit.taskId));
+          return {
+            status: latest.latestReviewAgent?.status === "passed" ? "passed" : "failed",
+            detail: latest.latestReviewAgent?.status ?? "missing"
+          };
+        });
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        if (workflowStageFailed(result)) {
           process.exit(1);
         }
       } catch (error) {
@@ -665,24 +648,12 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const tasks = getMaterializedWorkTasks(paths, item);
-        let failed = false;
-        const rows: string[][] = [];
-
-        for (const task of tasks) {
-          const repoPaths = resolvePaths(task.repoPath);
-          try {
-            const result = await approveTask(repoPaths, task.taskId, { force: options.force === true });
-            rows.push([task.target, task.taskId, "approved", result]);
-          } catch (error) {
-            failed = true;
-            rows.push([task.target, task.taskId, "failed", error instanceof Error ? error.message.split("\n")[0] : String(error)]);
-          }
-        }
-
-        printTable(["TARGET", "TASK", "STATUS", "DETAIL"], rows);
-
-        if (failed) {
+        const result = await runWorkWorkflowStage(paths, item, "approve", async (unit) => {
+          const detail = await approveTask(resolvePaths(unit.repoPath), unit.taskId, { force: options.force === true });
+          return { status: "passed", detail };
+        });
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        if (workflowStageFailed(result)) {
           process.exit(1);
         }
       } catch (error) {
@@ -699,24 +670,12 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const tasks = getMaterializedWorkTasks(paths, item);
-        let failed = false;
-
-        for (const [index, task] of tasks.entries()) {
-          if (index > 0) {
-            console.log("");
-          }
-          console.log(`${task.target}/${task.taskId}`);
-          const repoPaths = resolvePaths(task.repoPath);
-          try {
-            await commitTask(repoPaths, task.taskId, { message: options.message });
-          } catch (error) {
-            failed = true;
-            printNonFatalError(error);
-          }
-        }
-
-        if (failed) {
+        const result = await runWorkWorkflowStage(paths, item, "commit", async (unit) => {
+          await commitTask(resolvePaths(unit.repoPath), unit.taskId, { message: options.message });
+          return { status: "passed", detail: "committed or skipped" };
+        });
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        if (workflowStageFailed(result)) {
           process.exit(1);
         }
       } catch (error) {
@@ -754,37 +713,20 @@ export function createCli(): Command {
           process.exit(1);
         }
 
-        let failed = false;
-        const results: Array<{ target: string; task: string; status: string; pr: string }> = [];
-        for (const task of tasks) {
-          const repoPaths = resolvePaths(task.repoPath);
-          const meta = getTask(repoPaths, task.taskId);
+        const result = await runWorkWorkflowStage(paths, item, "pr", async (unit) => {
+          const repoPaths = resolvePaths(unit.repoPath);
+          const meta = getTask(repoPaths, unit.taskId);
           if (meta.status === "pr-open" && meta.prUrl) {
-            results.push({ target: task.target, task: task.taskId, status: "already-open", pr: meta.prUrl });
-            continue;
+            return { status: "skipped", detail: meta.prUrl };
           }
-          try {
-            const prUrl = await openPrForTask(repoPaths, task.taskId, options);
-            results.push({ target: task.target, task: task.taskId, status: "opened", pr: prUrl });
-          } catch (error) {
-            failed = true;
-            results.push({
-              target: task.target,
-              task: task.taskId,
-              status: "failed",
-              pr: error instanceof Error ? error.message.split("\n")[0] : String(error)
-            });
-            printNonFatalError(error);
-          }
-        }
+          const prUrl = await openPrForTask(repoPaths, unit.taskId, options);
+          return { status: "passed", detail: prUrl };
+        });
 
         console.log("");
-        printTable(
-          ["TARGET", "TASK", "STATUS", "PR"],
-          results.map((result) => [result.target, result.task, result.status, result.pr])
-        );
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "PR"], result);
 
-        if (failed) {
+        if (workflowStageFailed(result)) {
           process.exit(1);
         }
       } catch (error) {
@@ -800,29 +742,17 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const tasks = getMaterializedWorkTasks(paths, item);
-        let failed = false;
-
-        for (const [index, task] of tasks.entries()) {
-          if (index > 0) {
-            console.log("");
-          }
-          console.log(`${task.target}/${task.taskId}`);
-          const repoPaths = resolvePaths(task.repoPath);
-          try {
-            await checkCiForTask(repoPaths, task.taskId);
-          } catch (error) {
-            failed = true;
-            printNonFatalError(error);
-            continue;
-          }
-          const meta = getTask(repoPaths, task.taskId);
-          if (meta.status === "ci-failed") {
-            failed = true;
-          }
-        }
-
-        if (failed) {
+        const result = await runWorkWorkflowStage(paths, item, "ci", async (unit) => {
+          const repoPaths = resolvePaths(unit.repoPath);
+          await checkCiForTask(repoPaths, unit.taskId);
+          const meta = getTask(repoPaths, unit.taskId);
+          return {
+            status: meta.status === "ci-failed" ? "failed" : "passed",
+            detail: meta.status
+          };
+        });
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        if (workflowStageFailed(result)) {
           process.exit(1);
         }
       } catch (error) {
@@ -2935,6 +2865,33 @@ function getMaterializedWorkTasks(paths: ReturnType<typeof resolvePaths>, item: 
   return materialization.tasks;
 }
 
+function getWorkWorkflowUnits(paths: ReturnType<typeof resolvePaths>, item: WorkItem): WorkflowUnit[] {
+  return getMaterializedWorkTasks(paths, item).map((task) => ({
+    target: task.target,
+    taskId: task.taskId,
+    repoPath: task.repoPath
+  }));
+}
+
+async function runWorkWorkflowStage(
+  paths: ReturnType<typeof resolvePaths>,
+  item: WorkItem,
+  stage: WorkflowStageId,
+  run: (unit: WorkflowUnit) => Promise<{ status: "passed" | "failed" | "skipped" | "started"; detail: string }>
+): Promise<Awaited<ReturnType<typeof runWorkflowStage>>> {
+  return runWorkflowStage(DEFAULT_DEV_WORKFLOW, getWorkWorkflowUnits(paths, item), {
+    stage,
+    run
+  });
+}
+
+function printWorkflowStageResult(headers: [string, string, string, string], result: Awaited<ReturnType<typeof runWorkflowStage>>): void {
+  printTable(
+    headers,
+    result.results.map((row) => [row.unit.target, row.unit.taskId, row.status, row.detail])
+  );
+}
+
 async function runWorkRepoPlans(
   paths: ReturnType<typeof resolvePaths>,
   item: WorkItem,
@@ -2983,22 +2940,27 @@ async function runWorkRepoPlans(
   return results;
 }
 
-function runReadyWorkTasks(
+async function runReadyWorkTasks(
   paths: ReturnType<typeof resolvePaths>,
   item: WorkItem,
   options: { attachable?: boolean; tmux?: boolean; plain?: boolean }
-): void {
+): Promise<void> {
   const plan = planWorkRun(paths, item);
   for (const task of plan.skipped) {
     console.log(`${task.target}/${task.taskId}: skipped (${task.reason})`);
   }
-  const readyTasks = plan.ready.map((task) => {
-    const repoPaths = resolvePaths(task.repoPath);
-    const runtime = resolveRunRuntime(repoPaths, options);
-    return { task, repoPaths, runtime };
+  const result = await runWorkflowStage(DEFAULT_DEV_WORKFLOW, plan.ready, {
+    stage: "run",
+    run: async (task) => {
+      const repoPaths = resolvePaths(task.repoPath);
+      const runtime = resolveRunRuntime(repoPaths, options);
+      printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
+      return { status: "started", detail: "worker started" };
+    }
   });
-  for (const { task, repoPaths, runtime } of readyTasks) {
-    printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
+  if (workflowStageFailed(result)) {
+    printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+    throw new DevtaskError(`Work run ${item.id} failed to start one or more ready tasks.`);
   }
   if (plan.ready.length === 0 && plan.skipped.length === 0) {
     console.log(`No materialized tasks for work item ${item.id}`);
@@ -3017,10 +2979,18 @@ async function followWorkRun(
   while (true) {
     throwIfWorkRunFailed(paths, item);
     const plan = planWorkRun(paths, item);
-    for (const task of plan.ready) {
-      const repoPaths = resolvePaths(task.repoPath);
-      const runtime = resolveRunRuntime(repoPaths, options);
-      printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
+    const startResult = await runWorkflowStage(DEFAULT_DEV_WORKFLOW, plan.ready, {
+      stage: "run",
+      run: async (task) => {
+        const repoPaths = resolvePaths(task.repoPath);
+        const runtime = resolveRunRuntime(repoPaths, options);
+        printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
+        return { status: "started", detail: "worker started" };
+      }
+    });
+    if (workflowStageFailed(startResult)) {
+      printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], startResult);
+      throw new DevtaskError(`Work run ${item.id} failed to start one or more ready tasks.`);
     }
 
     for (const task of plan.skipped) {
