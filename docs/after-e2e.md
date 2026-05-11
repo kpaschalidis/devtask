@@ -203,6 +203,63 @@ The key contract is that context is an artifact with provenance. The developer s
 
 Self-improvement should not mean silently changing prompts or policies. It should mean capturing useful lessons and proposing changes that a developer can accept.
 
+Hermes Agent is a useful reference point here. Its closed learning loop separates persistent facts, searchable session history, and reusable procedural skills. `devtask` should borrow that taxonomy, but adapt it to software delivery with stricter human gates.
+
+The `devtask` taxonomy should be:
+
+- **Memory:** compact facts that should influence future work.
+- **Skills:** reusable procedures for recurring workflows.
+- **Context artifacts:** task, source, repo, and stage knowledge for one work item.
+- **History search:** long-tail recall across previous work artifacts.
+- **Improve suggestions:** reviewable proposed changes to memory, skills, config, or context builders.
+
+These are different stores with different lifetimes. Mixing them together would make the system harder to trust.
+
+Memory is for facts:
+
+```text
+.devtask/memory.md
+.devtask/user-preferences.md
+```
+
+Examples:
+
+- this workspace uses Bitbucket pull requests
+- backend tests require a seeded local database
+- user prefers concise status updates
+- target `backend` owns model/music-release API behavior
+
+Skills are for procedures:
+
+```text
+.devtask/skills/
+  bitbucket-pr.md
+  studio-backend-tests.md
+  repo-docs-update.md
+```
+
+Examples:
+
+- how to create a Bitbucket PR in this organization
+- how to run the backend integration test suite
+- how to update repo agent instructions safely
+- how to investigate a recurring CI failure pattern
+
+Context artifacts are work-item scoped. They should explain what the current task needs, not become permanent memory unless a later improvement proposal promotes them.
+
+History search should read existing durable artifacts before inventing new memory:
+
+- work plans
+- approved graphs
+- repo plans
+- run logs
+- check outputs
+- review findings
+- steering messages
+- PR and CI results
+
+This keeps detailed history available without injecting everything into every future prompt.
+
 Useful inputs:
 
 - review findings
@@ -244,6 +301,8 @@ The suggestion artifact should explain:
 - what change is proposed
 - which future stage would benefit
 - what file/config would change
+- which store is affected: memory, skill, context builder, config, or docs
+- what evidence supports the suggestion
 
 Guardrails:
 
@@ -251,8 +310,25 @@ Guardrails:
 - no domain-specific heuristic unless it is stored as project-local, reviewable policy
 - no global memory that cannot be inspected
 - every accepted improvement should be diffable and reversible
+- memory should stay small and curated
+- skills should be loaded on demand, not injected into every prompt
+- history search should be used for recall, not as always-on prompt baggage
+- improvement suggestions should cite their source artifacts
 
 The goal is compounding local workflow quality: each completed task can improve future planning, context selection, review quality, and recovery guidance without turning `devtask` into a black box.
+
+The closed loop should be:
+
+```text
+work executes
+  -> artifacts are captured
+  -> lessons are extracted
+  -> improvements are proposed
+  -> developer approves
+  -> future context/planning/run/review improves
+```
+
+This differs from a fully autonomous learning loop on purpose. `devtask` should optimize for reliable engineering workflow, where learned behavior is visible and accountable.
 
 ## Long-Term Shape
 
