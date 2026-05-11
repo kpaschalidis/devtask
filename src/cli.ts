@@ -60,7 +60,7 @@ import {
 import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 import { runWorkPlanner, workGraphPath, workPlanPath } from "./work-planner.js";
 import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
-import { buildWorkBoardRows } from "./work-board.js";
+import { buildWorkBoardRows, type WorkBoardRow } from "./work-board.js";
 import { isWorkTaskRunComplete, planWorkRun } from "./work-runner.js";
 import {
   DEFAULT_DEV_WORKFLOW,
@@ -77,7 +77,7 @@ interface PrOptions {
   ready?: boolean;
 }
 
-type LogStage = "latest" | "run" | "check" | "review";
+type LogStage = "current" | "latest" | "run" | "check" | "review";
 
 function printError(error: unknown): never {
   if (error instanceof DevtaskError) {
@@ -459,14 +459,15 @@ export function createCli(): Command {
     .description("Print or follow logs for materialized repo tasks in a work item.")
     .argument("<id>")
     .option("--target <target-id>", "Only show logs for one workspace target")
-    .option("--stage <stage>", "Stage output to show: latest, run, check, or review", parseLogStage, "latest")
+    .option("--stage <stage>", "Stage output to show: current, latest, run, check, or review", parseLogStage, "current")
     .option("-n, --lines <count>", "Number of trailing lines to print", parsePositiveInteger, 120)
     .option("-f, --follow", "Follow one target task log")
-    .action((id: string, options: { target?: string; stage: LogStage; lines: number; follow?: boolean }) => {
+    .action(async (id: string, options: { target?: string; stage: LogStage; lines: number; follow?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
         const tasks = selectWorkLogTasks(paths, item, options.target);
+        const boardRows = options.stage === "current" ? await buildWorkBoardRows(paths, item) : [];
         if (options.follow && tasks.length !== 1) {
           throw new DevtaskError("Use --target when following work logs");
         }
@@ -476,7 +477,7 @@ export function createCli(): Command {
             console.log("");
           }
           printWorkLog(task.target, task.repoPath, task.taskId, {
-            stage: options.stage,
+            stage: resolveRequestedLogStage(options.stage, task.target, task.taskId, boardRows),
             lines: options.lines,
             follow: options.follow === true
           });
@@ -2920,6 +2921,17 @@ function selectWorkLogTasks(
   return selected;
 }
 
+function resolveRequestedLogStage(stage: LogStage, target: string, taskId: string, boardRows: WorkBoardRow[]): LogStage {
+  if (stage !== "current") {
+    return stage;
+  }
+  const row = boardRows.find((candidate) => candidate.target === target && candidate.task === taskId);
+  if (row?.stage === "run" || row?.stage === "check" || row?.stage === "review") {
+    return row.stage;
+  }
+  return "latest";
+}
+
 async function runWorkWorkflowStage(
   paths: ReturnType<typeof resolvePaths>,
   item: WorkItem,
@@ -3155,7 +3167,7 @@ function printStageTaskLog(
 ): void {
   const repoPaths = resolvePaths(repoPath);
   const review = readTaskLogArtifacts(repoPaths, taskId);
-  const stage = options.stage === "latest" ? latestLogStage(review) : options.stage;
+  const stage = options.stage === "latest" || options.stage === "current" ? latestLogStage(review) : options.stage;
   if (!stage) {
     console.log(`${label}: no stage logs`);
     return;
@@ -3184,14 +3196,14 @@ function printStageTaskLog(
     return;
   }
   if (options.follow) {
-    throw new DevtaskError("Check logs are stored as completed verification output and cannot be followed");
+    console.log(`${label} check`);
+    console.log("Check output is complete; printing the latest captured verification output instead of following.");
+    printVerificationOutput(review.latestVerification, options.lines);
+    return;
   }
 
   console.log(`${label} check`);
-  console.log(`Status: ${review.latestVerification.status}`);
-  console.log(`Started: ${review.latestVerification.startedAt}`);
-  console.log(`Finished: ${review.latestVerification.finishedAt}`);
-  console.log(tailText(renderVerificationOutput(review.latestVerification), options.lines));
+  printVerificationOutput(review.latestVerification, options.lines);
 }
 
 function printFileLog(label: string, filePath: string, options: { lines: number; follow: boolean }): void {
@@ -3224,8 +3236,8 @@ function readTaskLogArtifacts(repoPaths: ReturnType<typeof resolvePaths>, taskId
   };
 }
 
-function latestLogStage(review: TaskLogArtifacts): Exclude<LogStage, "latest"> | null {
-  const candidates: Array<{ stage: Exclude<LogStage, "latest">; at: string }> = [];
+function latestLogStage(review: TaskLogArtifacts): Exclude<LogStage, "current" | "latest"> | null {
+  const candidates: Array<{ stage: Exclude<LogStage, "current" | "latest">; at: string }> = [];
   if (review.latestRun) {
     candidates.push({ stage: "run", at: review.latestRun.finishedAt });
   }
@@ -3237,6 +3249,22 @@ function latestLogStage(review: TaskLogArtifacts): Exclude<LogStage, "latest"> |
   }
   candidates.sort((a, b) => a.at.localeCompare(b.at));
   return candidates.at(-1)?.stage ?? null;
+}
+
+function printVerificationOutput(verification: VerificationRecord, lines: number): void {
+  console.log(`Status: ${verification.status}`);
+  console.log(`Started: ${verification.startedAt}`);
+  console.log(`Finished: ${verification.finishedAt}`);
+  console.log("");
+  console.log("Steps:");
+  for (const step of verification.steps) {
+    console.log(`  ${step.exitCode === 0 ? "PASS" : "FAIL"} ${step.command}`);
+  }
+  const output = renderVerificationOutput(verification);
+  if (output) {
+    console.log("");
+    console.log(tailText(output, lines));
+  }
 }
 
 function renderVerificationOutput(verification: VerificationRecord): string {
@@ -3959,10 +3987,10 @@ function parsePositiveInteger(value: string): number {
 }
 
 function parseLogStage(value: string): LogStage {
-  if (value === "latest" || value === "run" || value === "check" || value === "review") {
+  if (value === "current" || value === "latest" || value === "run" || value === "check" || value === "review") {
     return value;
   }
-  throw new DevtaskError(`Expected log stage latest, run, check, or review; got ${value}`);
+  throw new DevtaskError(`Expected log stage current, latest, run, check, or review; got ${value}`);
 }
 
 function sleep(ms: number): Promise<void> {
