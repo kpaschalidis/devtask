@@ -838,7 +838,9 @@ export function createCli(): Command {
           })
         );
         printWorkPrPreflight(preflights, draft ? "draft" : "ready");
-        if (preflights.some(({ meta, preflight }) => !isWorkPrPreflightReady(meta, preflight, draft))) {
+        const blockers = workPrPreflightBlockers(id, preflights, draft);
+        if (blockers.length > 0) {
+          printPrPreflightBlockers(blockers);
           process.exit(1);
         }
 
@@ -1952,7 +1954,9 @@ export function createCli(): Command {
           })
         );
         printGroupPrPreflight(preflights, draft ? "draft" : "ready");
-        if (preflights.some(({ meta, preflight }) => !isPrPreflightReady(meta, preflight, draft))) {
+        const blockers = groupPrPreflightBlockers(id, preflights, draft);
+        if (blockers.length > 0) {
+          printPrPreflightBlockers(blockers);
           process.exit(1);
         }
 
@@ -3712,6 +3716,66 @@ function isWorkPrPreflightReady(meta: ReturnType<typeof getTask>, preflight: Scm
 
 function isWorkPrLifecycleReady(meta: ReturnType<typeof getTask>): boolean {
   return meta.status === "approved" || meta.status === "ci-failed" || (meta.status === "pr-open" && Boolean(meta.prUrl));
+}
+
+function groupPrPreflightBlockers(
+  groupId: string,
+  rows: Array<{ repo: ReturnType<typeof getGroup>["repos"][number]; meta: ReturnType<typeof getTask>; preflight: ScmPreflight }>,
+  draft: boolean
+): string[] {
+  return rows.flatMap(({ repo, meta, preflight }) => prPreflightBlockers(`${repo.name}/${repo.taskId}`, meta, preflight, draft, true, {
+    commitCommand: `devtask group commit ${shellQuote(groupId)} --repo ${shellQuote(repo.name)}`
+  }));
+}
+
+function workPrPreflightBlockers(
+  workId: string,
+  rows: Array<{ task: NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"][number]; meta: ReturnType<typeof getTask>; preflight: ScmPreflight }>,
+  draft: boolean
+): string[] {
+  return rows.flatMap(({ task, meta, preflight }) =>
+    prPreflightBlockers(`${task.target}/${task.taskId}`, meta, preflight, draft, isWorkPrLifecycleReady(meta), {
+      commitCommand: `devtask work commit ${shellQuote(workId)} --target ${shellQuote(task.target)}`
+    })
+  );
+}
+
+function prPreflightBlockers(
+  label: string,
+  meta: ReturnType<typeof getTask>,
+  preflight: ScmPreflight,
+  draft: boolean,
+  lifecycleReady: boolean,
+  commands: { commitCommand: string }
+): string[] {
+  if (meta.status === "pr-open" && meta.prUrl) {
+    return [];
+  }
+
+  const blockers: string[] = [];
+  if (!lifecycleReady) {
+    blockers.push(`${label}: task is ${meta.status}; approve it before opening a PR`);
+  }
+  if (preflight.access !== "ok") {
+    blockers.push(`${label}: source provider access failed${preflight.accessDetail ? ` (${preflight.accessDetail})` : ""}`);
+  }
+  if (!preflight.clean) {
+    blockers.push(`${label}: worktree has uncommitted changes; run ${commands.commitCommand}`);
+  }
+  if (preflight.commits === 0) {
+    blockers.push(`${label}: branch has no commits to publish; run ${commands.commitCommand}`);
+  }
+  if (draft && !preflight.draftSupported) {
+    blockers.push(`${label}: draft PRs are not supported by ${preflight.provider}; rerun with --ready`);
+  }
+  return blockers;
+}
+
+function printPrPreflightBlockers(blockers: string[]): void {
+  console.log("Blocked:");
+  for (const blocker of blockers) {
+    console.log(`- ${blocker}`);
+  }
 }
 
 async function buildGroupBoardRows(paths: ReturnType<typeof resolvePaths>, id: string): Promise<GroupBoardRow[]> {
