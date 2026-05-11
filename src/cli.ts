@@ -885,7 +885,7 @@ export function createCli(): Command {
           await checkCiForTask(repoPaths, unit.taskId);
           const meta = getTask(repoPaths, unit.taskId);
           return {
-            status: meta.status === "ci-failed" ? "failed" : "passed",
+            status: workflowCiStatus(meta.status),
             detail: meta.status
           };
         });
@@ -3207,7 +3207,7 @@ async function runWorkWorkflowStage(
   item: WorkItem,
   stage: WorkflowStageId,
   target: string | undefined,
-  run: (unit: WorkflowUnit) => Promise<{ status: "passed" | "failed" | "skipped" | "started"; detail: string }>
+  run: (unit: WorkflowUnit) => Promise<{ status: "passed" | "failed" | "running" | "skipped" | "started"; detail: string }>
 ): Promise<Awaited<ReturnType<typeof runWorkflowStage>>> {
   return runWorkflowStage(DEFAULT_DEV_WORKFLOW, getWorkWorkflowUnits(paths, item, target), {
     stage,
@@ -4224,9 +4224,9 @@ async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string
     console.log(result.url);
   }
 
-  const status = result.status === "passed" ? "ci-passed" : "ci-failed";
+  const status = taskStatusFromCiResult(result.status);
   recordStage(paths, id, "ci", {
-    status: result.status,
+    status: stageStatusFromCiResult(result.status),
     input: {
       prUrl: meta.prUrl,
       branch: meta.branch
@@ -4236,13 +4236,56 @@ async function checkCiForTask(paths: ReturnType<typeof resolvePaths>, id: string
       detail: result.detail,
       url: result.url
     },
-    reason: result.status === "passed" ? null : "CI check failed"
+    reason: ciStageReason(result.status)
   });
   writeTaskMeta(taskMetaPath(paths, id), {
     ...meta,
     status,
     updatedAt: new Date().toISOString()
   });
+}
+
+function taskStatusFromCiResult(status: Awaited<ReturnType<typeof checkProviderCi>>["status"]): ReturnType<typeof getTask>["status"] {
+  if (status === "passed") {
+    return "ci-passed";
+  }
+  if (status === "failed") {
+    return "ci-failed";
+  }
+  if (status === "running") {
+    return "ci-running";
+  }
+  return "pr-open";
+}
+
+function workflowCiStatus(status: ReturnType<typeof getTask>["status"]): "passed" | "failed" | "running" | "skipped" {
+  if (status === "ci-passed") {
+    return "passed";
+  }
+  if (status === "ci-failed") {
+    return "failed";
+  }
+  if (status === "ci-running") {
+    return "running";
+  }
+  return "skipped";
+}
+
+function stageStatusFromCiResult(status: Awaited<ReturnType<typeof checkProviderCi>>["status"]): "passed" | "failed" | "running" | "skipped" {
+  return status === "unknown" ? "skipped" : status;
+}
+
+function ciStageReason(status: Awaited<ReturnType<typeof checkProviderCi>>["status"]): string | null {
+  if (status === "passed") {
+    return null;
+  }
+  if (status === "failed") {
+    return "CI check failed";
+  }
+  if (status === "running") {
+    return "CI is still running";
+  }
+  return "CI status is unavailable";
 }
 
 function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, options: { tmux?: boolean; fix?: boolean } = {}): StartedWorker {

@@ -29,7 +29,7 @@ export interface ScmPreflight {
 
 export interface CiCheckResult {
   provider: ScmProvider;
-  status: "passed" | "failed";
+  status: "passed" | "failed" | "running" | "unknown";
   detail: string;
   url: string | null;
 }
@@ -145,6 +145,14 @@ async function checkBitbucketCi(remote: RemoteInfo, branch: string): Promise<CiC
   }
 
   const pipeline = await fetchLatestBitbucketPipeline(username, apiToken, remote, branch);
+  if (!pipeline) {
+    return {
+      provider: "bitbucket",
+      status: "unknown",
+      detail: `No Bitbucket pipeline found for branch ${branch}`,
+      url: null
+    };
+  }
   const stateName = readNestedString(pipeline, ["state", "name"])?.toLowerCase() ?? "unknown";
   const resultName = readNestedString(pipeline, ["state", "result", "name"])?.toLowerCase() ?? null;
   const buildNumber = readNumber(pipeline, "build_number");
@@ -152,10 +160,20 @@ async function checkBitbucketCi(remote: RemoteInfo, branch: string): Promise<CiC
   const label = `pipeline ${buildNumber ?? readString(pipeline, "uuid") ?? "unknown"}: state=${stateName}, result=${resultName ?? "-"}`;
   return {
     provider: "bitbucket",
-    status: stateName === "completed" && resultName === "successful" ? "passed" : "failed",
+    status: bitbucketPipelineStatus(stateName, resultName),
     detail: label,
     url
   };
+}
+
+function bitbucketPipelineStatus(stateName: string, resultName: string | null): CiCheckResult["status"] {
+  if (stateName !== "completed") {
+    return stateName === "in_progress" || stateName === "pending" ? "running" : "unknown";
+  }
+  if (resultName === "successful") {
+    return "passed";
+  }
+  return resultName ? "failed" : "unknown";
 }
 
 async function fetchLatestBitbucketPipeline(
@@ -163,7 +181,7 @@ async function fetchLatestBitbucketPipeline(
   apiToken: string,
   remote: RemoteInfo,
   branch: string
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, unknown> | null> {
   const url = new URL(`https://api.bitbucket.org/2.0/repositories/${remote.owner}/${remote.repo}/pipelines`);
   url.searchParams.set("pagelen", "10");
   url.searchParams.set("sort", "-created_on");
@@ -185,7 +203,7 @@ async function fetchLatestBitbucketPipeline(
 
   const pipeline = payload.values.find((value) => isRecord(value) && readNestedString(value, ["target", "ref_name"]) === branch);
   if (!isRecord(pipeline)) {
-    throw new DevtaskError(`No Bitbucket pipeline found for branch ${branch}`);
+    return null;
   }
   return pipeline;
 }

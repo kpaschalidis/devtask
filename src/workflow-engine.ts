@@ -1,7 +1,7 @@
 export const DEFAULT_DEV_WORKFLOW_STAGES = ["plan", "run", "check", "fix", "review", "approve", "commit", "pr", "ci"] as const;
 
 export type WorkflowStageId = (typeof DEFAULT_DEV_WORKFLOW_STAGES)[number];
-export type WorkflowUnitStatus = "passed" | "failed" | "skipped" | "started";
+export type WorkflowUnitStatus = "passed" | "failed" | "running" | "skipped" | "started";
 
 export interface WorkflowStageDefinition {
   id: WorkflowStageId;

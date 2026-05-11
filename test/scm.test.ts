@@ -117,4 +117,65 @@ describe("scm", () => {
       })
     );
   });
+
+  it("reports running Bitbucket pipelines without marking them failed", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    await runCommandOrThrow("git", ["remote", "add", "origin", "https://bitbucket.org/studio/backend.git"], {
+      cwd: repo
+    });
+    process.env.BITBUCKET_EMAIL = "devtask@example.local";
+    process.env.BITBUCKET_API_TOKEN = "token";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            values: [
+              {
+                build_number: 7270,
+                target: { ref_name: "task/cps-549" },
+                state: { name: "IN_PROGRESS" }
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      })
+    );
+
+    await expect(checkProviderCi(repo, "https://bitbucket.org/studio/backend/pull-requests/1", "task/cps-549")).resolves.toMatchObject({
+      provider: "bitbucket",
+      status: "running",
+      detail: "pipeline 7270: state=in_progress, result=-"
+    });
+  });
+
+  it("reports missing Bitbucket branch pipelines as unknown", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    await runCommandOrThrow("git", ["remote", "add", "origin", "https://bitbucket.org/studio/dragonfly.git"], {
+      cwd: repo
+    });
+    process.env.BITBUCKET_EMAIL = "devtask@example.local";
+    process.env.BITBUCKET_API_TOKEN = "token";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(JSON.stringify({ values: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      })
+    );
+
+    await expect(
+      checkProviderCi(repo, "https://bitbucket.org/studio/dragonfly/pull-requests/1", "task/dragonfly")
+    ).resolves.toMatchObject({
+      provider: "bitbucket",
+      status: "unknown",
+      detail: "No Bitbucket pipeline found for branch task/dragonfly",
+      url: null
+    });
+  });
 });
