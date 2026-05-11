@@ -453,6 +453,33 @@ export function createCli(): Command {
     });
 
   work
+    .command("logs")
+    .description("Print or follow logs for materialized repo tasks in a work item.")
+    .argument("<id>")
+    .option("--target <target-id>", "Only show logs for one workspace target")
+    .option("-n, --lines <count>", "Number of trailing lines to print", parsePositiveInteger, 120)
+    .option("-f, --follow", "Follow one target task log")
+    .action((id: string, options: { target?: string; lines: number; follow?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const tasks = selectWorkLogTasks(paths, item, options.target);
+        if (options.follow && tasks.length !== 1) {
+          throw new DevtaskError("Use --target when following work logs");
+        }
+
+        for (const [index, task] of tasks.entries()) {
+          if (index > 0) {
+            console.log("");
+          }
+          printWorkLog(task.target, task.repoPath, task.taskId, { lines: options.lines, follow: options.follow === true });
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("plan")
     .description("Create or refresh the proposed execution graph for a work item.")
     .argument("<id>")
@@ -2873,6 +2900,19 @@ function getWorkWorkflowUnits(paths: ReturnType<typeof resolvePaths>, item: Work
   }));
 }
 
+function selectWorkLogTasks(
+  paths: ReturnType<typeof resolvePaths>,
+  item: WorkItem,
+  target?: string
+): NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"] {
+  const tasks = getMaterializedWorkTasks(paths, item);
+  const selected = target ? tasks.filter((task) => task.target === target) : tasks;
+  if (selected.length === 0) {
+    throw new DevtaskError(target ? `Work item ${item.id} does not have target ${target}` : `Work item ${item.id} has no materialized tasks`);
+  }
+  return selected;
+}
+
 async function runWorkWorkflowStage(
   paths: ReturnType<typeof resolvePaths>,
   item: WorkItem,
@@ -3064,15 +3104,33 @@ function printGroupLog(
   taskId: string,
   options: { lines: number; follow: boolean }
 ): void {
+  printMaterializedTaskLog(`${repoName}/${taskId}`, repoPath, taskId, options);
+}
+
+function printWorkLog(
+  target: string,
+  repoPath: string,
+  taskId: string,
+  options: { lines: number; follow: boolean }
+): void {
+  printMaterializedTaskLog(`${target}/${taskId}`, repoPath, taskId, options);
+}
+
+function printMaterializedTaskLog(
+  label: string,
+  repoPath: string,
+  taskId: string,
+  options: { lines: number; follow: boolean }
+): void {
   const repoPaths = resolvePaths(repoPath);
   getTask(repoPaths, taskId);
   const logPath = readLatestLogPath(repoPaths, taskId);
   if (!logPath) {
-    console.log(`${repoName}/${taskId}: no logs`);
+    console.log(`${label}: no logs`);
     return;
   }
 
-  console.log(`${repoName}/${taskId}`);
+  console.log(label);
   console.log(`Log: ${logPath}`);
   if (options.follow) {
     followFile(logPath, options.lines);
