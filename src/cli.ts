@@ -503,6 +503,10 @@ export function createCli(): Command {
         const repoPaths = resolvePaths(task.repoPath);
         const meta = getTask(repoPaths, task.taskId);
         const session = options.stage ? stageTmuxSessionName(repoPaths, task.taskId, options.stage) : meta.tmuxSession ?? tmuxSessionName(repoPaths, task.taskId);
+        if (!tmuxSessionExists(session)) {
+          const status = meta.supervisorPid || meta.childPid ? `status: ${meta.status}, supervisor: ${meta.supervisorPid ?? "-"}` : `status: ${meta.status}`;
+          throw new DevtaskError(`No attachable session for ${task.target}/${task.taskId} (${status}).`);
+        }
         attachTmuxSession(session);
       } catch (error) {
         printError(error);
@@ -1612,6 +1616,10 @@ export function createCli(): Command {
         const repoPaths = resolvePaths(repo.path);
         const meta = getTask(repoPaths, repo.taskId);
         const session = meta.tmuxSession ?? tmuxSessionName(repoPaths, repo.taskId);
+        if (!tmuxSessionExists(session)) {
+          const status = meta.supervisorPid || meta.childPid ? `status: ${meta.status}, supervisor: ${meta.supervisorPid ?? "-"}` : `status: ${meta.status}`;
+          throw new DevtaskError(`No attachable session for ${repo.name}/${repo.taskId} (${status}).`);
+        }
         attachTmuxSession(session);
       } catch (error) {
         printError(error);
@@ -2516,6 +2524,10 @@ export function createCli(): Command {
         const paths = resolvePaths();
         const meta = getTask(paths, id);
         const session = options.stage ? stageTmuxSessionName(paths, id, options.stage) : meta.tmuxSession ?? tmuxSessionName(paths, id);
+        if (!tmuxSessionExists(session)) {
+          const status = meta.supervisorPid || meta.childPid ? `status: ${meta.status}, supervisor: ${meta.supervisorPid ?? "-"}` : `status: ${meta.status}`;
+          throw new DevtaskError(`No attachable session for ${id} (${status}).`);
+        }
         attachTmuxSession(session);
       } catch (error) {
         printError(error);

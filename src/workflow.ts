@@ -229,6 +229,10 @@ function describeLifecycle(review: TaskReview): { stage: string; status: string 
   }
 
   if (review.meta.status === "running") {
+    const fix = review.stages.stages.fix;
+    if (fix?.status === "running") {
+      return { stage: "fix", status: "running" };
+    }
     return { stage: "run", status: "running" };
   }
 

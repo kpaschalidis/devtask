@@ -52,6 +52,7 @@ export async function runWorker(id: string, options: WorkerOptions = {}): Promis
       ...meta,
       supervisorPid: meta.supervisorPid === process.pid ? null : meta.supervisorPid,
       childPid: meta.supervisorPid === process.pid ? null : meta.childPid,
+      tmuxSession: meta.supervisorPid === process.pid ? null : meta.tmuxSession,
       updatedAt: new Date().toISOString()
     }));
   }
