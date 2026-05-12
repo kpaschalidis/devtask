@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { writeTaskMeta } from "../src/meta.js";
+import { readTaskMeta, writeTaskMeta } from "../src/meta.js";
 import { resolvePaths, taskMetaPath } from "../src/paths.js";
 import { getTask, initializeStore } from "../src/task-store.js";
 import { recordStage, readStageLedger } from "../src/stage-contracts.js";
@@ -41,5 +41,46 @@ describe("task runtime reconciliation", () => {
     expect(reconciled.tmuxSession).toBeNull();
     expect(runStage?.status).toBe("failed");
     expect(runStage?.reason).toContain("recorded tmux session devtask-missing-session is not running");
+  });
+
+  it("does not overwrite a worker failure written after the stale snapshot was read", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(repo);
+    initializeStore(paths);
+    await createTask(paths, "task-123", { goal: "Test worker race" });
+
+    const metaPath = taskMetaPath(paths, "task-123");
+    const staleSnapshot = {
+      ...getTask(paths, "task-123"),
+      status: "running" as const,
+      supervisorPid: null,
+      childPid: null,
+      tmuxSession: "devtask-missing-session",
+      failCount: 0,
+      updatedAt: new Date().toISOString()
+    };
+
+    writeTaskMeta(metaPath, {
+      ...staleSnapshot,
+      status: "failed",
+      tmuxSession: null,
+      failCount: 3,
+      updatedAt: new Date().toISOString()
+    });
+    recordStage(paths, "task-123", "run", {
+      status: "failed",
+      output: {
+        failCount: 3
+      },
+      reason: "worker command failed"
+    });
+
+    const reconciled = getTask(paths, "task-123");
+    const stored = readTaskMeta(metaPath);
+    const runStage = readStageLedger(paths, "task-123").stages.run;
+
+    expect(reconciled.status).toBe("failed");
+    expect(stored.failCount).toBe(3);
+    expect(runStage?.reason).toBe("worker command failed");
   });
 });

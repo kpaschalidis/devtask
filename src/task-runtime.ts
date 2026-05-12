@@ -21,29 +21,34 @@ export function reconcileTaskRuntime(paths: DevtaskPaths, meta: TaskMeta): TaskM
     return meta;
   }
 
+  const latest = readTaskMeta(taskMetaPath(paths, meta.id));
+  if (latest.status !== "running") {
+    return latest;
+  }
+
   const now = new Date().toISOString();
   const next: TaskMeta = {
-    ...meta,
+    ...latest,
     status: "failed",
     supervisorPid: null,
     childPid: null,
     tmuxSession: null,
     updatedAt: now
   };
-  writeTaskMeta(taskMetaPath(paths, meta.id), next);
 
-  const runStage = readStageLedger(paths, meta.id).stages.run;
+  const runStage = readStageLedger(paths, latest.id).stages.run;
   if (runStage?.status === "running") {
-    recordStage(paths, meta.id, "run", {
+    recordStage(paths, latest.id, "run", {
       status: "failed",
       input: runStage.input,
       output: runStage.output,
       artifacts: runStage.artifacts,
-      reason: staleRuntimeReason(meta)
+      reason: staleRuntimeReason(latest)
     });
   }
 
-  return readTaskMeta(taskMetaPath(paths, meta.id));
+  writeTaskMeta(taskMetaPath(paths, latest.id), next);
+  return readTaskMeta(taskMetaPath(paths, latest.id));
 }
 
 function staleRuntimeReason(meta: TaskMeta): string {
