@@ -206,6 +206,58 @@ describe("work runner", () => {
       ]
     });
   });
+
+  it("allows failed run-stage tasks to be retried", async () => {
+    const fixture = await makeFixture({ withDependency: false });
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
+    const backendMetaPath = taskMetaPath(fixture.backendPaths, "work-123-backend");
+    writeTaskMeta(backendMetaPath, {
+      ...readTaskMeta(backendMetaPath),
+      status: "failed"
+    });
+    recordStage(fixture.backendPaths, "work-123-backend", "run", {
+      status: "failed",
+      reason: "worker command failed"
+    });
+
+    expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
+      ready: [
+        {
+          target: "backend",
+          taskId: "work-123-backend",
+          status: "failed"
+        },
+        {
+          target: "frontend",
+          taskId: "work-123-frontend"
+        }
+      ]
+    });
+  });
+
+  it("does not retry non-run failed tasks during work run", async () => {
+    const fixture = await makeFixture({ withDependency: false });
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
+    const backendMetaPath = taskMetaPath(fixture.backendPaths, "work-123-backend");
+    writeTaskMeta(backendMetaPath, {
+      ...readTaskMeta(backendMetaPath),
+      status: "failed"
+    });
+    recordStage(fixture.backendPaths, "work-123-backend", "review", {
+      status: "failed",
+      reason: "review failed"
+    });
+
+    expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
+      skipped: expect.arrayContaining([
+        expect.objectContaining({
+          target: "backend",
+          taskId: "work-123-backend",
+          reason: "not runnable from failed"
+        })
+      ])
+    });
+  });
 });
 
 async function makeFixture(options: { withDependency: boolean; dependencyType?: "run" | "validation" }) {

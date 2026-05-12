@@ -122,6 +122,16 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
       continue;
     }
 
+    if (isRetryableRunFailure(repoPaths, task.taskId, meta.status)) {
+      ready.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        status: meta.status
+      });
+      continue;
+    }
+
     if (!RUNNABLE_STATUSES.includes(meta.status)) {
       skipped.push({
         target: task.target,
@@ -142,6 +152,13 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
   }
 
   return { ready, skipped };
+}
+
+export function isRetryableRunFailure(paths: DevtaskPaths, taskId: string, status?: TaskStatus): boolean {
+  if (status !== "failed") {
+    return false;
+  }
+  return readStageLedger(paths, taskId).stages.run?.status === "failed";
 }
 
 export function isWorkTaskRunComplete(paths: DevtaskPaths, taskId: string, status?: TaskStatus): boolean {

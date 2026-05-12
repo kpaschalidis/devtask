@@ -27,7 +27,7 @@ import { type WorkItem } from "../work-store.js";
 import { readLatestWorkPlanRecord, workGraphPath, workPlanPath, workPlansDir } from "../work-planner.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { buildWorkBoardRows, type WorkBoardRow } from "../work-board.js";
-import { isWorkTaskRunComplete, planWorkRun } from "../work-runner.js";
+import { isRetryableRunFailure, isWorkTaskRunComplete, planWorkRun } from "../work-runner.js";
 import { DEFAULT_DEV_WORKFLOW, runWorkflowStage, workflowStageFailed, type WorkflowStageId, type WorkflowUnit } from "../workflow-engine.js";
 import { createFixRequestFromCheck } from "../fix-request.js";
 import { readWorkStageLedger, WORK_STAGE_NAMES, type WorkStageContract } from "../work-stage-contracts.js";
@@ -671,10 +671,11 @@ export async function followWorkRun(
 ): Promise<void> {
   const intervalMs = options.poll * 1000;
   const announcedWaiting = new Set<string>();
+  const attemptedStarts = new Set<string>();
   console.log(`Following work run ${item.id}`);
 
   while (true) {
-    throwIfWorkRunFailed(paths, item);
+    throwIfWorkRunFailed(paths, item, attemptedStarts);
     const plan = planWorkRun(paths, item);
     const startResult = await runWorkflowStage(DEFAULT_DEV_WORKFLOW, plan.ready, {
       stage: "run",
@@ -682,6 +683,7 @@ export async function followWorkRun(
         const repoPaths = resolvePaths(task.repoPath);
         const runtime = resolveRunRuntime(repoPaths, options);
         printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running", workTaskRuntimeCommands(item.id, task.target));
+        attemptedStarts.add(workTaskKey(task.target, task.taskId));
         return { status: "started", detail: "worker started" };
       }
     });
@@ -711,13 +713,25 @@ export async function followWorkRun(
   }
 }
 
-function throwIfWorkRunFailed(paths: ReturnType<typeof resolvePaths>, item: WorkItem): void {
+function throwIfWorkRunFailed(paths: ReturnType<typeof resolvePaths>, item: WorkItem, attemptedStarts: Set<string>): void {
   const failed = getMaterializedWorkTasks(paths, item)
-    .map((task) => ({ task, meta: getTask(resolvePaths(task.repoPath), task.taskId) }))
-    .find(({ meta }) => meta.status === "failed" || meta.status === "blocked" || meta.status === "cancelled");
+    .map((task) => {
+      const repoPaths = resolvePaths(task.repoPath);
+      return { task, repoPaths, meta: getTask(repoPaths, task.taskId) };
+    })
+    .find(({ task, repoPaths, meta }) => {
+      if (meta.status === "failed" && isRetryableRunFailure(repoPaths, task.taskId, meta.status) && !attemptedStarts.has(workTaskKey(task.target, task.taskId))) {
+        return false;
+      }
+      return meta.status === "failed" || meta.status === "blocked" || meta.status === "cancelled";
+    });
   if (failed) {
     throw new DevtaskError(`${failed.task.target}/${failed.task.taskId} is ${failed.meta.status}. Inspect with devtask work board ${item.id}.`);
   }
+}
+
+function workTaskKey(target: string, taskId: string): string {
+  return `${target}/${taskId}`;
 }
 
 function isWorkRunComplete(paths: ReturnType<typeof resolvePaths>, item: WorkItem): boolean {
