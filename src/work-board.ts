@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { readConfig } from "./config.js";
 import { DevtaskError } from "./errors.js";
 import type { DevtaskPaths } from "./paths.js";
@@ -7,8 +6,8 @@ import { readStageLedger, STAGE_NAMES, type StageContract } from "./stage-contra
 import { buildTaskReview } from "./task-inspection.js";
 import { getTask } from "./task-store.js";
 import { readWorkMaterialization } from "./work-materializer.js";
-import { workGraphPath, workPlanPath } from "./work-planner.js";
 import { readWorkStageLedger, WORK_STAGE_NAMES, type WorkStageContract } from "./work-stage-contracts.js";
+import { getWorkSpecState } from "./work-spec-state.js";
 import { planWorkRun } from "./work-runner.js";
 import type { WorkItem } from "./work-store.js";
 import { buildBoardRow } from "./workflow.js";
@@ -28,9 +27,10 @@ export interface WorkBoardRow {
 }
 
 export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): Promise<WorkBoardRow[]> {
+  const spec = getWorkSpecState(paths, item);
   const materialization = readWorkMaterialization(paths, item.id);
   if (!materialization) {
-    return [buildUnmaterializedWorkRow(paths, item)];
+    return [buildUnmaterializedWorkRow(paths, item, spec)];
   }
 
   const runPlan = safePlanWorkRun(paths, item);
@@ -43,20 +43,28 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
       const config = readConfig(repoPaths);
       const row = buildBoardRow(await buildTaskReview(repoPaths, getTask(repoPaths, task.taskId)), config);
       const runSkipped = runSkippedByTask.get(task.taskId);
+      const specTask = spec.tasks.find((candidate) => candidate.taskId === task.taskId);
       const actionableRunSkip = runSkipped?.reason === "run complete" ? null : runSkipped;
-      const status = row.stage === "run" && runReadyTaskIds.has(task.taskId) ? "ready" : row.stage === "run" && actionableRunSkip ? "waiting" : row.status;
+      const waitingForSpec = spec.status !== "ready" && row.stage === "plan";
+      const status = waitingForSpec
+        ? specTaskStatus(spec.status, specTask)
+        : row.stage === "run" && runReadyTaskIds.has(task.taskId)
+          ? "ready"
+          : row.stage === "run" && actionableRunSkip
+            ? "waiting"
+            : row.status;
       rows.push({
         target: task.target,
         task: row.id,
-        stage: row.stage,
+        stage: waitingForSpec ? "spec" : row.stage,
         status,
         last: latestStageSummary(readStageLedger(repoPaths, task.taskId)),
-        blocked: actionableRunSkip?.reason ?? "-",
+        blocked: waitingForSpec ? specTask?.reason ?? spec.reason ?? "-" : actionableRunSkip?.reason ?? "-",
         check: row.check,
         review: row.review,
         pr: row.pr,
         updated: row.updated,
-        next: actionableRunSkip ? blockedWorkNext(item.id, actionableRunSkip.reason) : workLevelNext(item.id, row.stage, row.next)
+        next: waitingForSpec ? spec.next : actionableRunSkip ? blockedWorkNext(item.id, actionableRunSkip.reason) : workLevelNext(item.id, row.stage, row.next)
       });
     } catch (error) {
       if (!(error instanceof DevtaskError)) {
@@ -88,27 +96,48 @@ function blockedWorkNext(workId: string, reason: string): string {
   return reason;
 }
 
-function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem): WorkBoardRow {
-  const hasGraph = fs.existsSync(workGraphPath(paths, item.id));
-  const hasPlan = fs.existsSync(workPlanPath(paths, item.id));
+function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem, spec: ReturnType<typeof getWorkSpecState>): WorkBoardRow {
   const stages = readWorkStageLedger(paths, item.id);
   const latest = latestWorkStage(stages);
-  const readyForApproval = hasPlan && hasGraph;
-  const failedPlan = stages.stages.plan?.status === "failed";
-  const runningPlan = stages.stages.plan?.status === "running";
   return {
     target: "-",
     task: item.id,
-    stage: readyForApproval ? "spec" : latest?.stage ?? "plan",
-    status: readyForApproval ? "pending" : runningPlan ? "running" : failedPlan ? "failed" : "pending",
+    stage: "spec",
+    status: workSpecBoardStatus(spec.status),
     last: latest ? `${latest.stage} ${latest.status}` : "-",
-    blocked: latest?.reason ?? "-",
+    blocked: spec.reason ?? latest?.reason ?? "-",
     check: "-",
     review: "-",
     pr: "-",
     updated: latest?.finishedAt ?? latest?.startedAt ?? item.updatedAt,
-    next: `devtask work spec ${shellQuote(item.id)}${failedPlan ? " --refresh" : ""}`
+    next: spec.next
   };
+}
+
+function specTaskStatus(specStatus: ReturnType<typeof getWorkSpecState>["status"], task: ReturnType<typeof getWorkSpecState>["tasks"][number] | undefined): string {
+  if (specStatus === "repo-planning") {
+    return task?.status === "planned" ? "ready" : "running";
+  }
+  if (!task) {
+    return "pending";
+  }
+  if (task.status === "planned") {
+    return "ready";
+  }
+  return task.status;
+}
+
+function workSpecBoardStatus(status: ReturnType<typeof getWorkSpecState>["status"]): string {
+  if (status === "ready") {
+    return "pending";
+  }
+  if (status === "planning" || status === "repo-planning") {
+    return "running";
+  }
+  if (status === "needs-plan" || status === "needs-materialization" || status === "needs-repo-plan") {
+    return "pending";
+  }
+  return status;
 }
 
 function safePlanWorkRun(paths: DevtaskPaths, item: WorkItem): ReturnType<typeof planWorkRun> | null {

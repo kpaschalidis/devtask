@@ -7,6 +7,7 @@ import { buildTaskReview } from "../task-inspection.js";
 import { getTask } from "../task-store.js";
 import { approveWorkPlan, readWorkMaterialization } from "../work-materializer.js";
 import { runWorkPlanner, workGraphPath, workPlanPath } from "../work-planner.js";
+import { getWorkSpecState } from "../work-spec-state.js";
 import { readWorkStageLedger, runWorkStage } from "../work-stage-contracts.js";
 import type { WorkItem } from "../work-store.js";
 import { DEFAULT_DEV_WORKFLOW, type WorkflowStageId, workflowStageFailed } from "../workflow-engine.js";
@@ -46,6 +47,37 @@ export async function runWorkSpec(
       materialization = await materializeWorkPlan(paths, item);
     } else if (options.refresh) {
       throw new DevtaskError(`Work item ${item.id} has already been materialized. Refresh repo plans with devtask work repo-plan ${item.id} --refresh.`);
+    }
+
+    const specBeforeRepoPlan = getWorkSpecState(paths, item);
+    if (specBeforeRepoPlan.status === "repo-planning") {
+      console.log(`Repo planning is still running for ${item.id}.`);
+      console.log(`Next: ${specBeforeRepoPlan.next}`);
+      const repoPlans = specBeforeRepoPlan.tasks.map((task) => ({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        planPath: task.planPath,
+        status: task.status === "planned" ? "existing" : "started"
+      }));
+      return {
+        result: repoPlans,
+        final: {
+          status: "running",
+          output: {
+            taskCount: materialization.tasks.length,
+            repoPlanCount: repoPlans.length,
+            startedCount: repoPlans.filter((result) => result.status === "started").length
+          },
+          artifacts: [
+            workPlanPath(paths, item.id),
+            workGraphPath(paths, item.id),
+            workItemMaterializationPath(paths, item.id),
+            ...repoPlans.map((result) => result.planPath)
+          ],
+          reason: specBeforeRepoPlan.reason
+        }
+      };
     }
 
     const repoPlans = await runRepoPlansForSpec(paths, item, options);
@@ -157,9 +189,10 @@ async function runRepoPlansForSpec(
     return {
       result: repoPlanResults,
       final: {
-        status: repoPlanResults.every((result) => ["planned", "existing", "started"].includes(result.status)) ? "passed" : "failed",
+        status: repoPlanStageStatus(repoPlanResults),
         output: {
-          taskCount: repoPlanResults.length
+          taskCount: repoPlanResults.length,
+          startedCount: repoPlanResults.filter((result) => result.status === "started").length
         },
         artifacts: repoPlanResults.map((result) => result.planPath)
       }
@@ -185,6 +218,10 @@ function repoPlanStageStatus(results: Awaited<ReturnType<typeof runWorkRepoPlans
 }
 
 export function assertRepoPlansReady(paths: ReturnType<typeof resolveWorkspacePaths>, item: WorkItem): Array<{ target: string; taskId: string; planPath: string }> {
+  const spec = getWorkSpecState(paths, item);
+  if (spec.status !== "ready") {
+    throw new DevtaskError(`Work spec ${item.id} is not ready for approval: ${spec.reason ?? spec.status}. Next: ${spec.next}`);
+  }
   const materialization = readWorkMaterialization(paths, item.id);
   if (!materialization) {
     throw new DevtaskError(`Work item ${item.id} has not been materialized. Run devtask work spec ${item.id} first.`);
@@ -381,13 +418,13 @@ function assertSpecApproved(paths: ReturnType<typeof resolveWorkspacePaths>, ite
 }
 
 export function workNextCommand(paths: ReturnType<typeof resolveWorkspacePaths>, item: WorkItem): string {
-  const ledger = readWorkStageLedger(paths, item.id);
-  const materialization = readWorkMaterialization(paths, item.id);
-  if (!materialization) {
-    return `devtask work spec ${shellQuote(item.id)}`;
+  const spec = getWorkSpecState(paths, item);
+  if (spec.status !== "ready") {
+    return spec.next;
   }
+  const ledger = readWorkStageLedger(paths, item.id);
   if (ledger.stages["approve-spec"]?.status !== "passed") {
-    return `devtask work approve-spec ${shellQuote(item.id)}`;
+    return spec.next;
   }
   if (ledger.stages.exec?.status !== "passed") {
     return `devtask work exec ${shellQuote(item.id)} --auto`;

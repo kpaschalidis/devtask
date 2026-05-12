@@ -770,7 +770,7 @@ export function createCli(): Command {
         }
         await runWorkSpec(paths, item, options);
         console.log("");
-        console.log(`Next: devtask work approve-spec ${shellQuote(item.id)}`);
+        console.log(`Next: ${workNextCommand(paths, item)}`);
         await updateRecentWork(paths, item);
       } catch (error) {
         printError(error);

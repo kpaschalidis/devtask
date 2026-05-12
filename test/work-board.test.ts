@@ -28,10 +28,10 @@ describe("work board", () => {
       expect.objectContaining({
         target: "-",
         task: "WORK-123",
-        stage: "plan",
+        stage: "spec",
         status: "pending",
         last: "-",
-        blocked: "-",
+        blocked: "workspace plan is missing",
         next: "devtask work spec WORK-123"
       })
     ]);
@@ -55,7 +55,7 @@ describe("work board", () => {
       expect.objectContaining({
         target: "-",
         task: "WORK-123",
-        stage: "plan",
+        stage: "spec",
         status: "failed",
         last: "plan failed",
         blocked: "planner exited without producing valid plan artifacts",
@@ -124,7 +124,7 @@ describe("work board", () => {
 
     await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
       expect.objectContaining({
-        stage: "plan",
+        stage: "spec",
         next: "devtask work spec WORK-123"
       })
     ]);
@@ -173,10 +173,126 @@ describe("work board", () => {
       expect.objectContaining({
         target: "backend",
         task: "work-123-backend",
-        stage: "plan",
-        status: "pending",
-        blocked: "needs repo-plan",
+        stage: "spec",
+        status: "missing",
+        blocked: "repo plan is missing",
         next: "devtask work spec WORK-123"
+      })
+    ]);
+  });
+
+  it("shows running repo planning as spec progress instead of approval-ready", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-repo-planning-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Implement work"
+    });
+    addWorkspaceTarget(paths, {
+      id: "backend",
+      repoPath: repo,
+      kind: "api"
+    });
+    fs.writeFileSync(workPlanPath(paths, item.id), "# Plan\n");
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependencies: []
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+    await approveWorkPlan(paths, item);
+    const materialization = readWorkMaterialization(paths, item.id);
+    if (!materialization) {
+      throw new Error("Expected materialization");
+    }
+    const task = materialization.tasks[0];
+    const repoPaths = resolvePaths(task.repoPath);
+    recordStage(repoPaths, task.taskId, "plan", {
+      status: "running",
+      reason: "repo planning is running"
+    });
+
+    await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
+      expect.objectContaining({
+        target: "backend",
+        task: "work-123-backend",
+        stage: "spec",
+        status: "running",
+        blocked: "repo planning is running",
+        next: "devtask work board WORK-123"
+      })
+    ]);
+  });
+
+  it("uses work-level running repo-plan state before task ledgers are written", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-work-repo-planning-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Implement work"
+    });
+    addWorkspaceTarget(paths, {
+      id: "backend",
+      repoPath: repo,
+      kind: "api"
+    });
+    fs.writeFileSync(workPlanPath(paths, item.id), "# Plan\n");
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependencies: []
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+    await approveWorkPlan(paths, item);
+    recordWorkStage(paths, item.id, "repo-plan", {
+      status: "running",
+      reason: "repo planning is running"
+    });
+
+    await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
+      expect.objectContaining({
+        target: "backend",
+        task: "work-123-backend",
+        stage: "spec",
+        status: "running",
+        blocked: "repo plan is missing",
+        next: "devtask work board WORK-123"
       })
     ]);
   });
