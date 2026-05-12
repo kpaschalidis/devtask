@@ -8,6 +8,7 @@ import { buildTaskReview } from "./task-inspection.js";
 import { getTask } from "./task-store.js";
 import { readWorkMaterialization } from "./work-materializer.js";
 import { workGraphPath, workPlanPath } from "./work-planner.js";
+import { readWorkStageLedger, WORK_STAGE_NAMES, type WorkStageContract } from "./work-stage-contracts.js";
 import { planWorkRun } from "./work-runner.js";
 import type { WorkItem } from "./work-store.js";
 import { buildBoardRow } from "./workflow.js";
@@ -83,19 +84,23 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
 function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem): WorkBoardRow {
   const hasGraph = fs.existsSync(workGraphPath(paths, item.id));
   const hasPlan = fs.existsSync(workPlanPath(paths, item.id));
+  const stages = readWorkStageLedger(paths, item.id);
+  const latest = latestWorkStage(stages);
   const readyForApproval = hasPlan && hasGraph;
+  const failedPlan = stages.stages.plan?.status === "failed";
+  const runningPlan = stages.stages.plan?.status === "running";
   return {
     target: "-",
     task: item.id,
-    stage: readyForApproval ? "approve-plan" : "plan",
-    status: "pending",
-    last: "-",
-    blocked: "-",
+    stage: readyForApproval ? "approve-plan" : latest?.stage ?? "plan",
+    status: readyForApproval ? "pending" : runningPlan ? "running" : failedPlan ? "failed" : "pending",
+    last: latest ? `${latest.stage} ${latest.status}` : "-",
+    blocked: latest?.reason ?? "-",
     check: "-",
     review: "-",
     pr: "-",
-    updated: item.updatedAt,
-    next: readyForApproval ? `devtask work approve-plan ${shellQuote(item.id)}` : `devtask work plan ${shellQuote(item.id)}`
+    updated: latest?.finishedAt ?? latest?.startedAt ?? item.updatedAt,
+    next: readyForApproval ? `devtask work approve-plan ${shellQuote(item.id)}` : `devtask work plan ${shellQuote(item.id)}${failedPlan ? " --refresh" : ""}`
   };
 }
 
@@ -115,7 +120,14 @@ function latestStageSummary(ledger: ReturnType<typeof readStageLedger>): string 
   return latest ? `${latest.stage} ${latest.status}` : "-";
 }
 
-function stageTime(stage: StageContract): number {
+function latestWorkStage(ledger: ReturnType<typeof readWorkStageLedger>): WorkStageContract | null {
+  return WORK_STAGE_NAMES.map((stage) => ledger.stages[stage])
+    .filter((stage): stage is WorkStageContract => Boolean(stage))
+    .sort((a, b) => stageTime(b) - stageTime(a))
+    .at(0) ?? null;
+}
+
+function stageTime(stage: { finishedAt: string | null; startedAt: string | null }): number {
   const value = Date.parse(stage.finishedAt ?? stage.startedAt ?? "");
   return Number.isFinite(value) ? value : 0;
 }

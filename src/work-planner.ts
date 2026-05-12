@@ -32,6 +32,10 @@ export interface WorkPlanStart {
   graphPath: string;
 }
 
+export function workPlansDir(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "plans");
+}
+
 export function workPlanPath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemDir(paths, id), "plan.md");
 }
@@ -56,7 +60,7 @@ export async function runWorkPlanner(
 ): Promise<WorkPlanRecord> {
   const planId = newRunId();
   const dir = workItemDir(paths, workItem.id);
-  const runsDir = path.join(dir, "plans");
+  const runsDir = workPlansDir(paths, workItem.id);
   fs.mkdirSync(runsDir, { recursive: true });
 
   const promptPath = path.join(runsDir, `${planId}.prompt.md`);
@@ -119,6 +123,25 @@ export async function runWorkPlanner(
   };
   fs.writeFileSync(path.join(runsDir, `${planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
   return record;
+}
+
+export function readLatestWorkPlanRecord(paths: DevtaskPaths, id: string): WorkPlanRecord | null {
+  const runsDir = workPlansDir(paths, id);
+  if (!fs.existsSync(runsDir)) {
+    return null;
+  }
+
+  const latest = fs
+    .readdirSync(runsDir)
+    .filter((file) => file.endsWith(".json"))
+    .sort()
+    .at(-1);
+
+  if (!latest) {
+    return null;
+  }
+
+  return JSON.parse(fs.readFileSync(path.join(runsDir, latest), "utf8")) as WorkPlanRecord;
 }
 
 export function buildWorkPlanPromptForTest(

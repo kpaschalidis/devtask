@@ -10,7 +10,8 @@ import {
   resolveWorkspacePaths,
   resolveWorkspacePathsForInit,
   scriptsDir,
-  taskMetaPath
+  taskMetaPath,
+  workItemMaterializationPath
 } from "./paths.js";
 import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
@@ -65,6 +66,7 @@ import { runWorkPlanner, workGraphPath, workPlanPath } from "./work-planner.js";
 import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
 import { buildWorkBoardRows, type WorkBoardRow } from "./work-board.js";
 import { isWorkTaskRunComplete, planWorkRun } from "./work-runner.js";
+import { runWorkStage } from "./work-stage-contracts.js";
 import {
   DEFAULT_DEV_WORKFLOW,
   runWorkflowStage,
@@ -116,9 +118,11 @@ import {
   printWorkflowStageResult,
   printWorkItems,
   printWorkLog,
+  printWorkPlanLog,
   printWorkPrPreflight,
   printWorkSummary,
   printWorkspaceTargets,
+  hasMaterializedWorkTasks,
   resolveAttachSession,
   resolvePrDraftMode,
   resolveRequestedLogStage,
@@ -134,9 +138,11 @@ import {
   tailFile,
   templateScriptPath,
   startWorker,
+  steerWorkPlan,
   steerTask,
   workflowCiStatus,
   workPrPreflightBlockers,
+  workPlanSessionName,
   type LogStage,
   type PrOptions
 } from "./cli/support.js";
@@ -520,7 +526,7 @@ export function createCli(): Command {
 
   work
     .command("logs")
-    .description("Print or follow logs for materialized repo tasks in a work item.")
+    .description("Print or follow logs for work planning or materialized repo tasks in a work item.")
     .argument("<id>")
     .option("--target <target-id>", "Only show logs for one workspace target")
     .option("--stage <stage>", "Stage output to show: current, latest, run, check, fix, or review", parseLogStage, "current")
@@ -530,6 +536,10 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
+        if (!hasMaterializedWorkTasks(paths, item)) {
+          printWorkPlanLog(paths, item, { lines: options.lines, follow: options.follow === true });
+          return;
+        }
         const tasks = selectWorkLogTasks(paths, item, options.target);
         const boardRows = options.stage === "current" ? await buildWorkBoardRows(paths, item) : [];
         if (options.follow && tasks.length !== 1) {
@@ -553,14 +563,29 @@ export function createCli(): Command {
 
   work
     .command("attach")
-    .description("Attach to one materialized repo task's tmux session in a work item.")
+    .description("Attach to a work planner or one materialized repo task's tmux session in a work item.")
     .argument("<id>")
-    .requiredOption("--target <target-id>", "Workspace target to attach")
+    .option("--target <target-id>", "Workspace target to attach")
     .option("--stage <stage>", "Attach to a lifecycle stage session such as run, fix, plan, or review")
-    .action((id: string, options: { target: string; stage?: string }) => {
+    .action((id: string, options: { target?: string; stage?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
+        if (!hasMaterializedWorkTasks(paths, item)) {
+          const stage = options.stage ?? "plan";
+          if (stage !== "plan") {
+            throw new DevtaskError(`Work item ${id} has not been materialized. Only stage plan is attachable before approve-plan.`);
+          }
+          const session = workPlanSessionName(paths, item.id);
+          if (!tmuxSessionExists(session)) {
+            throw new DevtaskError(`No attachable planning session for work item ${item.id}. Re-run devtask work plan ${item.id} in attachable mode.`);
+          }
+          attachTmuxSession(session);
+          return;
+        }
+        if (!options.target) {
+          throw new DevtaskError("Use --target to attach to a materialized repo task");
+        }
         const task = selectOneWorkTask(paths, item, options.target);
         const repoPaths = resolvePaths(task.repoPath);
         const meta = getTask(repoPaths, task.taskId);
@@ -577,17 +602,32 @@ export function createCli(): Command {
 
   work
     .command("steer")
-    .description("Send live feedback to one materialized repo task in a work item.")
+    .description("Send live feedback to a work planner or one materialized repo task in a work item.")
     .argument("<id>")
     .argument("[message...]")
-    .requiredOption("--target <target-id>", "Workspace target to steer")
+    .option("--target <target-id>", "Workspace target to steer")
     .option("-f, --file <path>", "Read feedback from a file")
     .option("-n, --lines <count>", "Capture this many lines after sending", parsePositiveInteger, 20)
     .option("--stage <stage>", "Steer a lifecycle stage session such as run, fix, plan, or review")
-    .action((id: string, messageParts: string[], options: { target: string; file?: string; lines: number; stage?: string }) => {
+    .action((id: string, messageParts: string[], options: { target?: string; file?: string; lines: number; stage?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
+        if (!hasMaterializedWorkTasks(paths, item)) {
+          const stage = options.stage ?? "plan";
+          if (stage !== "plan") {
+            throw new DevtaskError(`Work item ${id} has not been materialized. Only stage plan is steerable before approve-plan.`);
+          }
+          steerWorkPlan(paths, item, {
+            messageParts,
+            file: options.file,
+            lines: options.lines
+          });
+          return;
+        }
+        if (!options.target) {
+          throw new DevtaskError("Use --target to steer a materialized repo task");
+        }
         const task = selectOneWorkTask(paths, item, options.target);
         const repoPaths = resolvePaths(task.repoPath);
         steerTask(repoPaths, task.taskId, {
@@ -633,20 +673,42 @@ export function createCli(): Command {
         }
         const config = readConfig(paths);
         console.log(`Running work planner for ${item.id}`);
-        const record = await runWorkPlanner(paths, item, config, {
-          onStart: (start) => {
-            console.log(`Prompt: ${start.promptPath}`);
-            console.log(`Plan: ${start.planPath}`);
-            console.log(`Graph: ${start.graphPath}`);
-            console.log(`Output: ${start.outputPath}`);
-            console.log(`Command: ${start.command}`);
-          },
-          onStdout: (chunk) => {
-            process.stdout.write(chunk);
-          },
-          onStderr: (chunk) => {
-            process.stderr.write(chunk);
+        const record = await runWorkStage(paths, item.id, "plan", {
+          input: {
+            sourceType: item.source.type,
+            sourceArtifact: item.source.artifact
           }
+        }, async () => {
+          const planRecord = await runWorkPlanner(paths, item, config, {
+            onStart: (start) => {
+              console.log(`Prompt: ${start.promptPath}`);
+              console.log(`Plan: ${start.planPath}`);
+              console.log(`Graph: ${start.graphPath}`);
+              console.log(`Output: ${start.outputPath}`);
+              console.log(`Command: ${start.command}`);
+            },
+            onStdout: (chunk) => {
+              process.stdout.write(chunk);
+            },
+            onStderr: (chunk) => {
+              process.stderr.write(chunk);
+            }
+          });
+          return {
+            result: planRecord,
+            final: {
+              status: planRecord.status === "planned" ? "passed" : "failed",
+              output: {
+                planId: planRecord.planId,
+                exitCode: planRecord.exitCode,
+                planPath: planRecord.planPath,
+                graphPath: planRecord.graphPath,
+                outputPath: planRecord.outputPath
+              },
+              artifacts: [planRecord.promptPath, planRecord.outputPath, planRecord.planPath, planRecord.graphPath],
+              reason: planRecord.status === "failed" ? "planner exited without producing valid plan artifacts" : null
+            }
+          };
         });
         console.log(`Plan: ${record.status}`);
         console.log(`File: ${record.planPath}`);
@@ -668,7 +730,25 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const materialization = await approveWorkPlan(paths, item);
+        const materialization = await runWorkStage(paths, item.id, "approve-plan", {
+          input: {
+            planPath: workPlanPath(paths, item.id),
+            graphPath: workGraphPath(paths, item.id)
+          }
+        }, async () => {
+          const result = await approveWorkPlan(paths, item);
+          return {
+            result,
+            final: {
+              status: "passed",
+              output: {
+                taskCount: result.tasks.length,
+                materializedAt: result.materializedAt
+              },
+              artifacts: [result.approvedGraphPath, workItemMaterializationPath(paths, item.id)]
+            }
+          };
+        });
         await updateRecentWork(paths, item);
         console.log(`Approved work plan ${id}`);
         console.log(`Materialization: ${materialization.tasks.length} task(s)`);
@@ -695,7 +775,23 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const results = await runWorkRepoPlans(paths, item, options);
+        const results = await runWorkStage(paths, item.id, "repo-plan", {
+          input: {
+            refresh: options.refresh === true
+          }
+        }, async () => {
+          const repoPlanResults = await runWorkRepoPlans(paths, item, options);
+          return {
+            result: repoPlanResults,
+            final: {
+              status: repoPlanResults.every((result) => ["planned", "existing", "started"].includes(result.status)) ? "passed" : "failed",
+              output: {
+                taskCount: repoPlanResults.length
+              },
+              artifacts: repoPlanResults.map((result) => result.planPath)
+            }
+          };
+        });
         if (results.length === 0) {
           console.log(`No materialized tasks for work item ${id}`);
           return;

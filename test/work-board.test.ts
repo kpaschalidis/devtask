@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { planMarkdownPath, resolvePaths, resolveWorkspacePathsForInit, taskMetaPath } from "../src/paths.js";
 import { readTaskMeta, writeTaskMeta } from "../src/meta.js";
 import { recordStage } from "../src/stage-contracts.js";
+import { recordWorkStage } from "../src/work-stage-contracts.js";
 import { initializeWorkspace } from "../src/task-store.js";
 import { buildWorkBoardRows } from "../src/work-board.js";
 import { approveWorkPlan, readWorkMaterialization } from "../src/work-materializer.js";
@@ -32,6 +33,33 @@ describe("work board", () => {
         last: "-",
         blocked: "-",
         next: "devtask work plan WORK-123"
+      })
+    ]);
+  });
+
+  it("shows failed workspace planning explicitly before materialization", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-plan-failed-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Plan work"
+    });
+    recordWorkStage(paths, item.id, "plan", {
+      status: "failed",
+      reason: "planner exited without producing valid plan artifacts",
+      artifacts: [path.join(workspace, ".devtask", "work", item.id, "plans", "latest.md")]
+    });
+
+    await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
+      expect.objectContaining({
+        target: "-",
+        task: "WORK-123",
+        stage: "plan",
+        status: "failed",
+        last: "plan failed",
+        blocked: "planner exited without producing valid plan artifacts",
+        next: "devtask work plan WORK-123 --refresh"
       })
     ]);
   });

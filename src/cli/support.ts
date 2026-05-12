@@ -24,12 +24,13 @@ import { assertCheckReady, assertCiReady, assertCommitReady, assertPrReady, asse
 import { renderJiraIssueMarkdown, type JiraIssue } from "../jira.js";
 import { type WorkspaceTarget } from "../workspace-targets.js";
 import { type WorkItem } from "../work-store.js";
-import { workGraphPath, workPlanPath } from "../work-planner.js";
+import { readLatestWorkPlanRecord, workGraphPath, workPlanPath, workPlansDir } from "../work-planner.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { buildWorkBoardRows, type WorkBoardRow } from "../work-board.js";
 import { isWorkTaskRunComplete, planWorkRun } from "../work-runner.js";
 import { DEFAULT_DEV_WORKFLOW, runWorkflowStage, workflowStageFailed, type WorkflowStageId, type WorkflowUnit } from "../workflow-engine.js";
 import { createFixRequestFromCheck } from "../fix-request.js";
+import { readWorkStageLedger, WORK_STAGE_NAMES, type WorkStageContract } from "../work-stage-contracts.js";
 
 
 export function printError(error: unknown): never {
@@ -291,6 +292,24 @@ export function steerTask(
   }
 }
 
+export function steerWorkPlan(
+  paths: ReturnType<typeof resolveWorkspacePaths>,
+  item: WorkItem,
+  options: { messageParts: string[]; file?: string; lines: number }
+): void {
+  const session = workPlanSessionName(paths, item.id);
+  if (!tmuxSessionExists(session)) {
+    throw new DevtaskError(`Work item ${item.id} is not running in an attachable planning session. Re-run devtask work plan ${item.id} in attachable mode.`);
+  }
+  const message = readSteerMessage(paths.root, options.file, options.messageParts);
+  const result = sendToTmuxSessionWithConfirmation(session, message, { lines: options.lines });
+  console.log(result.confirmed ? "Message sent; terminal output changed" : "Message sent; no terminal change observed yet");
+  if (result.output.trim()) {
+    console.log("");
+    console.log(result.output.trimEnd());
+  }
+}
+
 export function printTable(headers: string[], rows: string[][]): void {
   const widths = headers.map((header, index) =>
     Math.max(header.length, ...rows.map((row) => displayWidth(row[index] ?? "")))
@@ -328,6 +347,13 @@ export async function printWorkSummary(paths: ReturnType<typeof resolveWorkspace
   console.log(`Source: ${formatWorkSource(item)}`);
   console.log(`Created: ${item.createdAt}`);
   console.log(`Updated: ${item.updatedAt}`);
+  const latestStage = latestWorkStage(readWorkStageLedger(paths, item.id));
+  if (latestStage) {
+    console.log(`Latest stage: ${latestStage.stage} ${latestStage.status}`);
+    if (latestStage.reason) {
+      console.log(`Latest reason: ${latestStage.reason}`);
+    }
+  }
 
   const planPath = workPlanPath(paths, item.id);
   const graphPath = workGraphPath(paths, item.id);
@@ -479,6 +505,10 @@ export function selectWorkLogTasks(
   target?: string
 ): NonNullable<ReturnType<typeof readWorkMaterialization>>["tasks"] {
   return selectWorkTasks(paths, item, target);
+}
+
+export function hasMaterializedWorkTasks(paths: ReturnType<typeof resolvePaths>, item: WorkItem): boolean {
+  return readWorkMaterialization(paths, item.id) !== null;
 }
 
 export function selectOneWorkTask(
@@ -706,6 +736,33 @@ export function printWorkLog(
   printStageTaskLog(`${target}/${taskId}`, repoPath, taskId, options);
 }
 
+export function printWorkPlanLog(
+  paths: ReturnType<typeof resolveWorkspacePaths>,
+  item: WorkItem,
+  options: { lines: number; follow: boolean }
+): void {
+  const ledger = readWorkStageLedger(paths, item.id);
+  const artifactPath = ledger.stages.plan?.artifacts.find((artifact) => artifact.endsWith(".md") && !artifact.endsWith(".prompt.md"));
+  const record = readLatestWorkPlanRecord(paths, item.id);
+  const logPath = artifactPath ?? record?.outputPath ?? latestWorkPlannerOutputPath(paths, item.id);
+  if (!logPath) {
+    console.log(`Work ${item.id}: no planning logs`);
+    return;
+  }
+
+  console.log(`Work ${item.id} plan`);
+  console.log(`Log: ${logPath}`);
+  if (options.follow) {
+    followFile(logPath, options.lines);
+    return;
+  }
+  console.log(tailFile(logPath, options.lines));
+}
+
+export function workPlanSessionName(paths: ReturnType<typeof resolveWorkspacePaths>, id: string): string {
+  return `${tmuxSessionName(paths, id)}-work-plan`;
+}
+
 function printMaterializedTaskLog(
   label: string,
   repoPath: string,
@@ -800,6 +857,30 @@ function printFileLog(label: string, filePath: string, options: { lines: number;
     return;
   }
   console.log(tailFile(filePath, options.lines));
+}
+
+function latestWorkPlannerOutputPath(paths: ReturnType<typeof resolveWorkspacePaths>, id: string): string | null {
+  const runsDir = workPlansDir(paths, id);
+  if (!fs.existsSync(runsDir)) {
+    return null;
+  }
+  const latest = fs
+    .readdirSync(runsDir)
+    .filter((file) => file.endsWith(".md") && !file.endsWith(".prompt.md"))
+    .sort()
+    .at(-1);
+  return latest ? path.join(runsDir, latest) : null;
+}
+
+function latestWorkStage(ledger: ReturnType<typeof readWorkStageLedger>): WorkStageContract | null {
+  return WORK_STAGE_NAMES.map((stage) => ledger.stages[stage])
+    .filter((stage): stage is WorkStageContract => Boolean(stage))
+    .sort((a, b) => {
+      const aTime = Date.parse(a.finishedAt ?? a.startedAt ?? "");
+      const bTime = Date.parse(b.finishedAt ?? b.startedAt ?? "");
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    })
+    .at(0) ?? null;
 }
 
 interface TaskLogArtifacts {

@@ -62,6 +62,15 @@ describe("work logs", () => {
     expect(output).toContain("backend/work-123-backend fix");
     expect(output).toContain("fix log");
   });
+
+  it("shows workspace planning output before materialization", async () => {
+    const { workspace } = createUnmaterializedWorkItemWithPlanOutput();
+    process.chdir(workspace);
+    const output = await runCli(["work", "logs", "WORK-PLAN"]);
+
+    expect(output).toContain("Work WORK-PLAN plan");
+    expect(output).toContain("planner output");
+  });
 });
 
 describe("work target selection", () => {
@@ -222,6 +231,20 @@ function addFixLog(workspace: string): void {
     artifacts: [fixLogPath],
     reason: "worker command failed while applying fix"
   });
+}
+
+function createUnmaterializedWorkItemWithPlanOutput(): { workspace: string } {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-plan-logs-"));
+  const paths = resolveWorkspacePathsForInit(workspace);
+  initializeWorkspace(paths);
+  createManualWorkItem(paths, {
+    id: "WORK-PLAN",
+    title: "Plan work"
+  });
+  const plansDir = path.join(workspace, ".devtask", "work", "WORK-PLAN", "plans");
+  fs.mkdirSync(plansDir, { recursive: true });
+  fs.writeFileSync(path.join(plansDir, "2026-05-12T10-00-00-000Z.md"), "planner output\n");
+  return { workspace };
 }
 
 async function createTwoTargetWorkItem(): Promise<{ workspace: string }> {
