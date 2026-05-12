@@ -104,6 +104,8 @@ devtask task attach <task-id>
 
 - [Getting Started](docs/getting-started.md)
 - [Auth And Environment](docs/auth-and-environment.md)
+- [Storage Model](docs/storage-model.md)
+- [UI Direction](docs/ui-direction.md)
 - [Workspace And Work Contracts](docs/work-contracts.md)
 - [Lifecycle Contracts](docs/lifecycle-contracts.md)
 - [Task Commands](docs/task-commands.md)
