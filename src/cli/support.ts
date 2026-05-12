@@ -1582,7 +1582,7 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
     throw error;
   };
 
-  const workerPath = fileURLToPath(new URL("./bin/devtask-worker.js", import.meta.url));
+  const workerPath = resolveWorkerExecutablePath();
   const workerCommand = [process.execPath, workerPath, id, "--root", paths.root];
 
   if (options.tmux) {
@@ -1649,6 +1649,19 @@ function createStartupLogPath(paths: ReturnType<typeof resolvePaths>, id: string
   fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return path.join(dir, `${stamp}.log`);
+}
+
+export function resolveWorkerExecutablePath(argvPath = process.argv[1]): string {
+  const candidates = [
+    argvPath ? path.join(path.dirname(argvPath), "devtask-worker.js") : null,
+    fileURLToPath(new URL("../bin/devtask-worker.js", import.meta.url))
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  const found = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!found) {
+    throw new DevtaskError(`Unable to find devtask worker executable. Checked: ${candidates.join(", ")}`);
+  }
+  return found;
 }
 
 function tmuxWrappedWorkerCommand(workerCommand: string[], startupLog: string): string[] {
