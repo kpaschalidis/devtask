@@ -104,11 +104,14 @@ export function getWorkSpecState(paths: DevtaskPaths, item: WorkItem): WorkSpecS
     return state("failed", `devtask work spec ${shellQuote(item.id)}`, "one or more repo plans failed", tasks);
   }
 
-  if (workRepoPlanningRunning || tasks.some((task) => task.status === "running")) {
+  if (tasks.some((task) => task.status === "running")) {
     return state("repo-planning", `devtask work board ${shellQuote(item.id)}`, "repo planning is running", tasks);
   }
 
   if (tasks.some((task) => task.status === "missing")) {
+    if (workRepoPlanningRunning) {
+      return state("repo-planning", `devtask work board ${shellQuote(item.id)}`, "repo planning is running", tasks);
+    }
     return state("needs-repo-plan", `devtask work spec ${shellQuote(item.id)}`, "one or more repo plans are missing", tasks);
   }
 

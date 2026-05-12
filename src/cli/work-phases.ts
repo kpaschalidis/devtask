@@ -52,7 +52,6 @@ export async function runWorkSpec(
     const specBeforeRepoPlan = getWorkSpecState(paths, item);
     if (specBeforeRepoPlan.status === "repo-planning") {
       console.log(`Repo planning is still running for ${item.id}.`);
-      console.log(`Next: ${specBeforeRepoPlan.next}`);
       const repoPlans = specBeforeRepoPlan.tasks.map((task) => ({
         target: task.target,
         taskId: task.taskId,
