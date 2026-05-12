@@ -65,12 +65,7 @@ export function assertJiraConfigured(config: DevtaskConfig): JiraAuth {
 
 export async function fetchJiraIssue(config: DevtaskConfig, issueKey: string): Promise<JiraIssue> {
   const auth = assertJiraConfigured(config);
-  const response = await fetch(`${auth.apiBaseUrl}/issue/${encodeURIComponent(issueKey)}`, {
-    headers: {
-      Authorization: jiraAuthHeader(auth),
-      Accept: "application/json"
-    }
-  });
+  const response = await fetchJiraWithAuthFallback(auth, `/issue/${encodeURIComponent(issueKey)}`);
 
   if (!response.ok) {
     throw new DevtaskError(`Jira issue fetch failed: ${response.status} ${await response.text()}`);
@@ -81,12 +76,7 @@ export async function fetchJiraIssue(config: DevtaskConfig, issueKey: string): P
 
 export async function checkJiraAuth(config: DevtaskConfig): Promise<{ accountId: string | null; displayName: string | null; mode: JiraAuth["mode"] }> {
   const auth = assertJiraConfigured(config);
-  const response = await fetch(`${auth.apiBaseUrl}/myself`, {
-    headers: {
-      Authorization: jiraAuthHeader(auth),
-      Accept: "application/json"
-    }
-  });
+  const response = await fetchJiraWithAuthFallback(auth, "/myself");
   if (!response.ok) {
     throw new DevtaskError(`Jira auth check failed: ${response.status} ${await response.text()}`);
   }
@@ -108,8 +98,33 @@ function jiraApiBaseUrl(config: DevtaskConfig): string {
   return `${config.jira.baseUrl}/rest/api/3`;
 }
 
-function jiraAuthHeader(auth: JiraAuth): string {
-  return `Basic ${Buffer.from(`${auth.email}:${auth.token}`).toString("base64")}`;
+async function fetchJiraWithAuthFallback(auth: JiraAuth, apiPath: string): Promise<Response> {
+  let lastResponse: Response | null = null;
+  for (const authorization of jiraAuthHeaders(auth)) {
+    const response = await fetch(`${auth.apiBaseUrl}${apiPath}`, {
+      headers: {
+        Authorization: authorization,
+        Accept: "application/json"
+      }
+    });
+    if (response.ok || !shouldTryNextJiraAuth(response.status)) {
+      return response;
+    }
+    lastResponse = response;
+  }
+  return lastResponse ?? new Response("No Jira auth methods available", { status: 401 });
+}
+
+function jiraAuthHeaders(auth: JiraAuth): string[] {
+  const basic = `Basic ${Buffer.from(`${auth.email}:${auth.token}`).toString("base64")}`;
+  if (auth.mode === "gateway") {
+    return [`Bearer ${auth.token}`, basic];
+  }
+  return [basic];
+}
+
+function shouldTryNextJiraAuth(status: number): boolean {
+  return status === 401 || status === 403 || status === 404;
 }
 
 export function normalizeJiraIssue(value: JiraFetchResponse, baseUrl: string): JiraIssue {

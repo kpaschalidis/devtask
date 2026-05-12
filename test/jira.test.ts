@@ -97,9 +97,12 @@ describe("jira source integration", () => {
 
   it("uses Atlassian gateway URLs when cloudId is configured", async () => {
     process.env.JIRA_API_TOKEN = "token";
-    const calls: string[] = [];
-    globalThis.fetch = (async (url: string | URL | Request) => {
-      calls.push(String(url));
+    const calls: Array<{ url: string; authorization: string | null }> = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization")
+      });
       return new Response(
         JSON.stringify({
           key: "APP-123",
@@ -128,7 +131,54 @@ describe("jira source integration", () => {
       "APP-123"
     );
 
-    expect(calls[0]).toBe("https://api.atlassian.com/ex/jira/cloud-123/rest/api/3/issue/APP-123");
+    expect(calls[0]).toEqual({
+      url: "https://api.atlassian.com/ex/jira/cloud-123/rest/api/3/issue/APP-123",
+      authorization: "Bearer token"
+    });
+  });
+
+  it("falls back to Basic auth for gateway issue reads when Bearer auth is rejected", async () => {
+    process.env.JIRA_API_TOKEN = "token";
+    const calls: Array<{ url: string; authorization: string | null }> = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get("authorization");
+      calls.push({ url: String(url), authorization });
+      if (authorization?.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ errorMessages: ["scope does not match"] }), { status: 401 });
+      }
+      return new Response(
+        JSON.stringify({
+          key: "APP-123",
+          fields: {
+            summary: "Add billing export",
+            description: "Plain description"
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const issue = await fetchJiraIssue(
+      {
+        schemaVersion: 1,
+        codex: { model: null, fullAuto: true },
+        runtime: { mode: "plain", backend: null },
+        runtimeConfigured: false,
+        jira: {
+          baseUrl: "https://company.atlassian.net",
+          email: "dev@example.com",
+          cloudId: "cloud-123"
+        },
+        verify: []
+      },
+      "APP-123"
+    );
+
+    expect(issue.summary).toBe("Add billing export");
+    expect(calls.map((call) => call.authorization)).toEqual([
+      "Bearer token",
+      `Basic ${Buffer.from("dev@example.com:token").toString("base64")}`
+    ]);
   });
 
   it("checks Jira auth through the configured API mode", async () => {

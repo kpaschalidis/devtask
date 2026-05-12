@@ -163,11 +163,24 @@ The Jira token is account-level. When `cloudId` is configured, `devtask` calls A
 https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/...
 ```
 
+Gateway mode uses:
+
+```text
+Authorization: Bearer JIRA_API_TOKEN
+```
+
+If Bearer auth is rejected, devtask retries read requests with account-token Basic auth. Without `cloudId`, devtask calls the site URL directly and uses:
+
+```text
+Basic auth with email:JIRA_API_TOKEN
+```
+
 Quick checks:
 
 ```bash
 test -n "$JIRA_API_TOKEN"
 devtask jira doctor
+devtask jira doctor --issue <issue-key>
 ```
 
 ## Recommended Doctor Flow

@@ -48,7 +48,6 @@ import { assertCheckReady, assertCiReady, assertCommitReady, assertPrReady, asse
 import {
   assertJiraConfigured,
   buildJiraTaskGoal,
-  checkJiraAuth,
   fetchJiraIssue,
   renderJiraIssueMarkdown,
   writeJiraSourceArtifacts,
