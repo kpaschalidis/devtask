@@ -10,6 +10,7 @@ import { buildCodexCommand, readConfig } from "../config.js";
 import { parseManualStatus } from "../lifecycle.js";
 import { cleanupTask, planTaskCleanup, type CleanupOptions } from "../cleanup.js";
 import { assertReviewReady } from "../stage-policy.js";
+import { resolveTaskCommandTarget } from "../task-command-target.js";
 import { buildBoardRow, recommendNextAction } from "../workflow.js";
 import {
   approveTask,
@@ -610,8 +611,8 @@ export function registerTaskCommands(program: Command): void {
     .option("--stage <stage>", "Steer a lifecycle stage session such as run, fix, plan, or review")
     .action((id: string, messageParts: string[], options: { file?: string; lines: number; stage?: string }) => {
       try {
-        const paths = resolvePaths();
-        steerTask(paths, id, {
+        const target = resolveTaskCommandTarget(id);
+        steerTask(target.paths, target.taskId, {
           messageParts,
           file: options.file,
           lines: options.lines,
@@ -629,12 +630,12 @@ export function registerTaskCommands(program: Command): void {
     .option("--stage <stage>", "Attach to a lifecycle stage session such as run, fix, plan, or review")
     .action((id: string, options: { stage?: string }) => {
       try {
-        const paths = resolvePaths();
-        const meta = getTask(paths, id);
-        const session = resolveAttachSession(paths, meta, options.stage);
+        const target = resolveTaskCommandTarget(id);
+        const meta = getTask(target.paths, target.taskId);
+        const session = resolveAttachSession(target.paths, meta, options.stage);
         if (!tmuxSessionExists(session)) {
           const status = meta.supervisorPid || meta.childPid ? `status: ${meta.status}, supervisor: ${meta.supervisorPid ?? "-"}` : `status: ${meta.status}`;
-          throw new DevtaskError(`No attachable session for ${id} (${status}).`);
+          throw new DevtaskError(`No attachable session for ${target.displayId} (${status}).`);
         }
         attachTmuxSession(session);
       } catch (error) {
