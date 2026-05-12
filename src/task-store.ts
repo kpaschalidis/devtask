@@ -16,6 +16,7 @@ import { assertValidTaskId } from "./task-id.js";
 import { readTaskMeta, writeTaskMeta } from "./meta.js";
 import { createTaskWorktree } from "./git.js";
 import { DevtaskError } from "./errors.js";
+import { reconcileTaskRuntime } from "./task-runtime.js";
 import type { TaskMeta, TaskSummary } from "./types.js";
 import { buildCodexCommand, readConfig, writeConfig, DEFAULT_CONFIG } from "./config.js";
 
@@ -160,5 +161,5 @@ export function getTask(paths: DevtaskPaths, id: string): TaskMeta {
   if (!fs.existsSync(metaFile)) {
     throw new DevtaskError(`Task ${id} does not exist`);
   }
-  return readTaskMeta(metaFile);
+  return reconcileTaskRuntime(paths, readTaskMeta(metaFile));
 }
