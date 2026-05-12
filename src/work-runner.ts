@@ -78,6 +78,17 @@ export function planWorkRun(paths: DevtaskPaths, workItem: WorkItem): WorkRunPla
       continue;
     }
 
+    if (meta.status === "running") {
+      skipped.push({
+        target: task.target,
+        taskId: task.taskId,
+        repoPath: task.repoPath,
+        status: meta.status,
+        reason: "already running"
+      });
+      continue;
+    }
+
     if (isProcessAlive(meta.supervisorPid)) {
       skipped.push({
         target: task.target,

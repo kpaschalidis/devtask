@@ -178,6 +178,34 @@ describe("work runner", () => {
       ]
     });
   });
+
+  it("treats attachable running tasks as running even without a supervisor pid", async () => {
+    const fixture = await makeFixture({ withDependency: false });
+    markMaterializedTasksPlanned(fixture.paths, fixture.item.id);
+    const backendMetaPath = taskMetaPath(fixture.backendPaths, "work-123-backend");
+    writeTaskMeta(backendMetaPath, {
+      ...readTaskMeta(backendMetaPath),
+      status: "running",
+      supervisorPid: null,
+      tmuxSession: "devtask-backend-work-123-backend"
+    });
+
+    expect(planWorkRun(fixture.paths, fixture.item)).toMatchObject({
+      ready: [
+        {
+          target: "frontend",
+          taskId: "work-123-frontend"
+        }
+      ],
+      skipped: [
+        {
+          target: "backend",
+          taskId: "work-123-backend",
+          reason: "already running"
+        }
+      ]
+    });
+  });
 });
 
 async function makeFixture(options: { withDependency: boolean; dependencyType?: "run" | "validation" }) {

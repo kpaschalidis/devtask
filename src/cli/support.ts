@@ -58,12 +58,17 @@ export interface StartedWorker {
   tmuxSession: string | null;
 }
 
-export function printStartedWorker(id: string, started: StartedWorker, verb: "Running" | "Continuing" | "Fixing"): void {
+export function printStartedWorker(
+  id: string,
+  started: StartedWorker,
+  verb: "Running" | "Continuing" | "Fixing",
+  commands?: { attach: string; steer: string }
+): void {
   console.log(`${verb} task ${id}`);
   if (started.tmuxSession) {
     console.log(`tmux: ${started.tmuxSession}`);
-    console.log(`Attach: devtask task attach ${id}`);
-    console.log(`Steer: devtask task steer ${id} "message"`);
+    console.log(`Attach: ${commands?.attach ?? `devtask task attach ${id}`}`);
+    console.log(`Steer: ${commands?.steer ?? `devtask task steer ${id} "message"`}`);
     return;
   }
   console.log("Runtime: plain (attach/steer unavailable)");
@@ -635,7 +640,7 @@ export async function runReadyWorkTasks(
     run: async (task) => {
       const repoPaths = resolvePaths(task.repoPath);
       const runtime = resolveRunRuntime(repoPaths, options);
-      printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
+      printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running", workTaskRuntimeCommands(item.id, task.target));
       return { status: "started", detail: "worker started" };
     }
   });
@@ -646,6 +651,13 @@ export async function runReadyWorkTasks(
   if (plan.ready.length === 0 && plan.skipped.length === 0) {
     console.log(`No materialized tasks for work item ${item.id}`);
   }
+}
+
+function workTaskRuntimeCommands(workId: string, target: string): { attach: string; steer: string } {
+  return {
+    attach: `devtask work attach ${shellQuote(workId)} --target ${shellQuote(target)}`,
+    steer: `devtask work steer ${shellQuote(workId)} --target ${shellQuote(target)} "message"`
+  };
 }
 
 export async function followWorkRun(
@@ -665,7 +677,7 @@ export async function followWorkRun(
       run: async (task) => {
         const repoPaths = resolvePaths(task.repoPath);
         const runtime = resolveRunRuntime(repoPaths, options);
-        printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running");
+        printStartedWorker(`${task.target}/${task.taskId}`, startWorker(repoPaths, task.taskId, runtime), "Running", workTaskRuntimeCommands(item.id, task.target));
         return { status: "started", detail: "worker started" };
       }
     });
