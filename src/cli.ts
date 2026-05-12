@@ -178,6 +178,30 @@ export function createCli(): Command {
       }
     });
 
+  program
+    .command("attach")
+    .description("Shortcut for devtask work attach <id>.")
+    .argument("<id>")
+    .allowUnknownOption(true)
+    .argument("[args...]")
+    .action((id: string, args: string[]) => {
+      const cliPath = process.argv[1];
+      if (!cliPath) {
+        printError(new DevtaskError("Unable to determine devtask CLI path"));
+      }
+      const child = spawn(process.execPath, [cliPath, "work", "attach", id, ...args], {
+        cwd: process.cwd(),
+        stdio: "inherit",
+        env: process.env
+      });
+      child.once("error", (error) => {
+        printError(new DevtaskError(`Failed to attach to work item ${id}: ${error.message}`));
+      });
+      child.once("exit", (code) => {
+        process.exit(code ?? 1);
+      });
+    });
+
   const config = program.command("config").description("Show or update repo-local devtask configuration.");
 
   config
@@ -741,7 +765,7 @@ export function createCli(): Command {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        if (startStageSessionIfRequested(paths, item.id, "work-plan", ["work", "spec", id, "--plain", ...(options.refresh ? ["--refresh"] : [])], options)) {
+        if ((options.attachable || options.tmux) && startStageSessionIfRequested(paths, item.id, "work-plan", ["work", "spec", id, "--plain", ...(options.refresh ? ["--refresh"] : [])], options)) {
           return;
         }
         await runWorkSpec(paths, item, options);

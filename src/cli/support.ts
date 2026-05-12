@@ -571,7 +571,7 @@ export async function runWorkRepoPlans(
   for (const task of tasks) {
     const repoPaths = resolvePaths(task.repoPath);
     const meta = getTask(repoPaths, task.taskId);
-    if (!["created", "planned", "blocked"].includes(meta.status)) {
+    if (!isRepoPlanningAllowed(repoPaths, task.taskId, meta.status)) {
       throw new DevtaskError(`Task ${task.taskId} is ${meta.status}; repo planning is only available before the task runs`);
     }
 
@@ -607,6 +607,18 @@ export async function runWorkRepoPlans(
     });
   }
   return results;
+}
+
+function isRepoPlanningAllowed(paths: ReturnType<typeof resolvePaths>, taskId: string, status: ReturnType<typeof getTask>["status"]): boolean {
+  if (["created", "planned", "blocked"].includes(status)) {
+    return true;
+  }
+  if (status !== "failed") {
+    return false;
+  }
+
+  const stages = readStageLedger(paths, taskId).stages;
+  return stages.plan?.status === "failed" && !stages.run;
 }
 
 export async function runReadyWorkTasks(

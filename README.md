@@ -76,6 +76,7 @@ devtask work board APP-123
 devtask work show <work-id>
 devtask work board <work-id>
 devtask work next <work-id>
+devtask attach <work-id> --target <target-id>
 devtask work logs <work-id> --target <target-id> --stage run
 devtask work attach <work-id> --target <target-id>
 devtask work steer <work-id> --target <target-id> "Please keep this scoped."
