@@ -77,6 +77,12 @@ import { createFixRequestFromCheck } from "./fix-request.js";
 import { cleanupWorkItem } from "./work-cleanup.js";
 import { registerTaskCommands } from "./cli/task.js";
 import { registerJiraCommands } from "./cli/jira.js";
+import { registerRegistryCommands } from "./cli/registry.js";
+import {
+  globalIndexPath,
+  registerWorkspace,
+  updateRecentWork
+} from "./global-index.js";
 import {
   approveTask,
   checkCiForTask,
@@ -146,21 +152,24 @@ export function createCli(): Command {
 
   program
     .command("init")
-    .description("Initialize devtask storage in the current git repository or workspace.")
-    .option("--workspace", "Initialize a non-git workspace for work-item orchestration and helper scripts")
-    .action((options: { workspace?: boolean }) => {
+    .description("Initialize devtask workspace storage in the current directory or git repository.")
+    .option("--workspace", "Accepted for clarity; devtask init is workspace-first by default")
+    .option("--no-register", "Do not add this workspace to the global devtask index")
+    .action((options: { workspace?: boolean; register?: boolean }) => {
       try {
-        if (options.workspace) {
-          const paths = resolveWorkspacePathsForInit();
-          initializeWorkspace(paths);
-          console.log(`Initialized workspace ${paths.baseDir}`);
-          return;
-        }
-
-        const paths = resolvePaths();
+        const paths = resolveInitPaths();
+        const isRepoRoot = isGitRepoRoot(paths.root);
         const shouldConfigureRuntime = !hasRuntimeConfig(paths);
-        initializeStore(paths);
-        console.log(`Initialized ${paths.baseDir}`);
+        initializeWorkspace(paths);
+        if (isRepoRoot) {
+          initializeStore(paths);
+          ensureDefaultWorkspaceTarget(paths);
+        }
+        if (options.register !== false) {
+          const entry = registerWorkspace(paths);
+          console.log(`Registered workspace ${entry.id} in ${globalIndexPath()}`);
+        }
+        console.log(`Initialized workspace ${paths.baseDir}`);
         if (shouldConfigureRuntime) {
           configureRuntimeFromEnvironment(paths);
         } else {
@@ -359,10 +368,20 @@ export function createCli(): Command {
           scope: options.scope,
           kind: options.kind
         });
+        const repoPaths = resolvePaths(target.repoPath);
+        const shouldConfigureRuntime = !hasRuntimeConfig(repoPaths);
+        initializeStore(repoPaths);
+        if (shouldConfigureRuntime) {
+          configureRuntimeFromEnvironment(repoPaths);
+        }
         console.log(`Added target ${target.id}`);
         console.log(`Repo: ${target.repoPath}`);
         console.log(`Scope: ${target.scope ?? "."}`);
         console.log(`Kind: ${target.kind ?? "-"}`);
+        console.log(`Repo initialized: ${repoPaths.baseDir}`);
+        if (readConfig(repoPaths).verify.length === 0) {
+          console.log("Checks: not configured");
+        }
       } catch (error) {
         printError(error);
       }
@@ -427,6 +446,7 @@ export function createCli(): Command {
         console.log(`Created work item ${item.id}`);
         console.log(`Status: ${item.status}`);
         console.log(`Source: ${item.source.artifact}`);
+        await updateRecentWork(paths, item);
       } catch (error) {
         printError(error);
       }
@@ -632,6 +652,7 @@ export function createCli(): Command {
         console.log(`Plan: ${record.status}`);
         console.log(`File: ${record.planPath}`);
         console.log(`Graph: ${record.graphPath}`);
+        await updateRecentWork(paths, item);
         if (record.status === "failed") {
           process.exit(1);
         }
@@ -649,6 +670,7 @@ export function createCli(): Command {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
         const materialization = await approveWorkPlan(paths, item);
+        await updateRecentWork(paths, item);
         console.log(`Approved work plan ${id}`);
         console.log(`Materialization: ${materialization.tasks.length} task(s)`);
         for (const task of materialization.tasks) {
@@ -683,6 +705,7 @@ export function createCli(): Command {
           ["TARGET", "TASK", "STATUS", "PLAN"],
           results.map((result) => [result.target, result.taskId, result.status, result.planPath])
         );
+        await updateRecentWork(paths, item);
       } catch (error) {
         printError(error);
       }
@@ -706,6 +729,7 @@ export function createCli(): Command {
         } else {
           await runReadyWorkTasks(paths, item, options);
         }
+        await updateRecentWork(paths, item);
       } catch (error) {
         printError(error);
       }
@@ -736,6 +760,7 @@ export function createCli(): Command {
           };
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        await updateRecentWork(paths, item);
         if (workflowStageFailed(result)) {
           process.exit(1);
         }
@@ -770,6 +795,7 @@ export function createCli(): Command {
           };
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        await updateRecentWork(paths, item);
         if (workflowStageFailed(result)) {
           process.exit(1);
         }
@@ -799,6 +825,7 @@ export function createCli(): Command {
           return { status: "started", detail: `${request.source}:${request.fixId}` };
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        await updateRecentWork(paths, item);
         if (workflowStageFailed(result)) {
           process.exit(1);
         }
@@ -822,6 +849,7 @@ export function createCli(): Command {
           return { status: "passed", detail };
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        await updateRecentWork(paths, item);
         if (workflowStageFailed(result)) {
           process.exit(1);
         }
@@ -845,6 +873,7 @@ export function createCli(): Command {
           return { status: "passed", detail: "committed or skipped" };
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        await updateRecentWork(paths, item);
         if (workflowStageFailed(result)) {
           process.exit(1);
         }
@@ -898,6 +927,7 @@ export function createCli(): Command {
 
         console.log("");
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "PR"], result);
+        await updateRecentWork(paths, item);
 
         if (workflowStageFailed(result)) {
           process.exit(1);
@@ -926,6 +956,7 @@ export function createCli(): Command {
           };
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
+        await updateRecentWork(paths, item);
         if (workflowStageFailed(result)) {
           process.exit(1);
         }
@@ -1042,6 +1073,8 @@ export function createCli(): Command {
   registerTaskCommands(program);
   registerJiraCommands(program);
 
+  registerRegistryCommands(program);
+
   const doctor = program.command("doctor").description("Inspect local devtask setup and task health.");
 
   doctor
@@ -1097,4 +1130,30 @@ export function createCli(): Command {
 
 
   return program;
+}
+
+function resolveInitPaths(): ReturnType<typeof resolvePaths> {
+  try {
+    return resolvePaths();
+  } catch {
+    return resolveWorkspacePathsForInit();
+  }
+}
+
+function isGitRepoRoot(root: string): boolean {
+  return fs.existsSync(path.join(root, ".git"));
+}
+
+function ensureDefaultWorkspaceTarget(paths: ReturnType<typeof resolvePaths>): void {
+  const targets = listWorkspaceTargets(paths);
+  const hasRootTarget = targets.some((target) => target.repoPath === fs.realpathSync(paths.root) && target.scope === null);
+  if (hasRootTarget) {
+    return;
+  }
+  const desiredId = targets.some((target) => target.id === "app") ? "repo" : "app";
+  addWorkspaceTarget(paths, {
+    id: desiredId,
+    repoPath: ".",
+    kind: "app"
+  });
 }

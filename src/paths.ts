@@ -72,7 +72,7 @@ export function resolveWorkspacePaths(start = process.cwd()): DevtaskPaths {
     return resolvePaths(start);
   } catch {
     throw new DevtaskError(
-      `No devtask workspace or git repository found from ${path.resolve(start)}. Run devtask init --workspace for non-git folders.`
+      `No devtask workspace or git repository found from ${path.resolve(start)}. Run devtask init first.`
     );
   }
 }

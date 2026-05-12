@@ -15,9 +15,9 @@ The goal is to keep the work-item layer predictable before it grows into executi
 
 ## Workspace Contracts
 
-### `devtask init --workspace`
+### `devtask init`
 
-Creates a non-git control root for work items, targets, sources, and helper scripts.
+Creates a workspace root for work items, targets, sources, and helper scripts. In a git repo, it also initializes repo execution storage and adds a default `app -> .` target.
 
 Inputs:
 
@@ -27,14 +27,17 @@ Artifacts:
 
 - `.devtask/workspace.json`
 - `.devtask/config.json`
+- `.devtask/targets.json`
 - `.devtask/work/`
 - `.devtask/scripts/`
+- `.devtask/tasks/` when the root is also a git repo
+- `.devtask/worktrees/` when the root is also a git repo
 
 Rules:
 
 - must not require the workspace root itself to be a git repository
-- must not initialize member repositories
-- member repositories still require repo-local `devtask init` when they need runtime/check configuration
+- registers the workspace in the global index unless `--no-register` is passed
+- `--workspace` is accepted for clarity but is not required
 
 ### `devtask workspace target add <id> <repo-path>`
 
@@ -50,6 +53,9 @@ Inputs:
 Artifacts:
 
 - `.devtask/targets.json`
+- target repo `.devtask/config.json`
+- target repo `.devtask/tasks/`
+- target repo `.devtask/worktrees/`
 
 Preconditions:
 
@@ -62,7 +68,7 @@ Rules:
 
 - target id is the durable reference used by work graphs
 - `kind` is descriptive metadata only
-- target creation must not create repo tasks or worktrees
+- target creation initializes repo execution storage but must not create repo tasks or worktrees
 
 ### `devtask workspace target list`
 

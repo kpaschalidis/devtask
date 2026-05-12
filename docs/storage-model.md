@@ -185,7 +185,7 @@ Rules:
 `workspace.json`
 - category: `authoritative`
 - owner: workspace
-- writer: `devtask init --workspace`
+- writer: `devtask init`
 - purpose: marks a directory as a workspace root
 - mutation: latest snapshot
 - rebuildable: no
@@ -201,7 +201,7 @@ Rules:
 `targets.json`
 - category: `authoritative`
 - owner: workspace
-- writer: `devtask workspace target ...`
+- writer: `devtask init`, `devtask workspace target ...`
 - purpose: stable target inventory
 - mutation: latest snapshot
 - rebuildable: no

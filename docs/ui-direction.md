@@ -205,7 +205,7 @@ This index should contain pointers only:
 - last seen stage/status summaries
 - artifact pointers for convenience
 
-The index is not authoritative. If it is deleted, the UI should be able to rebuild it by scanning registered or recently used workspaces.
+The index is not authoritative. If it is deleted, devtask can rebuild it from explicitly registered workspace roots and from workspaces encountered by normal CLI usage.
 
 ## Implementation Direction
 

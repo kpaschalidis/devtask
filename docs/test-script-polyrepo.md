@@ -21,7 +21,7 @@ WORK_ID="docs-polyrepo-smoke"
 
 ```bash
 cd "$WORKSPACE"
-devtask init --workspace
+devtask init
 devtask workspace target add "$REPO_A_ID" "$REPO_A_PATH" --kind "$REPO_A_KIND"
 devtask workspace target add "$REPO_B_ID" "$REPO_B_PATH" --kind "$REPO_B_KIND"
 devtask workspace target list
@@ -31,12 +31,10 @@ Configure each member repo:
 
 ```bash
 cd "$WORKSPACE/$REPO_A_PATH"
-devtask init
 devtask config check "$REPO_A_CHECK"
 devtask config runtime attachable
 
 cd "$WORKSPACE/$REPO_B_PATH"
-devtask init
 devtask config check "$REPO_B_CHECK"
 devtask config runtime attachable
 ```

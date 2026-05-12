@@ -42,7 +42,6 @@ devtask --help
 cd /path/to/repo
 
 devtask init
-devtask workspace target add app . --kind app
 
 devtask work create fix-login \
   --title "Fix login redirect loop" \
@@ -65,7 +64,7 @@ devtask work ci fix-login
 ```bash
 cd /path/to/product-workspace
 
-devtask init --workspace
+devtask init
 devtask workspace target add backend ./backend --kind backend
 devtask workspace target add web ./web --kind frontend
 
@@ -89,6 +88,8 @@ devtask work attach <work-id> --target <target-id>
 devtask work steer <work-id> --target <target-id> "Please keep this scoped."
 devtask work fix <work-id> --target <target-id> --from check
 devtask work cleanup <work-id> --dry-run
+devtask recent
+devtask where <work-id>
 ```
 
 Advanced repo-local primitives:

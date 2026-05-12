@@ -61,11 +61,11 @@ describe("paths", () => {
     }
   });
 
-  it("explains how to initialize workspace mode outside git", () => {
+  it("explains how to initialize devtask outside git", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-no-workspace-"));
 
     try {
-      expect(() => resolveWorkspacePaths(dir)).toThrow("Run devtask init --workspace");
+      expect(() => resolveWorkspacePaths(dir)).toThrow("Run devtask init");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

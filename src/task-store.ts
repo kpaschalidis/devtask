@@ -8,6 +8,7 @@ import {
   taskDir,
   taskMarkdownPath,
   taskMetaPath,
+  workspaceTargetsPath,
   workspaceJsonPath,
   worktreePath
 } from "./paths.js";
@@ -56,6 +57,10 @@ export function initializeWorkspace(paths: DevtaskPaths): void {
         2
       )
     );
+  }
+  const targetsPath = workspaceTargetsPath(paths);
+  if (!fs.existsSync(targetsPath)) {
+    fs.writeFileSync(targetsPath, `${JSON.stringify({ schemaVersion: 1, targets: [] }, null, 2)}\n`);
   }
 }
 

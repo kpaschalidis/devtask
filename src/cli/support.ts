@@ -1625,7 +1625,7 @@ function defaultPrBody(meta: ReturnType<typeof getTask>): string {
   ].join("\n");
 }
 
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   if (/^[A-Za-z0-9._/:@+-]+$/.test(value)) {
     return value;
   }

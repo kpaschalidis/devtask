@@ -28,28 +28,28 @@ For a single repository:
 ```bash
 cd /path/to/repo
 devtask init
-devtask workspace target add app . --kind app
 ```
+
+In a git repository, `devtask init` creates a workspace and adds the default target `app -> .`.
 
 For a product folder that contains multiple repositories:
 
 ```bash
 cd /path/to/product
-devtask init --workspace
+devtask init
 devtask workspace target add backend ./backend --kind backend
 devtask workspace target add web ./web --kind frontend
 devtask workspace target list
 ```
 
-Targets are stable addresses the work planner can assign tasks to. A target can be a whole repo or a scoped folder inside a repo.
+Targets are stable addresses the work planner can assign tasks to. A target can be a whole repo or a scoped folder inside a repo. Adding a target also initializes that target repo's `.devtask/` execution storage if needed.
 
 ## 3. Configure Checks
 
-Run this inside each target repository that will execute repo-local tasks:
+Configure checks for each target repository that will execute repo-local tasks:
 
 ```bash
 cd /path/to/repo
-devtask init
 devtask config check 'npm test' 'npm run typecheck'
 devtask config runtime attachable
 ```
@@ -150,3 +150,15 @@ devtask work cleanup APP-123
 ```
 
 Cleanup does not revert merged code or delete remote branches.
+
+## 10. Find Work Later
+
+`devtask init` registers the workspace in the global disposable index under `~/.devtask/index.json`.
+
+```bash
+devtask recent
+devtask where APP-123
+devtask registry list
+```
+
+The global index is for discovery only. Workspace and repo-local `.devtask/` artifacts remain the source of truth.
