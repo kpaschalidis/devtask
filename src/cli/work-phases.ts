@@ -52,10 +52,11 @@ export async function runWorkSpec(
     return {
       result: repoPlans,
       final: {
-        status: repoPlans.every((result) => ["planned", "existing", "started"].includes(result.status)) ? "passed" : "failed",
+        status: repoPlanStageStatus(repoPlans),
         output: {
           taskCount: materialization.tasks.length,
-          repoPlanCount: repoPlans.length
+          repoPlanCount: repoPlans.length,
+          startedCount: repoPlans.filter((result) => result.status === "started").length
         },
         artifacts: [
           workPlanPath(paths, item.id),
@@ -169,9 +170,18 @@ async function runRepoPlansForSpec(
     results.map((result) => [result.target, result.taskId, result.status, result.planPath])
   );
   if (results.some((result) => !["planned", "existing"].includes(result.status))) {
-    throw new DevtaskError(`Repo planning for ${item.id} did not finish for every task`);
+    console.log("");
+    console.log(`Repo planning is still running for ${item.id}.`);
+    console.log(`Next: devtask work board ${item.id}`);
   }
   return results;
+}
+
+function repoPlanStageStatus(results: Awaited<ReturnType<typeof runWorkRepoPlans>>): "passed" | "running" | "failed" {
+  if (results.some((result) => result.status === "started")) {
+    return "running";
+  }
+  return results.every((result) => ["planned", "existing"].includes(result.status)) ? "passed" : "failed";
 }
 
 export function assertRepoPlansReady(paths: ReturnType<typeof resolveWorkspacePaths>, item: WorkItem): Array<{ target: string; taskId: string; planPath: string }> {
