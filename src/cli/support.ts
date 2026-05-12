@@ -3,12 +3,12 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { DevtaskError } from "../errors.js";
-import { planMarkdownPath, resolvePaths, resolveWorkspacePaths, scriptsDir, taskMetaPath } from "../paths.js";
+import { planMarkdownPath, resolvePaths, resolveWorkspacePaths, scriptsDir, startupDir, taskMetaPath } from "../paths.js";
 import { writeTaskMeta } from "../meta.js";
 import { isProcessAlive, terminateProcessGroup } from "../processes.js";
 import { getTask, listTasks } from "../task-store.js";
 import { buildTaskReview, inspectTaskHealth, readLatestLogPath, readLatestRun } from "../task-inspection.js";
-import { attachTmuxSession, isTmuxAvailable, killTmuxSession, sendToTmuxSessionWithConfirmation, startTmuxSession, tmuxSessionExists, tmuxSessionName } from "../tmux.js";
+import { attachTmuxSession, isTmuxAvailable, killTmuxSession, sendToTmuxSessionWithConfirmation, startTmuxSession, tmuxSessionExists, tmuxSessionName, waitForTmuxSession } from "../tmux.js";
 import { buildCodexCommand, readConfig, writeConfig } from "../config.js";
 import { assertCanMark, parseManualStatus } from "../lifecycle.js";
 import { readLatestVerification, runVerification, type VerificationRecord } from "../verification.js";
@@ -56,6 +56,7 @@ const ATTACHABLE_STAGE_NAMES = ["plan", "run", "fix", "review"] as const satisfi
 export interface StartedWorker {
   pid: number | null;
   tmuxSession: string | null;
+  startupLogPath?: string | null;
 }
 
 export function printStartedWorker(
@@ -67,6 +68,9 @@ export function printStartedWorker(
   console.log(`${verb} task ${id}`);
   if (started.tmuxSession) {
     console.log(`tmux: ${started.tmuxSession}`);
+    if (started.startupLogPath) {
+      console.log(`Startup log: ${started.startupLogPath}`);
+    }
     console.log(`Attach: ${commands?.attach ?? `devtask task attach ${id}`}`);
     console.log(`Steer: ${commands?.steer ?? `devtask task steer ${id} "message"`}`);
     return;
@@ -1572,13 +1576,16 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
     if (!session) {
       return rollbackStartFailure(new DevtaskError("Unable to derive tmux session name"));
     }
-
+    const startupLog = createStartupLogPath(paths, id);
     try {
-      startTmuxSession(session, workerCommand, paths.root);
+      startTmuxSession(session, tmuxWrappedWorkerCommand(workerCommand, startupLog), paths.root);
+      if (!waitForTmuxSession(session)) {
+        return rollbackStartFailure(buildTmuxStartupFailure(session, startupLog));
+      }
     } catch (error) {
       rollbackStartFailure(error);
     }
-    return { pid: null, tmuxSession: session };
+    return { pid: null, tmuxSession: session, startupLogPath: startupLog };
   }
 
   let child: ReturnType<typeof spawn> | null = null;
@@ -1621,6 +1628,37 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
   });
 
   return { pid: childPid, tmuxSession: null };
+}
+
+function createStartupLogPath(paths: ReturnType<typeof resolvePaths>, id: string): string {
+  const dir = startupDir(paths, id);
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.join(dir, `${stamp}.log`);
+}
+
+function tmuxWrappedWorkerCommand(workerCommand: string[], startupLog: string): string[] {
+  const quotedCommand = workerCommand.map(shellQuote).join(" ");
+  const quotedLog = shellQuote(startupLog);
+  return [
+    "/bin/zsh",
+    "-lc",
+    `exec ${quotedCommand} > ${quotedLog} 2>&1`
+  ];
+}
+
+function buildTmuxStartupFailure(session: string, startupLog: string): DevtaskError {
+  let detail = `tmux worker session ${session} exited during startup.`;
+  if (fs.existsSync(startupLog)) {
+    const output = fs.readFileSync(startupLog, "utf8").trim();
+    if (output) {
+      const tail = output.split("\n").slice(-20).join("\n");
+      detail = `${detail} Startup log: ${startupLog}\n${tail}`;
+    } else {
+      detail = `${detail} Startup log: ${startupLog}`;
+    }
+  }
+  return new DevtaskError(detail);
 }
 
 function assertFixReady(meta: ReturnType<typeof getTask>): void {

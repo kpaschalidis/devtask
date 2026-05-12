@@ -85,6 +85,10 @@ export function taskDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.tasksDir, id);
 }
 
+export function startupDir(paths: DevtaskPaths, id: string): string {
+  return path.join(taskDir(paths, id), "startup");
+}
+
 export function taskMetaPath(paths: DevtaskPaths, id: string): string {
   return path.join(taskDir(paths, id), "meta.json");
 }

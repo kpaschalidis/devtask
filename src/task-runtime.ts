@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { writeTaskMeta, readTaskMeta } from "./meta.js";
 import { isProcessAlive } from "./processes.js";
 import type { DevtaskPaths } from "./paths.js";
@@ -46,10 +48,24 @@ export function reconcileTaskRuntime(paths: DevtaskPaths, meta: TaskMeta): TaskM
 
 function staleRuntimeReason(meta: TaskMeta): string {
   if (meta.tmuxSession) {
-    return `recorded tmux session ${meta.tmuxSession} is not running`;
+    return `recorded tmux session ${meta.tmuxSession} is not running${findStartupLogSuffix(meta)}`;
   }
   if (meta.supervisorPid || meta.childPid) {
     return `recorded worker process is not running`;
   }
   return "task was marked running but no live worker session exists";
+}
+
+function findStartupLogSuffix(meta: TaskMeta): string {
+  try {
+    const dir = path.join(path.dirname(meta.taskPath), "startup");
+    if (!fs.existsSync(dir)) {
+      return "";
+    }
+    const files = fs.readdirSync(dir).filter((file) => file.endsWith(".log")).sort();
+    const latest = files.at(-1);
+    return latest ? `; startup log: ${path.join(dir, latest)}` : "";
+  } catch {
+    return "";
+  }
 }

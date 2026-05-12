@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendToTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionName } from "../src/tmux.js";
+import { sendToTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionName, waitForTmuxSession } from "../src/tmux.js";
 
 vi.mock("node:child_process", () => ({
   spawnSync: vi.fn(() => ({ status: 0, error: undefined, stdout: "" }))
@@ -93,5 +93,17 @@ describe("tmux", () => {
       confirmed: true,
       output: "after"
     });
+  });
+
+  it("returns false when a session never survives the startup window", () => {
+    mockedSpawnSync.mockClear();
+    mockedSpawnSync.mockImplementation((command, args) => {
+      if (command === "tmux" && Array.isArray(args) && args[0] === "has-session") {
+        return { status: 1, error: undefined, stdout: "" };
+      }
+      return { status: 0, error: undefined, stdout: "" };
+    });
+
+    expect(waitForTmuxSession("devtask-missing", { attempts: 2, intervalMs: 1 })).toBe(false);
   });
 });

@@ -46,6 +46,18 @@ export function startTmuxSession(session: string, command: string[], cwd: string
   }
 }
 
+export function waitForTmuxSession(session: string, options: { attempts?: number; intervalMs?: number } = {}): boolean {
+  const attempts = options.attempts ?? 5;
+  const intervalMs = options.intervalMs ?? 200;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (tmuxSessionExists(session)) {
+      return true;
+    }
+    sleepSync(intervalMs);
+  }
+  return false;
+}
+
 export function attachTmuxSession(session: string): void {
   assertTmuxAvailable();
   if (!tmuxSessionExists(session)) {
