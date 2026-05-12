@@ -11,7 +11,23 @@ import {
   type GenericStageUpdate
 } from "./stage-ledger.js";
 
-export const WORK_STAGE_NAMES = ["plan", "approve-plan", "repo-plan", "run", "check", "fix", "review", "approve", "commit", "pr", "ci"] as const;
+export const WORK_STAGE_NAMES = [
+  "plan",
+  "spec",
+  "approve-plan",
+  "repo-plan",
+  "approve-spec",
+  "exec",
+  "run",
+  "check",
+  "fix",
+  "review",
+  "approve",
+  "approve-exec",
+  "commit",
+  "pr",
+  "ci"
+] as const;
 
 export type WorkStageName = (typeof WORK_STAGE_NAMES)[number];
 export type WorkStageStatus = GenericStageStatus;

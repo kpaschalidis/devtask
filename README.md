@@ -5,11 +5,10 @@
 The public workflow is `work` first:
 
 - ingest or create a work item
-- plan affected targets
-- approve the execution graph
-- materialize repo-local tasks
-- run agents in isolated worktrees
-- check, review, approve, commit, publish PRs, and inspect CI
+- build and approve a full spec across affected targets
+- execute repo-local agents in isolated worktrees
+- check, review, and fix until implementation is ready
+- approve execution, publish PRs, and inspect CI
 
 Repo-local task commands still exist under `devtask task ...`, but they are advanced primitives. Most day-to-day usage should go through `devtask work ...`.
 
@@ -47,16 +46,10 @@ devtask work create fix-login \
   --title "Fix login redirect loop" \
   --body "Fix the redirect loop and add regression coverage."
 
-devtask work plan fix-login
-devtask work approve-plan fix-login
-devtask work repo-plan fix-login
-devtask work run fix-login --follow
-devtask work check fix-login
-devtask work review fix-login
-devtask work approve fix-login
-devtask work commit fix-login
-devtask work pr fix-login --ready
-devtask work ci fix-login
+devtask work spec fix-login
+devtask work approve-spec fix-login
+devtask work exec fix-login --auto
+devtask work approve-exec fix-login
 ```
 
 ## Polyrepo Workflow
@@ -69,20 +62,20 @@ devtask workspace target add backend ./backend --kind backend
 devtask workspace target add web ./web --kind frontend
 
 devtask work create APP-123 --from-jira
-devtask work plan APP-123
-devtask work approve-plan APP-123
-devtask work repo-plan APP-123
-devtask work run APP-123 --follow
+devtask work spec APP-123
+devtask work approve-spec APP-123
+devtask work exec APP-123 --auto
 devtask work board APP-123
 ```
 
-The work planner reads the source artifact and configured targets, then proposes a graph. Graph approval is explicit so the developer can catch wrong target selection before repo tasks are created.
+`spec` runs the workspace planner, materializes the proposed graph, and runs repo-specialist planners. `approve-spec` is the human gate before implementation. `exec --auto` runs implementation through checks and review, then stops before publishing. `approve-exec` approves the implementation and continues to PR creation and CI inspection.
 
 ## Useful Commands
 
 ```bash
 devtask work show <work-id>
 devtask work board <work-id>
+devtask work next <work-id>
 devtask work logs <work-id> --target <target-id> --stage run
 devtask work attach <work-id> --target <target-id>
 devtask work steer <work-id> --target <target-id> "Please keep this scoped."

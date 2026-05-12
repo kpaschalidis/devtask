@@ -271,6 +271,35 @@ Graph contract:
 }
 ```
 
+### `devtask work spec <id>`
+
+Builds the full implementation spec.
+
+Inputs:
+
+- work item metadata
+- source artifact
+- workspace target inventory
+- workspace planner artifacts, if already present
+- materialization artifacts, if already present
+- repo-local task metadata, if already materialized
+
+Artifacts:
+
+- all `work plan` artifacts
+- all `work approve-plan` artifacts
+- all `work repo-plan` artifacts
+- work-level `spec` stage record
+
+Rules:
+
+- must compose existing stage contracts instead of bypassing them
+- must run the workspace planner only when plan artifacts are missing or `--refresh` is allowed
+- must materialize the graph before repo-specialist planning
+- must run repo-specialist planning for every materialized task
+- must stop before implementation
+- must print `devtask work approve-spec <id>` as the next human gate
+
 ### `devtask work board <id>`
 
 Shows the current work-level stage and, after materialization, the repo-local task lifecycle state for each target task.
@@ -371,6 +400,29 @@ Rules:
 - plan should be scoped to the graph node ownership
 - dependencies should be visible in the repo plan
 
+### `devtask work approve-spec <id>`
+
+Approves the holistic spec before implementation.
+
+Inputs:
+
+- work-level `plan.md`
+- work-level `graph.json`
+- approved graph
+- materialization record
+- repo-local `plan.md` for every materialized task
+
+Artifacts:
+
+- work-level `approve-spec` stage record
+
+Rules:
+
+- this is the main human gate after planning
+- must fail if any repo-local plan is missing
+- must not run implementation agents
+- must not publish
+
 ### `devtask work run <id>`
 
 Runs materialized repo tasks.
@@ -396,6 +448,32 @@ Rules:
 - must only start repo tasks in `planned` or `paused`
 - `--follow` must keep polling, start newly unblocked tasks, and stop on failure/blocker
 - should support per-task attach/steer through existing repo-local runtime
+
+### `devtask work exec <id>`
+
+Runs the execution phase for an approved spec.
+
+Inputs:
+
+- approved spec stage
+- materialization record
+- dependency graph
+- repo-local task metadata
+
+Artifacts:
+
+- repo-local run logs
+- repo-local check records
+- repo-local review records
+- work-level `exec` stage record
+
+Rules:
+
+- must require `approve-spec`
+- without `--auto`, starts currently ready implementation tasks only
+- with `--auto`, follows implementation, then runs checks and review
+- must stop before publishing
+- if checks or review fail, must point to `work fix`
 
 ### `devtask work check <id>`
 
@@ -457,6 +535,33 @@ Rules:
 - separate from `approve-plan`
 - approves implementation diffs, not planning graph
 - must not publish PRs
+
+### `devtask work approve-exec <id>`
+
+Approves implementation and continues to publication.
+
+Inputs:
+
+- materialization record
+- repo-local task results
+- check results
+- review results
+- provider auth
+
+Artifacts:
+
+- repo-local approval records
+- repo-local PR records
+- repo-local CI records
+- work-level `approve-exec` stage record
+
+Rules:
+
+- this is the main human gate after execution
+- must use the same approval policy as `work approve`
+- must not silently commit dirty worktrees
+- must create PRs from existing commits
+- must check CI once after PR creation
 
 ### `devtask work commit <id>`
 

@@ -15,7 +15,7 @@ import { readLatestVerification, runVerification, type VerificationRecord } from
 import { runCommand, runCommandOrThrow } from "../process-runner.js";
 import { readLatestReviewAgent, runReviewAgent, type ReviewAgentRecord } from "../review-agent.js";
 import { hasTaskPlan, runPlanAgent } from "../planner.js";
-import { buildBoardRow, recommendNextAction, type NextAction } from "../workflow.js";
+import { buildBoardRow, type NextAction } from "../workflow.js";
 import { type CleanupOptions, type CleanupPlan } from "../cleanup.js";
 import { assertValidTaskId } from "../task-id.js";
 import { checkProviderCi, countBranchCommits, createProviderPullRequest, detectRemoteInfo, hasUncommittedChanges, preflightScmForPullRequest, type ScmPreflight } from "../scm.js";
@@ -1137,36 +1137,6 @@ export function printPrPreflightBlockers(blockers: string[]): void {
   console.log("Blocked:");
   for (const blocker of blockers) {
     console.log(`- ${blocker}`);
-  }
-}
-
-export async function advanceTask(paths: ReturnType<typeof resolvePaths>, id: string, next: NextAction): Promise<void> {
-  switch (next.kind) {
-    case "plan":
-      await planTask(paths, id);
-      return;
-    case "run":
-      printStartedWorker(id, startWorker(paths, id, resolveRunRuntime(paths, {})), "Running");
-      return;
-    case "continue": {
-      const meta = getTask(paths, id);
-      printStartedWorker(id, startWorker(paths, id, meta.tmuxSession ? { tmux: true } : resolveRunRuntime(paths, {})), "Continuing");
-      return;
-    }
-    case "check":
-      await checkTask(paths, id, { exitOnFailure: false });
-      return;
-    case "review":
-      await reviewTask(paths, id, { exitOnFindings: false });
-      return;
-    case "pr":
-      await openPrForTask(paths, id, {});
-      return;
-    case "ci":
-      await checkCiForTask(paths, id);
-      return;
-    default:
-      printNextAction(id, next);
   }
 }
 

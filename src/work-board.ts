@@ -56,7 +56,7 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
         review: row.review,
         pr: row.pr,
         updated: row.updated,
-        next: actionableRunSkip?.reason ?? workLevelNext(item.id, row.stage, row.next)
+        next: actionableRunSkip ? blockedWorkNext(item.id, actionableRunSkip.reason) : workLevelNext(item.id, row.stage, row.next)
       });
     } catch (error) {
       if (!(error instanceof DevtaskError)) {
@@ -81,6 +81,13 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
   return rows;
 }
 
+function blockedWorkNext(workId: string, reason: string): string {
+  if (reason === "needs repo-plan") {
+    return `devtask work spec ${shellQuote(workId)}`;
+  }
+  return reason;
+}
+
 function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem): WorkBoardRow {
   const hasGraph = fs.existsSync(workGraphPath(paths, item.id));
   const hasPlan = fs.existsSync(workPlanPath(paths, item.id));
@@ -92,7 +99,7 @@ function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem): WorkBo
   return {
     target: "-",
     task: item.id,
-    stage: readyForApproval ? "approve-plan" : latest?.stage ?? "plan",
+    stage: readyForApproval ? "spec" : latest?.stage ?? "plan",
     status: readyForApproval ? "pending" : runningPlan ? "running" : failedPlan ? "failed" : "pending",
     last: latest ? `${latest.stage} ${latest.status}` : "-",
     blocked: latest?.reason ?? "-",
@@ -100,7 +107,7 @@ function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem): WorkBo
     review: "-",
     pr: "-",
     updated: latest?.finishedAt ?? latest?.startedAt ?? item.updatedAt,
-    next: readyForApproval ? `devtask work approve-plan ${shellQuote(item.id)}` : `devtask work plan ${shellQuote(item.id)}${failedPlan ? " --refresh" : ""}`
+    next: `devtask work spec ${shellQuote(item.id)}${failedPlan ? " --refresh" : ""}`
   };
 }
 
@@ -134,10 +141,13 @@ function stageTime(stage: { finishedAt: string | null; startedAt: string | null 
 
 function workLevelNext(workId: string, stage: string, fallback: string): string {
   if (stage === "plan") {
-    return `devtask work repo-plan ${shellQuote(workId)}`;
+    return `devtask work spec ${shellQuote(workId)}`;
   }
-  if (["run", "check", "fix", "review", "approve", "commit", "pr", "ci"].includes(stage)) {
-    return `devtask work ${stage} ${shellQuote(workId)}`;
+  if (["run", "check", "fix", "review"].includes(stage)) {
+    return `devtask work exec ${shellQuote(workId)} --auto`;
+  }
+  if (["approve", "commit", "pr", "ci"].includes(stage)) {
+    return `devtask work approve-exec ${shellQuote(workId)}`;
   }
   return fallback;
 }

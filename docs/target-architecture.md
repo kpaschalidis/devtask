@@ -5,7 +5,7 @@ Local-first workflow controller for turning external work into reviewed pull req
 The target flow is:
 
 ```text
-tracker item -> work item -> target graph -> approved worktrees -> agents -> checks/review -> commits -> pull requests -> CI follow-up
+tracker item -> work item -> spec -> approved spec -> execution -> approved execution -> pull requests -> CI follow-up
 ```
 
 Examples of tracker and source control providers include Jira, Linear, GitHub Issues, Bitbucket, GitHub, and GitLab. The architecture should stay provider-neutral.
@@ -102,13 +102,15 @@ devtask work create <id> --title "..."
 
 Stores the source and creates the durable work item. No repo tasks are created.
 
-### 2. Work Plan
+### 2. Spec
 
 ```bash
-devtask work plan <id>
+devtask work spec <id>
 ```
 
-The work planner reads:
+The spec phase builds the full implementation contract. It runs the workspace planner, materializes repo-local tasks from the proposed graph, and runs repo-specialist planners.
+
+The workspace planner reads:
 
 - source artifact
 - workspace target inventory
@@ -121,23 +123,30 @@ It writes:
 
 The work planner owns **what**, **where**, **boundaries**, and **dependencies**. It does not own exact implementation.
 
-### 3. Approve Plan
+Repo planners then read:
+
+- original source
+- work-level plan
+- graph node
+- target repo/scope
+- dependency context
+
+They write repo-local `plan.md` files that own **how** inside each repo/scope.
+
+### 3. Approve Spec
 
 ```bash
-devtask work approve-plan <id>
+devtask work approve-spec <id>
 ```
 
-This is the human gate before materialization.
+This is the human gate before implementation.
 
 It should:
 
 - require a human-readable work plan
-- validate graph schema
-- validate target ids
-- validate task ids
-- validate dependency references
-- create repo-local task metadata
-- create branches and worktrees
+- require a frozen approved graph
+- require materialized repo-local tasks
+- require repo-local plans for every task
 - record materialized tasks under the work item
 
 It should not run agents.
@@ -148,70 +157,58 @@ It should not run agents.
 devtask work board <id>
 ```
 
-Shows the current work item and repo-task state from durable artifacts. Before materialization it points to `work plan` or `work approve-plan`; after materialization it shows one row per repo-local task with the next executable command.
+Shows the current work item and repo-task state from durable artifacts. Before implementation it points to `work spec` or `work approve-spec`; after implementation begins it shows one row per repo-local task with the next executable command.
 
-### 4. Repo Plan
+### 4. Low-Level Repo Plan
 
 ```bash
 devtask work repo-plan <id>
 ```
 
-Each materialized repo task gets a repo-specific plan.
+This is the primitive used by `work spec`. Developers can still run it directly to refresh repo-local plans before `approve-spec`.
 
-The repo planner reads:
-
-- original source
-- work-level plan
-- graph node
-- target repo/scope
-- dependency context
-
-The repo planner owns **how** inside its repo/scope:
-
-- exact files
-- local conventions
-- test strategy
-- implementation risks
-
-### 5. Run
+### 5. Execution
 
 ```bash
-devtask work run <id>
+devtask work exec <id> --auto
 ```
 
-Runs repo-local agents in parallel when dependencies allow.
+Runs repo-local agents in parallel when dependencies allow, then runs checks and review. It stops at the execution approval gate.
 
 Only `run` dependencies block execution. `validation`, `review`, `approval`, and `publish` dependencies preserve lifecycle constraints without unnecessarily blocking parallel implementation.
 
 Each agent works inside its own worktree. A task may use a simple single-agent runtime or a richer team/swarm runtime, but `devtask` remains the lifecycle owner.
 
-### 6. Check And Review
+### 6. Low-Level Check, Fix, And Review
 
 ```bash
 devtask work check <id>
+devtask work fix <id>
 devtask work review <id>
 ```
 
-Runs configured validation and review across materialized tasks. Dependency failures should block dependent tasks from advancing.
+These are primitives used by `work exec --auto` and manual recovery.
 
-### 7. Human Approval
+### 7. Execution Approval
+
+```bash
+devtask work approve-exec <id>
+```
+
+Human approval accepts the local diffs and review/check state, then publishes PRs and checks CI once.
+
+This is separate from `approve-spec`.
+
+### 8. Low-Level Publish
 
 ```bash
 devtask work approve <id>
-```
-
-Human approval accepts the local diffs and review/check state before publishing.
-
-This is separate from `approve-plan`.
-
-### 8. Commit And Pull Request
-
-```bash
 devtask work commit <id>
 devtask work pr <id>
+devtask work ci <id>
 ```
 
-Publishes existing commits from each repo task branch and creates provider pull requests or merge requests.
+These are primitives used by `approve-exec` and manual recovery.
 
 PR creation must remain strict:
 

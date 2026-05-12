@@ -72,33 +72,32 @@ Tracker source:
 devtask work create APP-123 --from-jira
 ```
 
-## 5. Plan And Approve The Graph
+## 5. Build And Approve The Spec
 
 ```bash
-devtask work plan APP-123
+devtask work spec APP-123
 devtask work show APP-123
-devtask work approve-plan APP-123
+devtask work approve-spec APP-123
 ```
 
-`plan` creates:
+`spec` creates or updates the complete planning package:
 
 - `.devtask/work/<id>/plan.md`
 - `.devtask/work/<id>/graph.json`
-
-`approve-plan` freezes the proposed graph into:
-
 - `.devtask/work/<id>/approved-graph.json`
-- repo-local tasks and worktrees
+- `.devtask/work/<id>/materialization.json`
+- repo-local tasks, worktrees, and repo-specific `plan.md` files
 
-## 6. Repo Plans And Implementation
+`approve-spec` is the human gate before implementation. It approves the holistic workspace plan plus the repo-specific plans.
+
+## 6. Execute Implementation
 
 ```bash
-devtask work repo-plan APP-123
-devtask work run APP-123 --follow
+devtask work exec APP-123 --auto
 devtask work board APP-123
 ```
 
-`repo-plan` creates task-specific implementation plans. `run` starts ready repo tasks and respects graph dependencies. `--follow` keeps the terminal open and prints progress; without it, workers run in the background.
+`exec --auto` starts ready repo tasks, respects graph dependencies, runs checks, runs review, and stops before publishing. If a check or review fails, inspect logs and run `fix`, then run `exec --auto` again.
 
 Attach or steer one target when tmux runtime is available:
 
@@ -107,12 +106,12 @@ devtask work attach APP-123 --target backend
 devtask work steer APP-123 --target backend "Keep the API change backward-compatible."
 ```
 
-## 7. Quality Gates
+## 7. Manual Recovery And Quality Gates
 
 ```bash
 devtask work check APP-123
 devtask work review APP-123
-devtask work approve APP-123
+devtask work fix APP-123 --target backend --from check
 ```
 
 If checks fail:
@@ -123,11 +122,20 @@ devtask work fix APP-123 --target backend --from check
 devtask work check APP-123 --target backend
 ```
 
-`approve` is the human gate before publishing. It validates the configured policy unless `--force` is used.
+The low-level stage commands are available for manual recovery. The main path is still `work exec --auto`.
 
-## 8. Publish
+## 8. Approve And Publish
 
 ```bash
+devtask work approve-exec APP-123
+```
+
+`approve-exec` is the human gate for implementation. It validates checks/review, approves repo tasks, creates PRs from existing commits, and checks CI once.
+
+Low-level publish commands remain available:
+
+```bash
+devtask work approve APP-123
 devtask work commit APP-123
 devtask work pr APP-123 --ready
 devtask work ci APP-123

@@ -12,7 +12,6 @@ import { cleanupTask, planTaskCleanup, type CleanupOptions } from "../cleanup.js
 import { assertReviewReady } from "../stage-policy.js";
 import { buildBoardRow, recommendNextAction } from "../workflow.js";
 import {
-  advanceTask,
   approveTask,
   checkCiForTask,
   checkTask,
@@ -535,55 +534,6 @@ export function registerTaskCommands(program: Command): void {
           ? await planTaskCleanup(paths, id, cleanupOptions)
           : await cleanupTask(paths, id, cleanupOptions);
         printCleanupPlan(id, plan);
-      } catch (error) {
-        printError(error);
-      }
-    });
-
-  task
-    .command("advance")
-    .description("Run the next safe workflow step for a task, stopping at human approval.")
-    .argument("<id>")
-    .action(async (id: string) => {
-      try {
-        const paths = resolvePaths();
-        const config = readConfig(paths);
-        const review = await buildTaskReview(paths, getTask(paths, id));
-        const next = recommendNextAction(review, config);
-
-        if (!next.automatic) {
-          printNextAction(id, next);
-          return;
-        }
-
-        switch (next.kind) {
-          case "plan":
-            await planTask(paths, id);
-            return;
-          case "run": {
-            printStartedWorker(id, startWorker(paths, id, resolveRunRuntime(paths, {})), "Running");
-            return;
-          }
-          case "continue": {
-            const meta = getTask(paths, id);
-            printStartedWorker(id, startWorker(paths, id, meta.tmuxSession ? { tmux: true } : resolveRunRuntime(paths, {})), "Continuing");
-            return;
-          }
-          case "check":
-            await checkAction(id);
-            return;
-          case "review":
-            await reviewAction(id);
-            return;
-          case "pr":
-            await prAction(id, {});
-            return;
-          case "ci":
-            await ciAction(id);
-            return;
-          default:
-            printNextAction(id, next);
-        }
       } catch (error) {
         printError(error);
       }

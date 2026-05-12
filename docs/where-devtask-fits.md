@@ -335,7 +335,7 @@ Near term:
 
 - finish the end-to-end work-item architecture
 - improve reliability and recovery
-- make `work board`, `work next`, and `work advance` strong
+- make `work board`, `work next`, and `work exec --auto` strong
 - finish publishing and CI lifecycle quality
 
 After that:

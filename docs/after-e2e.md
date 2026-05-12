@@ -5,7 +5,7 @@ This document describes what comes after the first complete work-item flow.
 The first end-to-end architecture means:
 
 ```text
-source -> work plan -> approve plan -> repo plan -> run -> check -> review -> approve -> commit -> PR -> CI
+source -> spec -> approve spec -> exec -> approve exec -> PR -> CI
 ```
 
 At that point `devtask` has a complete local path from external work to reviewable pull requests. The next phase is about reliability, ergonomics, and scaling the operating model.
@@ -16,16 +16,10 @@ At that point `devtask` has a complete local path from external work to reviewab
 
 ```bash
 devtask work create ...
-devtask work plan ...
-devtask work approve-plan ...
-devtask work repo-plan ...
-devtask work run ...
-devtask work check ...
-devtask work review ...
-devtask work approve ...
-devtask work commit ...
-devtask work pr ...
-devtask work ci ...
+devtask work spec ...
+devtask work approve-spec ...
+devtask work exec --auto ...
+devtask work approve-exec ...
 ```
 
 Task commands should remain under `devtask task ...` as repo-local primitives:
@@ -91,7 +85,7 @@ Priorities:
 
 - `work board` should show current stage, blockers, PRs, CI, and next command.
 - `work next <id>` should explain the next safe action.
-- `work advance <id>` should run safe automatic steps and stop at human gates.
+- `work exec <id> --auto` should run execution steps and stop at human gates.
 - Error messages should always include the exact recovery command.
 
 The goal is that the developer can manage a multi-repo task mostly from:
@@ -99,14 +93,14 @@ The goal is that the developer can manage a multi-repo task mostly from:
 ```bash
 devtask work board <id>
 devtask work next <id>
-devtask work advance <id>
+devtask work exec <id> --auto
 ```
 
 ## Repo-Specialist Planning
 
 The first E2E flow may keep `work repo-plan` mechanical: it renders repo-local plans from the approved graph and work-level plan.
 
-After the first E2E path is proven, `work repo-plan` should become a parallel repo-specialist planning stage:
+After the first E2E path is proven, the repo-specialist planning inside `work spec` should become stricter:
 
 - one planning agent per materialized repo task
 - each agent inspects only its target repo/scope

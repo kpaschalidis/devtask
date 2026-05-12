@@ -16,7 +16,7 @@ import {
 import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, initializeWorkspace, listTasks } from "./task-store.js";
-import { buildTaskReview, inspectTaskHealth, readLatestLogPath, readLatestRun } from "./task-inspection.js";
+import { buildTaskReview, inspectTaskHealth } from "./task-inspection.js";
 import {
   attachTmuxSession,
   isTmuxAvailable,
@@ -28,12 +28,8 @@ import {
 } from "./tmux.js";
 import { buildCodexCommand, hasRuntimeConfig, readConfig, writeConfig } from "./config.js";
 import { assertCanMark, parseManualStatus } from "./lifecycle.js";
-import { readLatestVerification, runVerification, type VerificationRecord } from "./verification.js";
 import { runCommand, runCommandOrThrow } from "./process-runner.js";
-import { readLatestReviewAgent, runReviewAgent, type ReviewAgentRecord } from "./review-agent.js";
-import { hasTaskPlan, runPlanAgent } from "./planner.js";
-import { buildBoardRow, recommendNextAction, type NextAction } from "./workflow.js";
-import { cleanupTask, planTaskCleanup, type CleanupOptions, type CleanupPlan } from "./cleanup.js";
+import { runPlanAgent } from "./planner.js";
 import { assertValidTaskId } from "./task-id.js";
 import {
   checkProviderCi,
@@ -64,21 +60,17 @@ import {
 import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 import { runWorkPlanner, workGraphPath, workPlanPath } from "./work-planner.js";
 import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
-import { buildWorkBoardRows, type WorkBoardRow } from "./work-board.js";
-import { isWorkTaskRunComplete, planWorkRun } from "./work-runner.js";
+import { buildWorkBoardRows } from "./work-board.js";
 import { runWorkStage } from "./work-stage-contracts.js";
 import {
-  DEFAULT_DEV_WORKFLOW,
-  runWorkflowStage,
-  workflowStageFailed,
-  type WorkflowStageId,
-  type WorkflowUnit
+  workflowStageFailed
 } from "./workflow-engine.js";
 import { createFixRequestFromCheck } from "./fix-request.js";
 import { cleanupWorkItem } from "./work-cleanup.js";
 import { registerTaskCommands } from "./cli/task.js";
 import { registerJiraCommands } from "./cli/jira.js";
 import { registerRegistryCommands } from "./cli/registry.js";
+import { assertRepoPlansReady, runWorkApproveExec, runWorkExec, runWorkSpec, workNextCommand } from "./cli/work-phases.js";
 import {
   globalIndexPath,
   registerWorkspace,
@@ -134,6 +126,7 @@ import {
   selectOneWorkTask,
   selectWorkLogTasks,
   selectWorkTasks,
+  shellQuote,
   startStageSessionIfRequested,
   tailFile,
   templateScriptPath,
@@ -525,6 +518,20 @@ export function createCli(): Command {
     });
 
   work
+    .command("next")
+    .description("Explain the next high-level action for a work item without running it.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        console.log(workNextCommand(paths, item));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("logs")
     .description("Print or follow logs for work planning or materialized repo tasks in a work item.")
     .argument("<id>")
@@ -574,7 +581,7 @@ export function createCli(): Command {
         if (!hasMaterializedWorkTasks(paths, item)) {
           const stage = options.stage ?? "plan";
           if (stage !== "plan") {
-            throw new DevtaskError(`Work item ${id} has not been materialized. Only stage plan is attachable before approve-plan.`);
+            throw new DevtaskError(`Work item ${id} has not been materialized. Only stage plan is attachable before spec materialization.`);
           }
           const session = workPlanSessionName(paths, item.id);
           if (!tmuxSessionExists(session)) {
@@ -616,7 +623,7 @@ export function createCli(): Command {
         if (!hasMaterializedWorkTasks(paths, item)) {
           const stage = options.stage ?? "plan";
           if (stage !== "plan") {
-            throw new DevtaskError(`Work item ${id} has not been materialized. Only stage plan is steerable before approve-plan.`);
+            throw new DevtaskError(`Work item ${id} has not been materialized. Only stage plan is steerable before spec materialization.`);
           }
           steerWorkPlan(paths, item, {
             messageParts,
@@ -723,6 +730,30 @@ export function createCli(): Command {
     });
 
   work
+    .command("spec")
+    .description("Build the full implementation spec: workspace plan, materialized tasks, and repo plans.")
+    .argument("<id>")
+    .option("--refresh", "Regenerate the workspace plan before materialization")
+    .option("--attachable", "Run planning agents inside attachable tmux sessions")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run planning agents in the current foreground process")
+    .action(async (id: string, options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        if (startStageSessionIfRequested(paths, item.id, "work-plan", ["work", "spec", id, "--plain", ...(options.refresh ? ["--refresh"] : [])], options)) {
+          return;
+        }
+        await runWorkSpec(paths, item, options);
+        console.log("");
+        console.log(`Next: devtask work approve-spec ${shellQuote(item.id)}`);
+        await updateRecentWork(paths, item);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("approve-plan")
     .description("Approve a work graph and materialize repo-local task worktrees.")
     .argument("<id>")
@@ -807,6 +838,42 @@ export function createCli(): Command {
     });
 
   work
+    .command("approve-spec")
+    .description("Approve the holistic spec after workspace and repo plans are ready.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const result = await runWorkStage(paths, item.id, "approve-spec", {
+          input: {
+            planPath: workPlanPath(paths, item.id),
+            graphPath: workGraphPath(paths, item.id)
+          }
+        }, async () => {
+          const plans = assertRepoPlansReady(paths, item);
+          return {
+            result: plans,
+            final: {
+              status: "passed",
+              output: {
+                taskCount: plans.length
+              },
+              artifacts: [workPlanPath(paths, item.id), workGraphPath(paths, item.id), ...plans.map((plan) => plan.planPath)]
+            }
+          };
+        });
+        console.log(`Approved spec ${item.id}`);
+        printTable(["TARGET", "TASK", "PLAN"], result.map((plan) => [plan.target, plan.taskId, plan.planPath]));
+        console.log("");
+        console.log(`Next: devtask work exec ${shellQuote(item.id)} --auto`);
+        await updateRecentWork(paths, item);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("run")
     .description("Run repo-local tasks that are ready in an approved work graph.")
     .argument("<id>")
@@ -824,6 +891,26 @@ export function createCli(): Command {
         } else {
           await runReadyWorkTasks(paths, item, options);
         }
+        await updateRecentWork(paths, item);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("exec")
+    .description("Run the implementation phase for an approved work spec.")
+    .argument("<id>")
+    .option("--auto", "Run execution stages until implementation approval is needed")
+    .option("--attachable", "Run workers and agents inside attachable tmux sessions")
+    .option("--tmux", "Alias for --attachable")
+    .option("--plain", "Run workers and agents as plain processes")
+    .option("--poll <seconds>", "Polling interval for running tasks", parsePositiveInteger, 5)
+    .action(async (id: string, options: { auto?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean; poll: number }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        await runWorkExec(paths, item, options);
         await updateRecentWork(paths, item);
       } catch (error) {
         printError(error);
@@ -946,6 +1033,38 @@ export function createCli(): Command {
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
         await updateRecentWork(paths, item);
         if (workflowStageFailed(result)) {
+          process.exit(1);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("approve-exec")
+    .description("Approve implemented work and continue to PR creation and CI check.")
+    .argument("<id>")
+    .option("--force", "Approve even when checks or review are missing or failing")
+    .option("--draft", "Create draft PRs")
+    .option("--ready", "Create ready-for-review PRs instead of drafts")
+    .action(async (id: string, options: { force?: boolean; draft?: boolean; ready?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const result = await runWorkApproveExec(paths, item, options);
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result.approval);
+        if (workflowStageFailed(result.approval)) {
+          process.exit(1);
+        }
+        console.log("");
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "PR"], result.pr);
+        if (workflowStageFailed(result.pr)) {
+          process.exit(1);
+        }
+        console.log("");
+        printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result.ci);
+        await updateRecentWork(paths, item);
+        if (workflowStageFailed(result.ci)) {
           process.exit(1);
         }
       } catch (error) {

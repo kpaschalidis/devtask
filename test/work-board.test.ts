@@ -32,7 +32,7 @@ describe("work board", () => {
         status: "pending",
         last: "-",
         blocked: "-",
-        next: "devtask work plan WORK-123"
+        next: "devtask work spec WORK-123"
       })
     ]);
   });
@@ -59,12 +59,12 @@ describe("work board", () => {
         status: "failed",
         last: "plan failed",
         blocked: "planner exited without producing valid plan artifacts",
-        next: "devtask work plan WORK-123 --refresh"
+        next: "devtask work spec WORK-123 --refresh"
       })
     ]);
   });
 
-  it("shows the approve-plan next step after a graph exists", async () => {
+  it("shows the spec next step after a graph exists", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-approve-"));
     const paths = resolveWorkspacePathsForInit(workspace);
     initializeWorkspace(paths);
@@ -92,9 +92,9 @@ describe("work board", () => {
       expect.objectContaining({
         target: "-",
         task: "WORK-123",
-        stage: "approve-plan",
+        stage: "spec",
         status: "pending",
-        next: "devtask work approve-plan WORK-123"
+        next: "devtask work spec WORK-123"
       })
     ]);
   });
@@ -125,7 +125,7 @@ describe("work board", () => {
     await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
       expect.objectContaining({
         stage: "plan",
-        next: "devtask work plan WORK-123"
+        next: "devtask work spec WORK-123"
       })
     ]);
   });
@@ -176,7 +176,7 @@ describe("work board", () => {
         stage: "plan",
         status: "pending",
         blocked: "needs repo-plan",
-        next: "needs repo-plan"
+        next: "devtask work spec WORK-123"
       })
     ]);
   });
@@ -244,7 +244,7 @@ describe("work board", () => {
         status: "ready",
         last: "plan passed",
         blocked: "-",
-        next: "devtask work run WORK-123"
+        next: "devtask work exec WORK-123 --auto"
       }),
       expect.objectContaining({
         target: "frontend",
@@ -322,7 +322,7 @@ describe("work board", () => {
         status: "pending",
         last: "run passed",
         blocked: "-",
-        next: "devtask work check WORK-123"
+        next: "devtask work exec WORK-123 --auto"
       })
     ]);
   });
