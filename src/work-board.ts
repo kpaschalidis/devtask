@@ -64,7 +64,7 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
         review: row.review,
         pr: row.pr,
         updated: row.updated,
-        next: waitingForSpec ? spec.next : actionableRunSkip ? blockedWorkNext(item.id, actionableRunSkip.reason) : workLevelNext(item.id, row.stage, row.next)
+        next: waitingForSpec ? spec.next : actionableRunSkip ? blockedWorkNext(item.id, actionableRunSkip.reason) : row.status === "running" ? "in progress" : workLevelNext(item.id, row.stage, row.next)
       });
     } catch (error) {
       if (!(error instanceof DevtaskError)) {
