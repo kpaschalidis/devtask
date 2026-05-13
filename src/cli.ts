@@ -773,7 +773,8 @@ export function createCli(): Command {
     .option("--attachable", "Run planning agents inside attachable tmux sessions")
     .option("--tmux", "Alias for --attachable")
     .option("--plain", "Run planning agents in the current foreground process")
-    .action(async (id: string, options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
+    .option("--poll <seconds>", "Seconds to wait for attachable repo planning to prove it started", parsePositiveInteger, 5)
+    .action(async (id: string, options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean; poll: number }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
@@ -838,7 +839,8 @@ export function createCli(): Command {
     .option("--attachable", "Run repo planning agents inside attachable tmux sessions")
     .option("--tmux", "Alias for --attachable")
     .option("--plain", "Run in the current foreground process")
-    .action(async (id: string, options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }) => {
+    .option("--poll <seconds>", "Seconds to wait for attachable repo planning to prove it started", parsePositiveInteger, 5)
+    .action(async (id: string, options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean; poll: number }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
@@ -851,7 +853,11 @@ export function createCli(): Command {
           return {
             result: repoPlanResults,
             final: {
-              status: repoPlanResults.every((result) => ["planned", "existing", "started"].includes(result.status)) ? "passed" : "failed",
+              status: repoPlanResults.some((result) => result.status === "failed")
+                ? "failed"
+                : repoPlanResults.some((result) => result.status === "started")
+                  ? "running"
+                  : "passed",
               output: {
                 taskCount: repoPlanResults.length
               },

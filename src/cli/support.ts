@@ -175,9 +175,9 @@ export function startStageSessionIfRequested(
   stage: string,
   args: string[],
   options: { attachable?: boolean; tmux?: boolean; plain?: boolean }
-): boolean {
+): string | null {
   if (!resolveStageAttachable(paths, options)) {
-    return false;
+    return null;
   }
 
   const cliPath = process.argv[1];
@@ -189,7 +189,7 @@ export function startStageSessionIfRequested(
   startTmuxSession(session, [process.execPath, cliPath, ...args], paths.root);
   console.log(`Started ${stage} in tmux: ${session}`);
   console.log(`Attach: tmux attach -t ${shellQuote(session)}`);
-  return true;
+  return session;
 }
 
 function resolveStageAttachable(
@@ -574,10 +574,11 @@ export function createFixRequest(paths: ReturnType<typeof resolvePaths>, taskId:
 export async function runWorkRepoPlans(
   paths: ReturnType<typeof resolvePaths>,
   item: WorkItem,
-  options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }
+  options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean; poll?: number }
 ): Promise<Array<{ target: string; taskId: string; repoPath: string; planPath: string; status: string }>> {
   const tasks = getMaterializedWorkTasks(paths, item);
   const results: Array<{ target: string; taskId: string; repoPath: string; planPath: string; status: string }> = [];
+  const explicitAttachable = options.attachable === true || options.tmux === true;
   for (const task of tasks) {
     const repoPaths = resolvePaths(task.repoPath);
     const meta = getTask(repoPaths, task.taskId);
@@ -597,13 +598,17 @@ export async function runWorkRepoPlans(
     }
 
     console.log(`${task.target}/${task.taskId}`);
-    if (startStageSessionIfRequested(repoPaths, task.taskId, "plan", ["task", "plan", task.taskId, "--plain"], options)) {
+    const session = explicitAttachable
+      ? startStageSessionIfRequested(repoPaths, task.taskId, "plan", ["task", "plan", task.taskId, "--plain"], options)
+      : null;
+    if (session) {
+      const status = await waitForRepoPlanStart(repoPaths, task.taskId, session, options.poll ?? 5);
       results.push({
         target: task.target,
         taskId: task.taskId,
         repoPath: task.repoPath,
         planPath: planMarkdownPath(repoPaths, task.taskId),
-        status: "started"
+        status
       });
       continue;
     }
@@ -617,6 +622,32 @@ export async function runWorkRepoPlans(
     });
   }
   return results;
+}
+
+async function waitForRepoPlanStart(
+  paths: ReturnType<typeof resolvePaths>,
+  taskId: string,
+  session: string,
+  pollSeconds: number
+): Promise<"planned" | "started" | "failed"> {
+  const deadline = Date.now() + Math.max(1, pollSeconds) * 1000;
+  while (Date.now() <= deadline) {
+    const stage = readStageLedger(paths, taskId).stages.plan;
+    if (hasTaskPlan(paths, taskId)) {
+      return "planned";
+    }
+    if (stage?.status === "failed") {
+      return "failed";
+    }
+    if (stage?.status === "passed") {
+      return hasTaskPlan(paths, taskId) ? "planned" : "failed";
+    }
+    if (stage?.status === "running" || tmuxSessionExists(session)) {
+      return "started";
+    }
+    await sleep(200);
+  }
+  return "failed";
 }
 
 function isRepoPlanningAllowed(paths: ReturnType<typeof resolvePaths>, taskId: string, status: ReturnType<typeof getTask>["status"]): boolean {

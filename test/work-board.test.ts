@@ -173,7 +173,7 @@ describe("work board", () => {
       expect.objectContaining({
         target: "backend",
         task: "work-123-backend",
-        stage: "spec",
+        stage: "repo-plan",
         status: "missing",
         blocked: "repo plan is missing",
         next: "devtask work spec WORK-123"
@@ -234,7 +234,7 @@ describe("work board", () => {
       expect.objectContaining({
         target: "backend",
         task: "work-123-backend",
-        stage: "spec",
+        stage: "repo-plan",
         status: "running",
         blocked: "repo planning is running",
         next: "devtask work board WORK-123"
@@ -289,10 +289,10 @@ describe("work board", () => {
       expect.objectContaining({
         target: "backend",
         task: "work-123-backend",
-        stage: "spec",
-        status: "running",
+        stage: "repo-plan",
+        status: "missing",
         blocked: "repo plan is missing",
-        next: "devtask work board WORK-123"
+        next: "devtask work spec WORK-123"
       })
     ]);
   });
@@ -564,13 +564,19 @@ describe("work board", () => {
       prUrl: "https://example.com/pr/1"
     });
     recordStage(repoPaths, task.taskId, "check", {
-      status: "passed"
+      status: "passed",
+      startedAt: "2027-05-05T00:00:00.000Z",
+      finishedAt: "2027-05-05T00:00:01.000Z"
     });
     recordStage(repoPaths, task.taskId, "review", {
-      status: "passed"
+      status: "passed",
+      startedAt: "2027-05-05T00:00:02.000Z",
+      finishedAt: "2027-05-05T00:00:03.000Z"
     });
     recordStage(repoPaths, task.taskId, "ci", {
       status: "failed",
+      startedAt: "2027-05-05T00:00:04.000Z",
+      finishedAt: "2027-05-05T00:00:05.000Z",
       reason: "CI check failed"
     });
 

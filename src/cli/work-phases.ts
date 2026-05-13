@@ -32,7 +32,7 @@ import {
 export async function runWorkSpec(
   paths: ReturnType<typeof resolveWorkspacePaths>,
   item: WorkItem,
-  options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }
+  options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean; poll?: number }
 ): Promise<void> {
   await runWorkStage(paths, item.id, "spec", {
     input: {
@@ -176,7 +176,7 @@ async function materializeWorkPlan(paths: ReturnType<typeof resolveWorkspacePath
 async function runRepoPlansForSpec(
   paths: ReturnType<typeof resolveWorkspacePaths>,
   item: WorkItem,
-  options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean }
+  options: { refresh?: boolean; attachable?: boolean; tmux?: boolean; plain?: boolean; poll?: number }
 ): Promise<Awaited<ReturnType<typeof runWorkRepoPlans>>> {
   console.log(`Running repo plans for ${item.id}`);
   const results = await runWorkStage(paths, item.id, "repo-plan", {
@@ -210,6 +210,9 @@ async function runRepoPlansForSpec(
 }
 
 function repoPlanStageStatus(results: Awaited<ReturnType<typeof runWorkRepoPlans>>): "passed" | "running" | "failed" {
+  if (results.some((result) => result.status === "failed")) {
+    return "failed";
+  }
   if (results.some((result) => result.status === "started")) {
     return "running";
   }

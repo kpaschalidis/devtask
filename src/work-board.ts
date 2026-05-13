@@ -56,7 +56,7 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
       rows.push({
         target: task.target,
         task: row.id,
-        stage: waitingForSpec ? "spec" : row.stage,
+        stage: waitingForSpec ? specBoardStage(spec.status) : row.stage,
         status,
         last: latestStageSummary(readStageLedger(repoPaths, task.taskId)),
         blocked: waitingForSpec ? specTask?.reason ?? spec.reason ?? "-" : actionableRunSkip?.reason ?? "-",
@@ -131,6 +131,13 @@ function specTaskStatus(specStatus: ReturnType<typeof getWorkSpecState>["status"
     return "ready";
   }
   return task.status;
+}
+
+function specBoardStage(status: ReturnType<typeof getWorkSpecState>["status"]): string {
+  if (status === "repo-planning" || status === "needs-repo-plan") {
+    return "repo-plan";
+  }
+  return "spec";
 }
 
 function workSpecBoardStatus(status: ReturnType<typeof getWorkSpecState>["status"]): string {
