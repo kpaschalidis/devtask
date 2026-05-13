@@ -63,6 +63,16 @@ describe("work logs", () => {
     expect(output).toContain("fix log");
   });
 
+  it("prints raw run logs when the run record is missing", async () => {
+    const { workspace } = await createWorkItemWithFailedCheck();
+    removeRunRecords(workspace);
+    process.chdir(workspace);
+    const output = await runCli(["work", "logs", "WORK-123", "--target", "backend", "--stage", "run"]);
+
+    expect(output).toContain("backend/work-123-backend run");
+    expect(output).toContain("run log");
+  });
+
   it("shows workspace planning output before materialization", async () => {
     const { workspace } = createUnmaterializedWorkItemWithPlanOutput();
     process.chdir(workspace);
@@ -231,6 +241,20 @@ function addFixLog(workspace: string): void {
     artifacts: [fixLogPath],
     reason: "worker command failed while applying fix"
   });
+}
+
+function removeRunRecords(workspace: string): void {
+  const paths = resolveWorkspacePathsForInit(workspace);
+  const materialization = readWorkMaterialization(paths, "WORK-123");
+  if (!materialization) {
+    throw new Error("Expected work materialization");
+  }
+  const task = materialization.tasks[0];
+  const repoPaths = resolvePaths(task.repoPath);
+  const runsDir = path.join(taskDir(repoPaths, task.taskId), "runs");
+  for (const file of fs.readdirSync(runsDir)) {
+    fs.unlinkSync(path.join(runsDir, file));
+  }
 }
 
 function createUnmaterializedWorkItemWithPlanOutput(): { workspace: string } {

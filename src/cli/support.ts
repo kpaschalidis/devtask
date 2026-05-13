@@ -844,11 +844,12 @@ function printStageTaskLog(
   }
 
   if (stage === "run") {
-    if (!review.latestRun) {
+    const logPath = review.latestRun?.logPath ?? readLatestLogPath(repoPaths, taskId);
+    if (!logPath) {
       console.log(`${label}: no run logs`);
       return;
     }
-    printFileLog(`${label} run`, review.latestRun.logPath, options);
+    printFileLog(`${label} run`, logPath, options);
     return;
   }
 
