@@ -606,6 +606,52 @@ export async function runWorkWorkflowStage(
   });
 }
 
+export async function runReviewStageForWork(
+  paths: ReturnType<typeof resolvePaths>,
+  taskId: string,
+  options: { attachable?: boolean; tmux?: boolean; plain?: boolean; poll?: number }
+): Promise<{ status: WorkflowUnitStatus; detail: string }> {
+  assertReviewReady(paths, getTask(paths, taskId), readConfig(paths));
+  const session = startStageSessionIfRequested(paths, taskId, "review", ["task", "review", taskId, "--plain"], options);
+  if (session) {
+    return {
+      status: await waitForAttachableStageStart(paths, taskId, "review", session, options.poll ?? 5),
+      detail: "stage session started"
+    };
+  }
+
+  await reviewTask(paths, taskId, { exitOnFindings: false });
+  const latest = await buildTaskReview(paths, getTask(paths, taskId));
+  return {
+    status: latest.latestReviewAgent?.status === "passed" ? "passed" : "failed",
+    detail: latest.latestReviewAgent?.status ?? "missing"
+  };
+}
+
+async function waitForAttachableStageStart(
+  paths: ReturnType<typeof resolvePaths>,
+  taskId: string,
+  stage: StageName,
+  session: string,
+  pollSeconds: number
+): Promise<"started" | "failed"> {
+  const deadline = Date.now() + Math.max(1, pollSeconds) * 1000;
+  while (Date.now() <= deadline) {
+    const state = readStageLedger(paths, taskId).stages[stage];
+    if (state?.status === "failed") {
+      return "failed";
+    }
+    if (state?.status === "running" || tmuxSessionExists(session)) {
+      return "started";
+    }
+    if (state?.status === "passed") {
+      return "started";
+    }
+    await sleep(200);
+  }
+  return "failed";
+}
+
 export function printWorkflowStageResult(headers: [string, string, string, string], result: Awaited<ReturnType<typeof runWorkflowStage>>): void {
   printTable(
     headers,

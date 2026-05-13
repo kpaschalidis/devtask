@@ -2,8 +2,6 @@ import { readConfig } from "../config.js";
 import { DevtaskError } from "../errors.js";
 import { planMarkdownPath, resolvePaths, resolveWorkspacePaths, workItemMaterializationPath } from "../paths.js";
 import { hasTaskPlan } from "../planner.js";
-import { assertReviewReady } from "../stage-policy.js";
-import { buildTaskReview } from "../task-inspection.js";
 import { getTask } from "../task-store.js";
 import { approveWorkPlan, readWorkMaterialization } from "../work-materializer.js";
 import { runWorkPlanner, workGraphPath, workPlanPath } from "../work-planner.js";
@@ -22,9 +20,9 @@ import {
   printWorkflowStageResult,
   resolvePrDraftMode,
   runReadyWorkTasks,
+  runReviewStageForWork,
   runWorkRepoPlans,
   runWorkWorkflowStage,
-  reviewTask,
   shellQuote,
   workflowCiStatus
 } from "./support.js";
@@ -290,21 +288,16 @@ export async function runWorkExec(
 
     const reviewResult = await runWorkWorkflowStage(paths, item, "review", undefined, async (unit) => {
       const repoPaths = resolvePaths(unit.repoPath);
-      assertReviewReady(repoPaths, getTask(repoPaths, unit.taskId), readConfig(repoPaths));
-      await reviewTask(repoPaths, unit.taskId, { exitOnFindings: false });
-      const latest = await buildTaskReview(repoPaths, getTask(repoPaths, unit.taskId));
-      return {
-        status: latest.latestReviewAgent?.status === "passed" ? "passed" : "failed",
-        detail: latest.latestReviewAgent?.status ?? "missing"
-      };
+      return runReviewStageForWork(repoPaths, unit.taskId, options);
     });
     printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], reviewResult);
+    const reviewStarted = reviewResult.results.some((result) => result.status === "started");
     return {
       result: reviewResult,
       final: {
-        status: workflowStageFailed(reviewResult) ? "failed" : "passed",
+        status: workflowStageFailed(reviewResult) ? "failed" : reviewStarted ? "running" : "passed",
         output: {
-          next: `devtask work approve-exec ${item.id}`
+          next: reviewStarted ? `devtask work board ${item.id}` : `devtask work approve-exec ${item.id}`
         },
         reason: workflowStageFailed(reviewResult) ? `review failed; run devtask work fix ${item.id} --from review` : null
       }

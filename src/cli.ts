@@ -16,7 +16,7 @@ import {
 import { writeTaskMeta } from "./meta.js";
 import { isProcessAlive, terminateProcessGroup } from "./processes.js";
 import { createTask, getTask, initializeStore, initializeWorkspace, listTasks } from "./task-store.js";
-import { buildTaskReview, inspectTaskHealth } from "./task-inspection.js";
+import { inspectTaskHealth } from "./task-inspection.js";
 import {
   attachTmuxSession,
   isTmuxAvailable,
@@ -41,7 +41,7 @@ import {
   type ScmPreflight
 } from "./scm.js";
 import { readStageLedger, recordStage, runStage, STAGE_NAMES, type StageName } from "./stage-contracts.js";
-import { assertCheckReady, assertCiReady, assertCommitReady, assertPrReady, assertReviewReady, assertRunReady } from "./stage-policy.js";
+import { assertCheckReady, assertCiReady, assertCommitReady, assertPrReady, assertRunReady } from "./stage-policy.js";
 import {
   assertJiraConfigured,
   buildJiraTaskGoal,
@@ -125,8 +125,8 @@ import {
   resolvePrDraftMode,
   resolveRequestedLogStage,
   resolveRunRuntime,
-  reviewTask,
   runReadyWorkTasks,
+  runReviewStageForWork,
   runWorkRepoPlans,
   runWorkWorkflowStage,
   selectOneWorkTask,
@@ -1023,16 +1023,7 @@ export function createCli(): Command {
         const item = getWorkItem(paths, id);
         const result = await runWorkWorkflowStage(paths, item, "review", options.target, async (unit) => {
           const repoPaths = resolvePaths(unit.repoPath);
-          assertReviewReady(repoPaths, getTask(repoPaths, unit.taskId), readConfig(repoPaths));
-          if (startStageSessionIfRequested(repoPaths, unit.taskId, "review", ["task", "review", unit.taskId, "--plain"], options)) {
-            return { status: "started", detail: "stage session started" };
-          }
-          await reviewTask(repoPaths, unit.taskId, { exitOnFindings: false });
-          const latest = await buildTaskReview(repoPaths, getTask(repoPaths, unit.taskId));
-          return {
-            status: latest.latestReviewAgent?.status === "passed" ? "passed" : "failed",
-            detail: latest.latestReviewAgent?.status ?? "missing"
-          };
+          return runReviewStageForWork(repoPaths, unit.taskId, options);
         });
         printWorkflowStageResult(["TARGET", "TASK", "STATUS", "DETAIL"], result);
         await updateRecentWork(paths, item);
