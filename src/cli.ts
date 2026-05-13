@@ -61,6 +61,12 @@ import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems, t
 import { runWorkPlanner, workGraphPath, workPlanPath } from "./work-planner.js";
 import { approveWorkPlan, readWorkMaterialization } from "./work-materializer.js";
 import { buildWorkBoardRows } from "./work-board.js";
+import {
+  buildWorkExecReviewPacket,
+  buildWorkSpecReviewPacket,
+  formatWorkExecReviewPacket,
+  formatWorkSpecReviewPacket
+} from "./work-review-packets.js";
 import { runWorkStage } from "./work-stage-contracts.js";
 import {
   workflowStageFailed
@@ -904,6 +910,21 @@ export function createCli(): Command {
     });
 
   work
+    .command("review-spec")
+    .description("Print a human review packet for the work spec before approval.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const packet = await buildWorkSpecReviewPacket(paths, item);
+        console.log(formatWorkSpecReviewPacket(packet));
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("run")
     .description("Run repo-local tasks that are ready in an approved work graph.")
     .argument("<id>")
@@ -1011,6 +1032,21 @@ export function createCli(): Command {
         if (workflowStageFailed(result)) {
           process.exit(1);
         }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("review-exec")
+    .description("Print a human review packet for committed implementation before approval.")
+    .argument("<id>")
+    .action(async (id: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const item = getWorkItem(paths, id);
+        const packet = await buildWorkExecReviewPacket(paths, item);
+        console.log(formatWorkExecReviewPacket(packet));
       } catch (error) {
         printError(error);
       }

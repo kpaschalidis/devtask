@@ -423,6 +423,29 @@ Rules:
 - must not run implementation agents
 - must not publish
 
+### `devtask work review-spec <id>`
+
+Read-only helper for reviewing the spec before approval.
+
+Inputs:
+
+- work source
+- work-level `plan.md`
+- graph
+- approved graph, if present
+- materialization, if present
+- repo-local plans, if present
+
+Artifacts:
+
+- none
+
+Rules:
+
+- must not approve, reject, publish, or mutate lifecycle state
+- should surface missing plans, missing graph, unknown targets, missing materialization, and missing repo plans
+- should answer: "Can the human confidently approve the spec?"
+
 ### `devtask work run <id>`
 
 Runs materialized repo tasks.
@@ -535,6 +558,32 @@ Rules:
 - separate from `approve-plan`
 - approves implementation diffs, not planning graph
 - must not publish PRs
+
+### `devtask work review-exec <id>`
+
+Read-only helper for reviewing committed implementation before execution approval.
+
+Inputs:
+
+- work source
+- approved graph/materialization
+- repo-local task metadata
+- committed branch diffs
+- dirty/untracked file state
+- check results
+- agent review results
+
+Artifacts:
+
+- none
+
+Rules:
+
+- must not approve, reject, publish, or mutate lifecycle state
+- must review committed branch diffs, not only uncommitted worktree diffs
+- should surface dirty tracked files as blockers
+- should surface untracked files as warnings
+- should answer: "Can the human confidently approve this work for publishing?"
 
 ### `devtask work approve-exec <id>`
 

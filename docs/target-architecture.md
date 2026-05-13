@@ -141,6 +141,14 @@ devtask work approve-spec <id>
 
 This is the human gate before implementation.
 
+Before approving, the developer can run:
+
+```bash
+devtask work review-spec <id>
+```
+
+This prints the source, work plan, graph, materialization, repo plans, dependencies, validation, and open questions in one read-only review packet.
+
 It should:
 
 - require a human-readable work plan
@@ -198,6 +206,14 @@ devtask work approve-exec <id>
 Human approval accepts the local diffs and review/check state, then publishes PRs and checks CI once.
 
 This is separate from `approve-spec`.
+
+Before approving, the developer can run:
+
+```bash
+devtask work review-exec <id>
+```
+
+This prints the committed branch diff summary, dirty/untracked files, check status, agent review status, task status, and PR status per target in one read-only review packet.
 
 ### 8. Low-Level Publish
 

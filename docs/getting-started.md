@@ -77,6 +77,7 @@ devtask work create APP-123 --from-jira
 ```bash
 devtask work spec APP-123
 devtask work show APP-123
+devtask work review-spec APP-123
 devtask work approve-spec APP-123
 ```
 
@@ -88,13 +89,14 @@ devtask work approve-spec APP-123
 - `.devtask/work/<id>/materialization.json`
 - repo-local tasks, worktrees, and repo-specific `plan.md` files
 
-`approve-spec` is the human gate before implementation. It approves the holistic workspace plan plus the repo-specific plans.
+`review-spec` prints the human review packet for the holistic workspace plan and repo-specific plans. `approve-spec` is the human gate before implementation.
 
 ## 6. Execute Implementation
 
 ```bash
 devtask work exec APP-123 --auto
 devtask work board APP-123
+devtask work review-exec APP-123
 ```
 
 `exec --auto` starts ready repo tasks, respects graph dependencies, runs checks, runs review, and stops before publishing. If a check or review fails, inspect logs and run `fix`, then run `exec --auto` again.
@@ -130,7 +132,7 @@ The low-level stage commands are available for manual recovery. The main path is
 devtask work approve-exec APP-123
 ```
 
-`approve-exec` is the human gate for implementation. It validates checks/review, approves repo tasks, creates PRs from existing commits, and checks CI once.
+`review-exec` prints the human review packet for committed branch diffs, checks, agent review, and dirty-file state. `approve-exec` is the human gate for implementation. It validates checks/review, approves repo tasks, creates PRs from existing commits, and checks CI once.
 
 Low-level publish commands remain available:
 
