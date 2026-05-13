@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sendToTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionName, waitForTmuxSession } from "../src/tmux.js";
 
-vi.mock("node:child_process", () => ({
-  spawnSync: vi.fn(() => ({ status: 0, error: undefined, stdout: "" }))
-}));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawnSync: vi.fn(() => ({ status: 0, error: undefined, stdout: "" }))
+  };
+});
 
 const { spawnSync } = await import("node:child_process");
 const mockedSpawnSync = vi.mocked(spawnSync);

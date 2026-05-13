@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tmux ls *)",
+      "Bash(/bin/zsh -lc 'echo PATH=__TRACKED_VAR__; which node; which codex')",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|py\\)$\")",
+      "Bash(npm run *)",
+      "Bash(npm test *)"
+    ]
+  }
+}

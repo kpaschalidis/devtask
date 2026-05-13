@@ -17,10 +17,24 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export type TaskRuntimeState = "unknown" | "alive" | "missing" | "completed";
+
+export interface TaskRuntimeLifecycle {
+  state: TaskRuntimeState;
+  reason: string;
+  lastObservedAt: string | null;
+}
+
+export interface TaskLifecycle {
+  version: 1;
+  runtime: TaskRuntimeLifecycle;
+}
+
 export interface TaskMeta {
   schemaVersion: 1;
   id: string;
   status: TaskStatus;
+  lifecycle: TaskLifecycle | null;
   branch: string;
   worktreePath: string;
   taskPath: string;
@@ -31,6 +45,7 @@ export interface TaskMeta {
   supervisorPid: number | null;
   childPid: number | null;
   tmuxSession: string | null;
+  agentSessionMode: "direct" | null;
   prUrl: string | null;
   failCount: number;
   maxRetries: number;

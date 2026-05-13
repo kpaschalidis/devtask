@@ -33,6 +33,14 @@ export function reconcileTaskRuntime(paths: DevtaskPaths, meta: TaskMeta): TaskM
     supervisorPid: null,
     childPid: null,
     tmuxSession: null,
+    lifecycle: {
+      version: 1,
+      runtime: {
+        state: "missing",
+        reason: "runtime_lost",
+        lastObservedAt: now
+      }
+    },
     updatedAt: now
   };
 

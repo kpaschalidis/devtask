@@ -3,12 +3,12 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { DevtaskError } from "../errors.js";
-import { planMarkdownPath, resolvePaths, resolveWorkspacePaths, scriptsDir, startupDir, taskMetaPath } from "../paths.js";
+import { planMarkdownPath, resolvePaths, resolveWorkspacePaths, scriptsDir, taskDir, taskMetaPath } from "../paths.js";
 import { writeTaskMeta } from "../meta.js";
 import { isProcessAlive, terminateProcessGroup } from "../processes.js";
 import { getTask, listTasks } from "../task-store.js";
 import { buildTaskReview, inspectTaskHealth, readLatestLogPath, readLatestRun } from "../task-inspection.js";
-import { attachTmuxSession, isTmuxAvailable, killTmuxSession, sendToTmuxSessionWithConfirmation, startTmuxSession, tmuxSessionExists, tmuxSessionName, waitForTmuxSession } from "../tmux.js";
+import { attachTmuxSession, createBareSession, isTmuxAvailable, killTmuxSession, sendLaunchCommand, sendToTmuxSessionWithConfirmation, startTmuxSession, tmuxSessionExists, tmuxSessionName, writeLaunchScript } from "../tmux.js";
 import { buildCodexCommand, readConfig, writeConfig } from "../config.js";
 import { assertCanMark, parseManualStatus } from "../lifecycle.js";
 import { readLatestVerification, runVerification, type VerificationRecord } from "../verification.js";
@@ -30,6 +30,7 @@ import { buildWorkBoardRows, type WorkBoardRow } from "../work-board.js";
 import { isRetryableRunFailure, isWorkTaskRunComplete, planWorkRun } from "../work-runner.js";
 import { DEFAULT_DEV_WORKFLOW, runWorkflowStage, workflowStageFailed, type WorkflowStageId, type WorkflowUnit } from "../workflow-engine.js";
 import { createFixRequestFromCheck } from "../fix-request.js";
+import { runRecovery } from "../recovery.js";
 import { readWorkStageLedger, WORK_STAGE_NAMES, type WorkStageContract } from "../work-stage-contracts.js";
 
 
@@ -635,6 +636,7 @@ export async function runReadyWorkTasks(
   item: WorkItem,
   options: { attachable?: boolean; tmux?: boolean; plain?: boolean }
 ): Promise<void> {
+  runRecovery(paths);
   const plan = planWorkRun(paths, item);
   for (const task of plan.skipped) {
     console.log(`${task.target}/${task.taskId}: skipped (${task.reason})`);
@@ -675,6 +677,7 @@ export async function followWorkRun(
   console.log(`Following work run ${item.id}`);
 
   while (true) {
+    runRecovery(paths);
     throwIfWorkRunFailed(paths, item, attemptedStarts);
     const plan = planWorkRun(paths, item);
     const startResult = await runWorkflowStage(DEFAULT_DEV_WORKFLOW, plan.ready, {
@@ -1549,12 +1552,14 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
     throw new DevtaskError(`Task ${id} is already supervised by PID ${meta.supervisorPid}`);
   }
 
+  const session = options.tmux ? tmuxSessionName(paths, id) : null;
   const next = {
     ...meta,
     status: "running" as const,
     supervisorPid: null,
     childPid: null,
-    tmuxSession: options.tmux ? tmuxSessionName(paths, id) : null,
+    tmuxSession: session,
+    agentSessionMode: null as "direct" | null,
     failCount: 0,
     updatedAt: new Date().toISOString()
   };
@@ -1563,7 +1568,7 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
     command: meta.command,
     worktreePath: meta.worktreePath,
     mode: options.tmux ? "attachable" : "plain",
-    tmuxSession: next.tmuxSession
+    tmuxSession: session
   };
   recordStage(paths, id, "run", {
     status: "running",
@@ -1584,23 +1589,78 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
   };
 
   const workerPath = resolveWorkerExecutablePath();
-  const workerCommand = [process.execPath, workerPath, id, "--root", paths.root];
 
   if (options.tmux) {
-    const session = next.tmuxSession;
     if (!session) {
       return rollbackStartFailure(new DevtaskError("Unable to derive tmux session name"));
     }
-    const startupLog = createStartupLogPath(paths, id);
     try {
-      startTmuxSession(session, tmuxWrappedWorkerCommand(workerCommand, startupLog), paths.root);
-      if (!waitForTmuxSession(session)) {
-        return rollbackStartFailure(buildTmuxStartupFailure(session, startupLog));
-      }
+      createBareSession(session, meta.worktreePath);
     } catch (error) {
-      rollbackStartFailure(error);
+      return rollbackStartFailure(error);
     }
-    return { pid: null, tmuxSession: session, startupLogPath: startupLog };
+
+    // Build the interactive agent launch command from the stored one-shot command.
+    // "codex exec --full-auto ... - < file" → "codex --full-auto ..."
+    const agentCommand = buildInteractiveAgentCommand(meta.command);
+
+    // Write a temp launch script with PATH + env exports so zsh path_helper
+    // doesn't wipe the PATH, and the agent can resolve $DEVTASK_TASK_DIR.
+    const currentTaskDir = taskDir(paths, id);
+    const runtimeStatePath = path.join(meta.worktreePath, ".devtask_state.md");
+    const runtimeResultPath = path.join(meta.worktreePath, ".devtask_result.json");
+    const scriptLines = [
+      `export PATH=$(printf '%s' ${JSON.stringify(process.env.PATH ?? "")})`,
+      `export DEVTASK_ROOT=${shellQuote(paths.root)}`,
+      `export DEVTASK_TASK_ID=${shellQuote(id)}`,
+      `export DEVTASK_TASK_DIR=${shellQuote(currentTaskDir)}`,
+      `export DEVTASK_PLAN_PATH=${shellQuote(planMarkdownPath(paths, id))}`,
+      `export DEVTASK_STATE_PATH=${shellQuote(runtimeStatePath)}`,
+      `export DEVTASK_RESULT_PATH=${shellQuote(runtimeResultPath)}`,
+      `exec ${agentCommand}`
+    ];
+    const scriptPath = writeLaunchScript(scriptLines.join("\n"));
+    sendLaunchCommand(session, `bash ${shellQuote(scriptPath)}`);
+
+    // Spawn the worker daemon OUTSIDE the tmux session so the pane stays
+    // clean for the user to attach to and see the agent's output.
+    let workerChild: ReturnType<typeof spawn> | null = null;
+    try {
+      workerChild = spawn(process.execPath, [workerPath, id, "--root", paths.root], {
+        cwd: paths.root,
+        detached: true,
+        stdio: "ignore"
+      });
+    } catch (error) {
+      try { killTmuxSession(session); } catch { /* best-effort cleanup */ }
+      return rollbackStartFailure(error);
+    }
+
+    if (!workerChild || workerChild.pid === undefined) {
+      try { killTmuxSession(session); } catch { /* best-effort cleanup */ }
+      return rollbackStartFailure(new DevtaskError("Failed to start worker process"));
+    }
+
+    const workerPid = workerChild.pid;
+    workerChild.unref();
+
+    writeTaskMeta(taskMetaPath(paths, id), {
+      ...next,
+      supervisorPid: workerPid,
+      tmuxSession: session,
+      agentSessionMode: "direct",
+      lifecycle: {
+        version: 1,
+        runtime: {
+          state: "alive" as const,
+          reason: "process_running",
+          lastObservedAt: new Date().toISOString()
+        }
+      },
+      updatedAt: new Date().toISOString()
+    });
+
+    return { pid: workerPid, tmuxSession: session };
   }
 
   let child: ReturnType<typeof spawn> | null = null;
@@ -1639,17 +1699,28 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
     ...next,
     supervisorPid: childPid,
     tmuxSession: null,
+    lifecycle: {
+      version: 1,
+      runtime: {
+        state: "alive" as const,
+        reason: "process_running",
+        lastObservedAt: new Date().toISOString()
+      }
+    },
     updatedAt: new Date().toISOString()
   });
 
   return { pid: childPid, tmuxSession: null };
 }
 
-function createStartupLogPath(paths: ReturnType<typeof resolvePaths>, id: string): string {
-  const dir = startupDir(paths, id);
-  fs.mkdirSync(dir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return path.join(dir, `${stamp}.log`);
+function buildInteractiveAgentCommand(oneShot: string): string {
+  // Convert "codex exec --full-auto ... - < "$DEVTASK_TASK_PATH""
+  // to "codex --full-auto ..." for interactive (REPL) mode.
+  // The task prompt is delivered post-launch via send-keys.
+  return oneShot
+    .replace(/^codex exec\b/, "codex")
+    .replace(/\s+-\s+<\s+\S+$/, "")
+    .trim();
 }
 
 export function resolveWorkerExecutablePath(argvPath = process.argv[1]): string {
@@ -1665,29 +1736,6 @@ export function resolveWorkerExecutablePath(argvPath = process.argv[1]): string 
   return found;
 }
 
-function tmuxWrappedWorkerCommand(workerCommand: string[], startupLog: string): string[] {
-  const quotedCommand = workerCommand.map(shellQuote).join(" ");
-  const quotedLog = shellQuote(startupLog);
-  return [
-    "/bin/zsh",
-    "-lc",
-    `exec ${quotedCommand} > ${quotedLog} 2>&1`
-  ];
-}
-
-function buildTmuxStartupFailure(session: string, startupLog: string): DevtaskError {
-  let detail = `tmux worker session ${session} exited during startup.`;
-  if (fs.existsSync(startupLog)) {
-    const output = fs.readFileSync(startupLog, "utf8").trim();
-    if (output) {
-      const tail = output.split("\n").slice(-20).join("\n");
-      detail = `${detail} Startup log: ${startupLog}\n${tail}`;
-    } else {
-      detail = `${detail} Startup log: ${startupLog}`;
-    }
-  }
-  return new DevtaskError(detail);
-}
 
 function assertFixReady(meta: ReturnType<typeof getTask>): void {
   if (meta.status === "running") {

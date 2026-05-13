@@ -9,6 +9,8 @@ import { newRunId, writeRunRecord, type RunStatus } from "./run-record.js";
 import { excludeDevtaskRuntimeFiles } from "./git.js";
 import { recordStage } from "./stage-contracts.js";
 import { clearActiveFixRequest, readActiveFixRequest } from "./fix-request.js";
+import { isSessionAliveAsync, sendMessageAsync, startPipePane } from "./tmux.js";
+import { CODEX_PROCESS_NAME, waitForAgentReady } from "./agent.js";
 
 export interface WorkerOptions {
   root?: string;
@@ -24,6 +26,14 @@ export async function runWorker(id: string, options: WorkerOptions = {}): Promis
   updateMeta(paths, id, (meta) => ({
     ...meta,
     supervisorPid: process.pid,
+    lifecycle: {
+      version: 1,
+      runtime: {
+        state: "alive" as const,
+        reason: "process_running",
+        lastObservedAt: new Date().toISOString()
+      }
+    },
     updatedAt: new Date().toISOString()
   }));
 
@@ -60,6 +70,9 @@ export async function runWorker(id: string, options: WorkerOptions = {}): Promis
 
 async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
   const meta = readTaskMeta(taskMetaPath(paths, id));
+  if (meta.agentSessionMode === "direct") {
+    return runOnceDirectSession(paths, id);
+  }
   const currentTaskDir = taskDir(paths, id);
   const runtimeStatePath = path.join(meta.worktreePath, ".devtask_state.md");
   const runtimeResultPath = path.join(meta.worktreePath, ".devtask_result.json");
@@ -207,6 +220,161 @@ async function runOnce(paths: DevtaskPaths, id: string): Promise<void> {
     status: nextStatus,
     childPid: null,
     failCount: nextFailCount,
+    lifecycle: {
+      version: 1,
+      runtime: {
+        state: "completed" as const,
+        reason: status === "success" ? "completed" : "runtime_lost",
+        lastObservedAt: finishedAt
+      }
+    },
+    updatedAt: finishedAt
+  }));
+}
+
+async function runOnceDirectSession(paths: DevtaskPaths, id: string): Promise<void> {
+  const meta = readTaskMeta(taskMetaPath(paths, id));
+  const session = meta.tmuxSession;
+  if (!session) return;
+
+  const sessionAlive = await isSessionAliveAsync(session);
+  if (!sessionAlive) return; // reconciler will catch the stale state on next getTask
+
+  const runtimeStatePath = path.join(meta.worktreePath, ".devtask_state.md");
+  const runtimeResultPath = path.join(meta.worktreePath, ".devtask_result.json");
+  const runId = newRunId();
+  const startedAt = new Date().toISOString();
+  const logsDir = path.join(taskDir(paths, id), "logs");
+  fs.mkdirSync(logsDir, { recursive: true });
+  await excludeDevtaskRuntimeFiles(meta.worktreePath);
+  prepareRuntimeFiles(meta.statePath, meta.resultPath, runtimeStatePath, runtimeResultPath);
+  const promptPath = prepareWorkerPrompt(paths, meta);
+  const fixRequest = readActiveFixRequest(paths, id);
+  const logPath = path.join(logsDir, `${runId}.log`);
+
+  recordStage(paths, id, "run", {
+    status: "running",
+    startedAt,
+    input: {
+      command: meta.command,
+      worktreePath: meta.worktreePath,
+      promptPath,
+      planPath: planMarkdownPath(paths, id)
+    },
+    artifacts: [logPath]
+  });
+  if (fixRequest) {
+    recordStage(paths, id, "fix", {
+      status: "running",
+      startedAt,
+      input: { fixId: fixRequest.fixId, source: fixRequest.source, summary: fixRequest.summary },
+      artifacts: [fixRequest.promptPath]
+    });
+  }
+
+  await startPipePane(session, logPath);
+
+  const ready = await waitForAgentReady(session, CODEX_PROCESS_NAME, { timeoutMs: 30_000 });
+  if (!ready) {
+    const reason = "agent did not become ready within timeout";
+    recordStage(paths, id, "run", {
+      status: "failed",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      artifacts: [logPath],
+      reason
+    });
+    updateMeta(paths, id, (current) => ({
+      ...current,
+      status: current.failCount + 1 >= current.maxRetries ? "failed" : current.status,
+      failCount: current.failCount + 1,
+      updatedAt: new Date().toISOString()
+    }));
+    return;
+  }
+
+  const promptContent = fs.readFileSync(promptPath, "utf8");
+  await sendMessageAsync(session, promptContent);
+
+  let status: RunStatus = "failed";
+  let resultStatus: string | null = null;
+
+  while (true) {
+    resultStatus = readResultStatus(runtimeResultPath);
+    if (resultStatus === "done" || resultStatus === "blocked") {
+      status = "success";
+      break;
+    }
+    const alive = await isSessionAliveAsync(session);
+    if (!alive) break;
+    await sleep(5_000);
+  }
+
+  harvestRuntimeFiles(runtimeStatePath, runtimeResultPath, meta.statePath, meta.resultPath);
+
+  const finishedAt = new Date().toISOString();
+  const latest = readTaskMeta(taskMetaPath(paths, id));
+  const nextFailCount = status === "success" ? 0 : latest.failCount + 1;
+  const nextStatus =
+    status === "failed" && nextFailCount >= latest.maxRetries
+      ? "failed"
+      : status === "success" && resultStatus === "done"
+        ? "done"
+        : status === "success" && resultStatus === "blocked"
+          ? "blocked"
+          : status === "success"
+            ? "review"
+          : latest.status;
+
+  writeRunRecord(path.join(taskDir(paths, id), "runs"), {
+    schemaVersion: 1,
+    runId,
+    taskId: id,
+    status,
+    command: latest.command,
+    cwd: latest.worktreePath,
+    logPath,
+    startedAt,
+    finishedAt,
+    exitCode: null
+  });
+
+  recordStage(paths, id, "run", {
+    status: nextStatus === "blocked" ? "blocked" : status === "success" ? "passed" : "failed",
+    startedAt,
+    finishedAt,
+    output: { runId, exitCode: null, resultStatus, nextStatus, failCount: nextFailCount },
+    artifacts: [logPath],
+    reason: status === "failed" ? "agent session exited without writing result" : nextStatus === "blocked" ? "task result reported blocked" : null
+  });
+  if (fixRequest) {
+    recordStage(paths, id, "fix", {
+      status: status === "success" ? "passed" : "failed",
+      startedAt,
+      finishedAt,
+      input: { fixId: fixRequest.fixId, source: fixRequest.source, summary: fixRequest.summary },
+      output: { runId, exitCode: null, resultStatus, nextStatus },
+      artifacts: [fixRequest.promptPath, logPath],
+      reason: status === "success" ? null : "agent session exited while applying fix"
+    });
+    if (status === "success") {
+      clearActiveFixRequest(paths, id);
+    }
+  }
+
+  updateMeta(paths, id, (current) => ({
+    ...current,
+    status: nextStatus,
+    childPid: null,
+    failCount: nextFailCount,
+    lifecycle: {
+      version: 1,
+      runtime: {
+        state: "completed" as const,
+        reason: status === "success" ? "completed" : "runtime_lost",
+        lastObservedAt: finishedAt
+      }
+    },
     updatedAt: finishedAt
   }));
 }
