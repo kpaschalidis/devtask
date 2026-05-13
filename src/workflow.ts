@@ -265,7 +265,7 @@ function describeLifecycle(review: TaskReview): { stage: string; status: string 
   if (review.meta.status === "pr-open") {
     const ci = review.stages.stages.ci;
     if (ci?.status === "skipped") {
-      return { stage: "-", status: "ci-skipped" };
+      return { stage: "-", status: "ci-unavailable" };
     }
     return { stage: "ci", status: "pending" };
   }

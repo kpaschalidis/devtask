@@ -227,7 +227,7 @@ describe("workflow recommendations", () => {
     });
     expect(buildBoardRow(review, config)).toMatchObject({
       stage: "-",
-      status: "ci-skipped",
+      status: "ci-unavailable",
       next: "CI status is unavailable"
     });
   });

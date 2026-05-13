@@ -131,7 +131,7 @@ devtask work show "$WORK_ID"
 Expected:
 
 - each publishable target gets its own PR
-- targets without provider CI can be marked `ci skipped`
+- targets without provider CI can be marked `ci unavailable`
 - V1 leaves final review and merge to the developer
 
 ## Cleanup

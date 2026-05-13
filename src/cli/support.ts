@@ -28,7 +28,7 @@ import { readLatestWorkPlanRecord, workGraphPath, workPlanPath, workPlansDir } f
 import { readWorkMaterialization } from "../work-materializer.js";
 import { buildWorkBoardRows, type WorkBoardRow } from "../work-board.js";
 import { isRetryableRunFailure, isWorkTaskRunComplete, planWorkRun } from "../work-runner.js";
-import { DEFAULT_DEV_WORKFLOW, runWorkflowStage, workflowStageFailed, type WorkflowStageId, type WorkflowUnit } from "../workflow-engine.js";
+import { DEFAULT_DEV_WORKFLOW, runWorkflowStage, workflowStageFailed, type WorkflowStageId, type WorkflowUnit, type WorkflowUnitStatus } from "../workflow-engine.js";
 import { createFixRequestFromCheck } from "../fix-request.js";
 import { runRecovery } from "../recovery.js";
 import { readWorkStageLedger, WORK_STAGE_NAMES, type WorkStageContract } from "../work-stage-contracts.js";
@@ -548,7 +548,7 @@ export async function runWorkWorkflowStage(
   item: WorkItem,
   stage: WorkflowStageId,
   target: string | undefined,
-  run: (unit: WorkflowUnit) => Promise<{ status: "passed" | "failed" | "running" | "skipped" | "started"; detail: string }>
+  run: (unit: WorkflowUnit) => Promise<{ status: WorkflowUnitStatus; detail: string }>
 ): Promise<Awaited<ReturnType<typeof runWorkflowStage>>> {
   return runWorkflowStage(DEFAULT_DEV_WORKFLOW, getWorkWorkflowUnits(paths, item, target), {
     stage,
@@ -1511,7 +1511,7 @@ function taskStatusFromCiResult(status: Awaited<ReturnType<typeof checkProviderC
   return "pr-open";
 }
 
-export function workflowCiStatus(status: ReturnType<typeof getTask>["status"]): "passed" | "failed" | "running" | "skipped" {
+export function workflowCiStatus(status: ReturnType<typeof getTask>["status"]): "passed" | "failed" | "running" | "unavailable" {
   if (status === "ci-passed") {
     return "passed";
   }
@@ -1521,7 +1521,7 @@ export function workflowCiStatus(status: ReturnType<typeof getTask>["status"]): 
   if (status === "ci-running") {
     return "running";
   }
-  return "skipped";
+  return "unavailable";
 }
 
 function stageStatusFromCiResult(status: Awaited<ReturnType<typeof checkProviderCi>>["status"]): "passed" | "failed" | "running" | "skipped" {
