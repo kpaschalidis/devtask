@@ -351,10 +351,10 @@ export function printWorkItems(items: WorkItem[]): void {
   );
 }
 
-export async function printWorkSummary(paths: ReturnType<typeof resolveWorkspacePaths>, item: WorkItem): Promise<void> {
+export async function printWorkSummary(paths: ReturnType<typeof resolveWorkspacePaths>, item: WorkItem, options: { source?: boolean } = {}): Promise<void> {
   console.log(`Work: ${item.id}`);
   console.log(`Status: ${item.status}`);
-  console.log(`Source: ${formatWorkSource(item)}`);
+  const source = printWorkSourceSummary(item);
   console.log(`Created: ${item.createdAt}`);
   console.log(`Updated: ${item.updatedAt}`);
   const latestStage = latestWorkStage(readWorkStageLedger(paths, item.id));
@@ -389,6 +389,12 @@ export async function printWorkSummary(paths: ReturnType<typeof resolveWorkspace
     console.log("Pull Requests:");
     printTable(["TARGET", "TASK", "URL"], prRows);
   }
+
+  if (options.source && source) {
+    console.log("");
+    console.log("Source content:");
+    console.log(source.content.trimEnd());
+  }
 }
 
 function formatWorkSource(item: WorkItem): string {
@@ -396,6 +402,50 @@ function formatWorkSource(item: WorkItem): string {
     return `${item.source.key} - ${item.source.title} (${item.source.url})`;
   }
   return item.source.title;
+}
+
+function printWorkSourceSummary(item: WorkItem): ReturnType<typeof readSourceArtifact> {
+  console.log(`Source: ${formatWorkSource(item)}`);
+  if (!item.source.artifact) {
+    return null;
+  }
+
+  console.log(`Source artifact: ${item.source.artifact}`);
+  const source = readSourceArtifact(item.source.artifact);
+  if (!source) {
+    console.log("Source preview: artifact missing");
+    return null;
+  }
+
+  console.log(`Source size: ${source.lineCount} lines / ${source.charCount} chars`);
+  const preview = source.preview;
+  if (preview.length > 0) {
+    console.log("Source preview:");
+    for (const line of preview) {
+      console.log(`  ${line}`);
+    }
+  }
+  return source;
+}
+
+function readSourceArtifact(filePath: string): { content: string; lineCount: number; charCount: number; preview: string[] } | null {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  const content = fs.readFileSync(filePath, "utf8");
+  const lines = content.split(/\r?\n/);
+  const preview = lines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#") && !/^[A-Za-z ]+:/.test(line))
+    .slice(0, 4);
+
+  return {
+    content,
+    lineCount: content.trim().length === 0 ? 0 : lines.length,
+    charCount: content.length,
+    preview
+  };
 }
 
 function collectWorkPrRows(materialization: ReturnType<typeof readWorkMaterialization>): string[][] {

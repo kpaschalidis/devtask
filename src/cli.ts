@@ -503,7 +503,8 @@ export function createCli(): Command {
     .description("Show one work item.")
     .argument("<id>")
     .option("--json", "Print raw work item metadata JSON")
-    .action(async (id: string, options: { json?: boolean }) => {
+    .option("--source", "Print the full source artifact content")
+    .action(async (id: string, options: { json?: boolean; source?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
@@ -511,7 +512,7 @@ export function createCli(): Command {
           console.log(JSON.stringify(item, null, 2));
           return;
         }
-        await printWorkSummary(paths, item);
+        await printWorkSummary(paths, item, { source: options.source === true });
       } catch (error) {
         printError(error);
       }
