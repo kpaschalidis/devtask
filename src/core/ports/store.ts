@@ -41,7 +41,7 @@ export interface RunAttemptStore {
 export interface ArtifactStore {
   save(artifact: Artifact): void;
   listByStageAttempt(stageAttemptId: string): Artifact[];
-  listByTask(workId: string, taskId: string): Artifact[];
+  listByTask(workId: string, taskId: string | null): Artifact[];
 }
 
 export interface GateStore {
