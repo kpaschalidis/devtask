@@ -515,11 +515,12 @@ export function createCli(): Command {
     .command("board")
     .description("Show work-item planning/materialization state and repo task next commands.")
     .argument("<id>")
-    .action(async (id: string) => {
+    .option("--target <target-id>", "Only show rows for one workspace target")
+    .action(async (id: string, options: { target?: string }) => {
       try {
         const paths = resolveWorkspacePaths();
         const item = getWorkItem(paths, id);
-        const rows = await buildWorkBoardRows(paths, item);
+        const rows = (await buildWorkBoardRows(paths, item)).filter((row) => !options.target || row.target === options.target);
         printTable(
           ["TARGET", "TASK", "STAGE", "STATUS", "LAST", "BLOCKED", "CHECK", "REVIEW", "PR", "UPDATED", "NEXT"],
           rows.map((row) => [
@@ -615,17 +616,22 @@ export function createCli(): Command {
           return;
         }
         if (!options.target) {
-          throw new DevtaskError("Use --target to attach to a materialized repo task");
+          const targets = [...new Set((readWorkMaterialization(paths, item.id)?.tasks ?? []).map((t) => t.target))];
+          const hint = targets.length > 0 ? `\nAvailable targets: ${targets.join(", ")}` : "";
+          throw new DevtaskError(`Use --target to attach to a materialized repo task.${hint}`);
         }
-        const task = selectOneWorkTask(paths, item, options.target);
-        const repoPaths = resolvePaths(task.repoPath);
-        const meta = getTask(repoPaths, task.taskId);
-        const session = resolveAttachSession(repoPaths, meta, options.stage);
-        if (!tmuxSessionExists(session)) {
-          const status = meta.supervisorPid || meta.childPid ? `status: ${meta.status}, supervisor: ${meta.supervisorPid ?? "-"}` : `status: ${meta.status}`;
-          throw new DevtaskError(`No attachable session for ${task.target}/${task.taskId} (${status}).`);
+        const candidates = selectWorkTasks(paths, item, options.target).map((task) => {
+          const repoPaths = resolvePaths(task.repoPath);
+          const meta = getTask(repoPaths, task.taskId);
+          const session = resolveAttachSession(repoPaths, meta, options.stage);
+          return { task, meta, session };
+        });
+        const found = candidates.find(({ session }) => tmuxSessionExists(session));
+        if (!found) {
+          const summary = candidates.map(({ task, meta }) => `${task.target}/${task.taskId} (status: ${meta.status})`).join(", ");
+          throw new DevtaskError(`No attachable session for ${summary}.`);
         }
-        attachTmuxSession(session);
+        attachTmuxSession(found.session);
       } catch (error) {
         printError(error);
       }

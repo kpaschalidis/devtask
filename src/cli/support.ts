@@ -1595,6 +1595,9 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
       return rollbackStartFailure(new DevtaskError("Unable to derive tmux session name"));
     }
     try {
+      if (tmuxSessionExists(session)) {
+        killTmuxSession(session);
+      }
       createBareSession(session, meta.worktreePath);
     } catch (error) {
       return rollbackStartFailure(error);
@@ -1715,10 +1718,13 @@ export function startWorker(paths: ReturnType<typeof resolvePaths>, id: string, 
 
 function buildInteractiveAgentCommand(oneShot: string): string {
   // Convert "codex exec --full-auto ... - < "$DEVTASK_TASK_PATH""
-  // to "codex --full-auto ..." for interactive (REPL) mode.
-  // The task prompt is delivered post-launch via send-keys.
+  // to "codex -a never ..." for interactive (REPL) mode.
+  // --full-auto is exec-only; the interactive equivalent is -a never.
+  // --skip-git-repo-check is also exec-only and is dropped.
   return oneShot
     .replace(/^codex exec\b/, "codex")
+    .replace(/--full-auto/, "-a never")
+    .replace(/\s+--skip-git-repo-check/, "")
     .replace(/\s+-\s+<\s+\S+$/, "")
     .trim();
 }

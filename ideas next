@@ -1,0 +1,2 @@
+- global registry of workspaces (later ui managing all in one place)
+- after plan, iterate, approve, there should be an option to run the rest of the pipeline in auto mode

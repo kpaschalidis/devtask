@@ -68,6 +68,7 @@ export function attachTmuxSession(session: string): void {
     throw new DevtaskError(`tmux session ${session} does not exist`);
   }
 
+  process.stderr.write("Attaching to tmux session. Press Ctrl+b d to detach without stopping the agent.\n");
   const result = spawnSync("tmux", ["attach-session", "-t", session], { stdio: "inherit" });
   if (result.error || result.status !== 0) {
     throw new DevtaskError(`Failed to attach tmux session ${session}`);
@@ -222,17 +223,23 @@ export async function sendMessageAsync(session: string, message: string): Promis
     fs.writeFileSync(tmpPath, message, { encoding: "utf8", mode: 0o600 });
     try {
       await tmuxAsync("load-buffer", "-b", bufferName, tmpPath);
-      await tmuxAsync("paste-buffer", "-b", bufferName, "-t", session, "-d");
+      // -p = bracket-paste mode: content arrives as one atomic event, not per-keystroke.
+      await tmuxAsync("paste-buffer", "-p", "-b", bufferName, "-t", session, "-d");
     } finally {
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       try { await tmuxAsync("delete-buffer", "-b", bufferName); } catch { /* ignore */ }
     }
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
   } else {
     await tmuxAsync("send-keys", "-t", session, "-l", message);
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
   }
 
-  await new Promise<void>((resolve) => setTimeout(resolve, 300));
   await tmuxAsync("send-keys", "-t", session, "Enter");
+}
+
+export async function sendKeyAsync(session: string, key: string): Promise<void> {
+  await tmuxAsync("send-keys", "-t", session, key);
 }
 
 export async function startPipePane(session: string, logPath: string): Promise<void> {

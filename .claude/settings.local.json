@@ -5,7 +5,28 @@
       "Bash(/bin/zsh -lc 'echo PATH=__TRACKED_VAR__; which node; which codex')",
       "Bash(grep -E \"\\\\.\\(ts|tsx|js|py\\)$\")",
       "Bash(npm run *)",
-      "Bash(npm test *)"
+      "Bash(npm test *)",
+      "Bash(node dist/cli/index.js work show CPS-609)",
+      "Bash(devtask work *)",
+      "Bash(devtask list *)",
+      "Bash(devtask task *)",
+      "Bash(devtask --help)",
+      "Bash(codex *)",
+      "Bash(node *)",
+      "Bash(tmux capture-pane *)",
+      "Bash(kill 37016)",
+      "Bash(tmux kill-session *)",
+      "Bash(devtask where *)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(tmux display-message *)",
+      "Bash(kill 36119)",
+      "Bash(pkill -f \"devtask-worker.js backend-experience-contract\")",
+      "Bash(pkill -f \"devtask-worker.js dragonfly-experience-listing-alignment\")",
+      "WebSearch",
+      "Bash(gh api *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:smithery.ai)",
+      "WebFetch(domain:mcpmarket.com)"
     ]
   }
 }

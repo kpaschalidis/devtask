@@ -4,7 +4,7 @@ import { isProcessAlive } from "./processes.js";
 import type { DevtaskPaths } from "./paths.js";
 import { taskMetaPath } from "./paths.js";
 import { readStageLedger, recordStage } from "./stage-contracts.js";
-import { tmuxSessionExists } from "./tmux.js";
+import { killTmuxSession, tmuxSessionExists } from "./tmux.js";
 import type { TaskMeta } from "./types.js";
 
 export function runRecovery(paths: DevtaskPaths): void {
@@ -67,6 +67,9 @@ function markAlive(paths: DevtaskPaths, id: string, meta: TaskMeta): void {
 }
 
 function markRuntimeLost(paths: DevtaskPaths, id: string, meta: TaskMeta): void {
+  if (meta.tmuxSession) {
+    try { killTmuxSession(meta.tmuxSession); } catch { /* best-effort */ }
+  }
   const now = new Date().toISOString();
   const next: TaskMeta = {
     ...meta,

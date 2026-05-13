@@ -7,7 +7,7 @@ import { readTaskMeta, writeTaskMeta } from "./meta.js";
 import { acquireLock, releaseLock } from "./lock.js";
 import { newRunId, writeRunRecord, type RunStatus } from "./run-record.js";
 import { excludeDevtaskRuntimeFiles } from "./git.js";
-import { recordStage } from "./stage-contracts.js";
+import { readStageLedger, recordStage } from "./stage-contracts.js";
 import { clearActiveFixRequest, readActiveFixRequest } from "./fix-request.js";
 import { isSessionAliveAsync, sendMessageAsync, startPipePane } from "./tmux.js";
 import { CODEX_PROCESS_NAME, waitForAgentReady } from "./agent.js";
@@ -238,7 +238,36 @@ async function runOnceDirectSession(paths: DevtaskPaths, id: string): Promise<vo
   if (!session) return;
 
   const sessionAlive = await isSessionAliveAsync(session);
-  if (!sessionAlive) return; // reconciler will catch the stale state on next getTask
+  if (!sessionAlive) {
+    // Session died between runs. Record as failure so the worker loop exits
+    // and the follow loop can restart with a fresh session.
+    const latest = readTaskMeta(taskMetaPath(paths, id));
+    if (latest.status !== "running") return;
+    const nextFailCount = latest.failCount + 1;
+    const runStage = readStageLedger(paths, id).stages.run;
+    if (runStage?.status === "running") {
+      recordStage(paths, id, "run", {
+        status: "failed",
+        input: runStage.input,
+        artifacts: runStage.artifacts,
+        reason: `tmux session ${session} no longer exists`
+      });
+    }
+    updateMeta(paths, id, (current) => ({
+      ...current,
+      status: "failed",
+      supervisorPid: null,
+      childPid: null,
+      tmuxSession: null,
+      failCount: nextFailCount,
+      lifecycle: {
+        version: 1,
+        runtime: { state: "missing" as const, reason: "runtime_lost", lastObservedAt: new Date().toISOString() }
+      },
+      updatedAt: new Date().toISOString()
+    }));
+    return;
+  }
 
   const runtimeStatePath = path.join(meta.worktreePath, ".devtask_state.md");
   const runtimeResultPath = path.join(meta.worktreePath, ".devtask_result.json");
@@ -286,7 +315,9 @@ async function runOnceDirectSession(paths: DevtaskPaths, id: string): Promise<vo
     });
     updateMeta(paths, id, (current) => ({
       ...current,
-      status: current.failCount + 1 >= current.maxRetries ? "failed" : current.status,
+      // Always transition to "failed" in direct-session mode so the worker loop
+      // exits and the follow loop can restart with a fresh session.
+      status: "failed",
       failCount: current.failCount + 1,
       updatedAt: new Date().toISOString()
     }));
@@ -316,15 +347,13 @@ async function runOnceDirectSession(paths: DevtaskPaths, id: string): Promise<vo
   const latest = readTaskMeta(taskMetaPath(paths, id));
   const nextFailCount = status === "success" ? 0 : latest.failCount + 1;
   const nextStatus =
-    status === "failed" && nextFailCount >= latest.maxRetries
-      ? "failed"
-      : status === "success" && resultStatus === "done"
-        ? "done"
-        : status === "success" && resultStatus === "blocked"
-          ? "blocked"
-          : status === "success"
-            ? "review"
-          : latest.status;
+    status === "success" && resultStatus === "done"
+      ? "done"
+      : status === "success" && resultStatus === "blocked"
+        ? "blocked"
+        : status === "success"
+          ? "review"
+          : "failed"; // direct-session failures always exit to "failed" so the follow loop can restart
 
   writeRunRecord(path.join(taskDir(paths, id), "runs"), {
     schemaVersion: 1,
