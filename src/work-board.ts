@@ -64,7 +64,13 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
         review: row.review,
         pr: row.pr,
         updated: row.updated,
-        next: waitingForSpec ? spec.next : actionableRunSkip ? blockedWorkNext(item.id, actionableRunSkip.reason) : row.status === "running" ? "in progress" : workLevelNext(item.id, row.stage, row.next)
+        next: waitingForSpec
+          ? spec.next
+          : actionableRunSkip
+            ? blockedWorkNext(item.id, actionableRunSkip.reason)
+            : row.status === "running"
+              ? "in progress"
+              : workLevelNext(item.id, task.repoPath, row.stage, row.status, row.next)
       });
     } catch (error) {
       if (!(error instanceof DevtaskError)) {
@@ -168,15 +174,27 @@ function stageTime(stage: { finishedAt: string | null; startedAt: string | null 
   return Number.isFinite(value) ? value : 0;
 }
 
-function workLevelNext(workId: string, stage: string, fallback: string): string {
+function workLevelNext(workId: string, repoPath: string, stage: string, status: string, fallback: string): string {
   if (stage === "plan") {
     return `devtask work spec ${shellQuote(workId)}`;
   }
   if (["run", "check", "fix", "review"].includes(stage)) {
     return `devtask work exec ${shellQuote(workId)} --auto`;
   }
-  if (["approve", "commit", "pr", "ci"].includes(stage)) {
+  if (stage === "approve") {
     return `devtask work approve-exec ${shellQuote(workId)}`;
+  }
+  if (stage === "commit") {
+    return `devtask work commit ${shellQuote(workId)}`;
+  }
+  if (stage === "pr") {
+    return `devtask work pr ${shellQuote(workId)} --ready`;
+  }
+  if (stage === "ci") {
+    if (status === "pending") {
+      return `devtask work ci ${shellQuote(workId)}`;
+    }
+    return repoLocalNext(repoPath, fallback);
   }
   return fallback;
 }
@@ -186,4 +204,11 @@ function shellQuote(value: string): string {
     return value;
   }
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function repoLocalNext(repoPath: string, fallback: string): string {
+  if (!fallback.startsWith("devtask ")) {
+    return fallback;
+  }
+  return `(cd ${shellQuote(repoPath)} && ${fallback})`;
 }

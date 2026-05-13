@@ -442,6 +442,148 @@ describe("work board", () => {
       })
     ]);
   });
+
+  it("routes pending CI to the work-level ci command", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-ci-pending-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Implement work"
+    });
+    addWorkspaceTarget(paths, {
+      id: "backend",
+      repoPath: repo,
+      kind: "api"
+    });
+    fs.writeFileSync(workPlanPath(paths, item.id), "# Plan\n");
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependencies: []
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+    await approveWorkPlan(paths, item);
+    markMaterializedTasksPlanned(paths, item.id);
+    const materialization = readWorkMaterialization(paths, item.id);
+    if (!materialization) {
+      throw new Error("Expected materialization");
+    }
+    const task = materialization.tasks[0];
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+    writeTaskMeta(taskMetaPath(repoPaths, task.taskId), {
+      ...meta,
+      status: "pr-open",
+      prUrl: "https://example.com/pr/1"
+    });
+    recordStage(repoPaths, task.taskId, "check", {
+      status: "passed"
+    });
+    recordStage(repoPaths, task.taskId, "review", {
+      status: "passed"
+    });
+
+    await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
+      expect.objectContaining({
+        target: "backend",
+        task: "work-123-backend",
+        stage: "ci",
+        status: "pending",
+        next: "devtask work ci WORK-123"
+      })
+    ]);
+  });
+
+  it("falls back to the repo-local remediation path when CI fails", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-board-ci-failed-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Implement work"
+    });
+    addWorkspaceTarget(paths, {
+      id: "backend",
+      repoPath: repo,
+      kind: "api"
+    });
+    fs.writeFileSync(workPlanPath(paths, item.id), "# Plan\n");
+    fs.writeFileSync(
+      workGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          tasks: [
+            {
+              id: "work-123-backend",
+              target: "backend",
+              goal: "Implement backend behavior.",
+              owns: ["server/**"],
+              dependencies: []
+            }
+          ],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+    await approveWorkPlan(paths, item);
+    markMaterializedTasksPlanned(paths, item.id);
+    const materialization = readWorkMaterialization(paths, item.id);
+    if (!materialization) {
+      throw new Error("Expected materialization");
+    }
+    const task = materialization.tasks[0];
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+    writeTaskMeta(taskMetaPath(repoPaths, task.taskId), {
+      ...meta,
+      status: "ci-failed",
+      prUrl: "https://example.com/pr/1"
+    });
+    recordStage(repoPaths, task.taskId, "check", {
+      status: "passed"
+    });
+    recordStage(repoPaths, task.taskId, "review", {
+      status: "passed"
+    });
+    recordStage(repoPaths, task.taskId, "ci", {
+      status: "failed",
+      reason: "CI check failed"
+    });
+
+    await expect(buildWorkBoardRows(paths, item)).resolves.toEqual([
+      expect.objectContaining({
+        target: "backend",
+        task: "work-123-backend",
+        stage: "ci",
+        status: "failed",
+        next: expect.stringContaining("devtask task continue work-123-backend")
+      })
+    ]);
+  });
 });
 
 function markMaterializedTasksPlanned(paths: ReturnType<typeof resolveWorkspacePathsForInit>, workId: string): void {
