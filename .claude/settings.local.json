@@ -26,7 +26,19 @@
       "Bash(gh api *)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:smithery.ai)",
-      "WebFetch(domain:mcpmarket.com)"
+      "WebFetch(domain:mcpmarket.com)",
+      "Bash(python3 -m json.tool)",
+      "Bash(chmod +x *)",
+      "Bash(python3 -c \"import json,sys; s=json.load\\(sys.stdin\\)['stages']; c=s.get\\('check',{}\\); print\\(json.dumps\\(c, indent=2\\)\\)\")",
+      "Bash(git *)",
+      "Bash(bash -x ./devtask-verify.sh)",
+      "Bash(./devtask-verify.sh)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(docker compose *)",
+      "Bash(docker run *)",
+      "Bash(docker volume *)",
+      "Bash(npx tsc *)",
+      "Bash(npx vitest *)"
     ]
   }
 }
