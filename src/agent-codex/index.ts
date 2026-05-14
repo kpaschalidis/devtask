@@ -8,8 +8,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { AgentRunner, RunEvent, RunOptions, ActivityState } from '../core/ports/agent-runner.js';
-import type { SessionHandle } from '../core/domain/run-attempt.js';
+import type { AgentRunner, RunEvent, RunOptions, ActivityState, SessionHandle } from '../core/ports/agent-runner.js';
 
 const execFileAsync = promisify(execFile);
 

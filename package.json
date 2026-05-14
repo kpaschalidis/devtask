@@ -29,7 +29,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "commander": "^14.0.3"
+    "@mastra/core": "^1.33.1",
+    "commander": "^14.0.3",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

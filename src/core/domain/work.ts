@@ -9,9 +9,11 @@ export type WorkStatus =
 
 export interface Work {
   id: string;
+  repoPath: string;
   title: string;
   description: string | null;
   status: WorkStatus;
+  mastraRunId?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -6,6 +6,7 @@
     "worktrees",
     "devtask",
     "pipefail",
-    "AUTOINCREMENT"
+    "AUTOINCREMENT",
+    "dountil"
   ]
 }

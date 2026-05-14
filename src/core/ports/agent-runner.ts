@@ -1,4 +1,4 @@
-import type { SessionHandle } from '../domain/run-attempt.js';
+import type { SessionHandle } from '../domain/task.js';
 
 export type { SessionHandle };
 
