@@ -14,9 +14,7 @@ export function getReadyTasks(
   return graph.tasks.filter((task) => {
     const status = taskStates.get(task.id) ?? 'pending';
     if (status !== 'pending') return false;
-    // Tasks on the same repo run sequentially
     if (runningRepos.has(task.repoPath)) return false;
-    // All dependencies must be completed
     return task.dependsOn.every((depId) => taskStates.get(depId) === 'completed');
   });
 }
