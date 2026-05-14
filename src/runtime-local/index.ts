@@ -8,14 +8,14 @@ import { createTaskWorktree } from '../git.js';
 
 const execFileAsync = promisify(execFile);
 
-export interface TmuxRuntimeConfig {
+export interface LocalRuntimeConfig {
   // Root directory where git worktrees are created.
   // Each workspace lives at <workspacesRoot>/<workId>/<taskId>/
   workspacesRoot: string;
 }
 
-export class TmuxRuntimeBackend implements RuntimeBackend {
-  constructor(private readonly config: TmuxRuntimeConfig) {}
+export class LocalRuntimeBackend implements RuntimeBackend {
+  constructor(private readonly config: LocalRuntimeConfig) {}
 
   async createWorkspace(workId: string, taskId: string, repoPath: string): Promise<WorkspaceInfo> {
     const worktreeDir = path.join(this.config.workspacesRoot, workId, taskId);

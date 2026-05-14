@@ -4,6 +4,8 @@
     "speccing",
     "worktree",
     "worktrees",
-    "devtask"
+    "devtask",
+    "pipefail",
+    "AUTOINCREMENT"
   ]
 }
