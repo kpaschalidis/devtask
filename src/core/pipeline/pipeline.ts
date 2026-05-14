@@ -33,7 +33,7 @@ const resumeEnvelope = z.object({ data: z.unknown() });
 // ---------------------------------------------------------------------------
 
 export function createPipeline(config: PipelineConfig): Pipeline {
-  const { workPhases, taskPhases, ports, stores, logger } = config;
+  const { workPhases, taskPhases, stores, logger } = config;
 
   const mastra = buildMastra(workPhases, taskPhases, config);
 

@@ -76,6 +76,7 @@ import { cleanupWorkItem } from "./work-cleanup.js";
 import { registerTaskCommands } from "./cli/task.js";
 import { registerJiraCommands } from "./cli/jira.js";
 import { registerRegistryCommands } from "./cli/registry.js";
+import { registerPipelineCommands } from "./cli/pipeline.js";
 import { assertRepoPlansReady, runWorkApproveExec, runWorkExec, runWorkSpec, workNextCommand } from "./cli/work-phases.js";
 import {
   globalIndexPath,
@@ -1352,6 +1353,7 @@ export function createCli(): Command {
   registerJiraCommands(program);
 
   registerRegistryCommands(program);
+  registerPipelineCommands(program);
 
   const doctor = program.command("doctor").description("Inspect local devtask setup and task health.");
 
