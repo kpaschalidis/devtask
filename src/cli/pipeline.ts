@@ -35,7 +35,7 @@ export function registerPipelineCommands(program: Command): void {
           const now = ts();
           const work: Work = {
             id: workId,
-            repoPath: path.resolve(opts.repo),
+            repoPaths: [path.resolve(opts.repo)],
             title,
             description: opts.description ?? null,
             status: 'pending',
@@ -74,11 +74,15 @@ export function registerPipelineCommands(program: Command): void {
           const task: Task = {
             id: taskId,
             workId,
-            repoPath: opts.repo ? path.resolve(opts.repo) : work.repoPath,
+            repoPath: opts.repo ? path.resolve(opts.repo) : (work.repoPaths[0] ?? process.cwd()),
             title,
             description: opts.description ?? null,
             status: 'pending',
             dependsOn: opts.dependsOn ?? [],
+            acceptanceCriteria: [],
+            filesToCreate: [],
+            filesToModify: [],
+            phase: 1,
             verifyScript: opts.script,
             createdAt: now,
             updatedAt: now,
@@ -160,7 +164,7 @@ export function registerPipelineCommands(program: Command): void {
           console.log(`\nWork:   ${work.id}`);
           console.log(`Title:  ${work.title}`);
           console.log(`Status: ${work.status}`);
-          console.log(`Repo:   ${work.repoPath}`);
+          console.log(`Repos:  ${work.repoPaths.join(', ')}`);
 
           const tasks = stores.tasks.listByWork(workId);
           if (tasks.length > 0) {

@@ -17,8 +17,12 @@ export interface Task {
   title: string;
   description: string | null;
   status: TaskStatus;
-  dependsOn: string[];        // taskIds this task must wait for
-  verifyScript?: string;      // bash script to verify the task; produced by the spec agent
+  dependsOn: string[];
+  acceptanceCriteria: string[];
+  filesToCreate: string[];
+  filesToModify: string[];
+  phase: number;
+  verifyScript?: string;
   sessionHandle?: SessionHandle;
   mastraRunId?: string;
   createdAt: string;

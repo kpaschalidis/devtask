@@ -33,7 +33,13 @@ function createStores(): CoreStores {
     save: (g) => { graphs.set(g.workId, g); },
     getByWork: (workId) => graphs.get(workId) ?? null,
   };
-  return { work, tasks: taskStore, graph };
+  const specMap = new Map<string, import('../domain/spec.js').Spec>();
+  const specs = {
+    save: (s: import('../domain/spec.js').Spec) => { specMap.set(s.id, s); specMap.set(`w:${s.workId}`, s); },
+    getById: (id: string) => specMap.get(id) ?? null,
+    getByWork: (workId: string) => specMap.get(`w:${workId}`) ?? null,
+  };
+  return { work, tasks: taskStore, graph, specs };
 }
 
 // ── Mock adapters ─────────────────────────────────────────────────────────────
@@ -74,11 +80,11 @@ const autoShipPhase: TaskPhase = {
 function ts() { return new Date().toISOString(); }
 
 function makeWork(id: string): Work {
-  return { id, repoPath: '/repo', title: 'Test work', description: null, status: 'pending', createdAt: ts(), updatedAt: ts() };
+  return { id, repoPaths: ['/repo'], title: 'Test work', description: null, status: 'pending', createdAt: ts(), updatedAt: ts() };
 }
 
 function makeTask(id: string, workId: string, opts: Partial<Task> = {}): Task {
-  return { id, workId, repoPath: '/repo', title: 'Test task', description: 'Do the thing', status: 'pending', dependsOn: [], createdAt: ts(), updatedAt: ts(), ...opts };
+  return { id, workId, repoPath: '/repo', title: 'Test task', description: 'Do the thing', status: 'pending', dependsOn: [], acceptanceCriteria: [], filesToCreate: [], filesToModify: [], phase: 1, createdAt: ts(), updatedAt: ts(), ...opts };
 }
 
 function makeGraph(workId: string, tasks: Task[]): ExecutionGraph {
@@ -109,7 +115,7 @@ describe('pipeline e2e', () => {
     const pipeline = createPipeline({
       workPhases: [],
       taskPhases: { implement: implementPhase, verify: verifyPhase, ship: autoShipPhase },
-      ports: { agentRunner: mockAgentRunner(), runtimeBackend: mockRuntimeBackend(), publishProvider: null, ciProvider: null },
+      ports: { agentRunner: mockAgentRunner(), runtimeBackend: mockRuntimeBackend(), publishProvider: null, ciProvider: null, contextProvider: null },
       stores,
       logger: silentLogger(),
     });
@@ -134,7 +140,7 @@ describe('pipeline e2e', () => {
     const pipeline = createPipeline({
       workPhases: [],
       taskPhases: { implement: implementPhase, verify: verifyPhase, ship: autoShipPhase },
-      ports: { agentRunner: mockAgentRunner(), runtimeBackend: mockRuntimeBackend(), publishProvider: null, ciProvider: null },
+      ports: { agentRunner: mockAgentRunner(), runtimeBackend: mockRuntimeBackend(), publishProvider: null, ciProvider: null, contextProvider: null },
       stores,
       logger: silentLogger(),
     });
@@ -157,7 +163,7 @@ describe('pipeline e2e', () => {
     const pipeline = createPipeline({
       workPhases: [],
       taskPhases: { implement: implementPhase, verify: verifyPhase, ship: shipPhase },
-      ports: { agentRunner: mockAgentRunner(), runtimeBackend: mockRuntimeBackend(), publishProvider: null, ciProvider: null },
+      ports: { agentRunner: mockAgentRunner(), runtimeBackend: mockRuntimeBackend(), publishProvider: null, ciProvider: null, contextProvider: null },
       stores,
       logger: silentLogger(),
     });
@@ -193,6 +199,7 @@ describe('pipeline e2e', () => {
         runtimeBackend: mockRuntimeBackend(),
         publishProvider: null,
         ciProvider: null,
+        contextProvider: null,
       },
       stores,
       logger: silentLogger(),

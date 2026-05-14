@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { Work } from '../domain/work.js';
 import type { Task } from '../domain/task.js';
 import type { ExecutionGraph } from '../domain/execution-graph.js';
+import type { Spec } from '../domain/spec.js';
 import type { CoreStores } from '../ports/store.js';
 
 function parseJson<T>(s: string): T {
@@ -117,6 +118,43 @@ export class SqliteExecutionGraphStore {
 }
 
 // ---------------------------------------------------------------------------
+// SpecStore
+// ---------------------------------------------------------------------------
+
+export class SqliteSpecStore {
+  private readonly stmtUpsert: ReturnType<DatabaseSync['prepare']>;
+  private readonly stmtById: ReturnType<DatabaseSync['prepare']>;
+  private readonly stmtByWork: ReturnType<DatabaseSync['prepare']>;
+
+  constructor(db: DatabaseSync) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS specs (
+        id      TEXT PRIMARY KEY,
+        work_id TEXT NOT NULL UNIQUE,
+        data    TEXT NOT NULL
+      );
+    `);
+    this.stmtUpsert = db.prepare('INSERT OR REPLACE INTO specs (id, work_id, data) VALUES (?, ?, ?)');
+    this.stmtById   = db.prepare('SELECT data FROM specs WHERE id = ?');
+    this.stmtByWork = db.prepare('SELECT data FROM specs WHERE work_id = ?');
+  }
+
+  save(spec: Spec): void {
+    this.stmtUpsert.run(spec.id, spec.workId, JSON.stringify(spec));
+  }
+
+  getById(id: string): Spec | null {
+    const r = this.stmtById.get(id) as { data: string } | undefined;
+    return r ? parseJson<Spec>(r.data) : null;
+  }
+
+  getByWork(workId: string): Spec | null {
+    const r = this.stmtByWork.get(workId) as { data: string } | undefined;
+    return r ? parseJson<Spec>(r.data) : null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -129,11 +167,13 @@ export function createSqliteStores(dbPath: string): SqliteCoreStores {
   const work  = new SqliteWorkStore(db);
   const tasks = new SqliteTaskStore(db);
   const graph = new SqliteExecutionGraphStore(db);
+  const specs = new SqliteSpecStore(db);
 
   return {
     work,
     tasks,
     graph,
+    specs,
     close() { db.close(); },
   };
 }

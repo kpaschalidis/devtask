@@ -4,6 +4,7 @@ import type { AgentRunner } from '../ports/agent-runner.js';
 import type { RuntimeBackend } from '../ports/runtime-backend.js';
 import type { PublishProvider } from '../ports/publish-provider.js';
 import type { CiProvider } from '../ports/ci-provider.js';
+import type { ContextProvider } from '../ports/context-provider.js';
 import type { Logger } from '../logging/index.js';
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,7 @@ export interface PipelinePorts {
   runtimeBackend: RuntimeBackend;
   publishProvider: PublishProvider | null;
   ciProvider: CiProvider | null;
+  contextProvider: ContextProvider | null;
 }
 
 // ---------------------------------------------------------------------------

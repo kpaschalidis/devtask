@@ -3,6 +3,8 @@ import { createPipeline } from './core/pipeline/pipeline.js';
 import { implementPhase } from './phases/implement.js';
 import { verifyPhase } from './phases/verify.js';
 import { shipPhase } from './phases/ship.js';
+import { refinePhase } from './phases/refine.js';
+import { architectPhase } from './phases/architect.js';
 import { CodexAgentRunner } from './agent-codex/index.js';
 import { LocalRuntimeBackend } from './runtime-local/index.js';
 import { createSqliteStores } from './core/storage/sqlite.js';
@@ -32,9 +34,9 @@ export function createDevtaskPipeline(paths: DevtaskPaths, config: DevtaskConfig
   });
 
   const pipeline = createPipeline({
-    workPhases: [],
+    workPhases: [refinePhase, architectPhase],
     taskPhases: { implement: implementPhase, verify: verifyPhase, ship: shipPhase },
-    ports: { agentRunner, runtimeBackend, publishProvider: null, ciProvider: null },
+    ports: { agentRunner, runtimeBackend, publishProvider: null, ciProvider: null, contextProvider: null },
     stores,
     logger: consoleLogger(),
   });

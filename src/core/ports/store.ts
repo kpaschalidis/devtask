@@ -1,6 +1,7 @@
 import type { Work } from '../domain/work.js';
 import type { Task } from '../domain/task.js';
 import type { ExecutionGraph } from '../domain/execution-graph.js';
+import type { Spec } from '../domain/spec.js';
 
 export interface WorkStore {
   save(work: Work): void;
@@ -19,8 +20,15 @@ export interface ExecutionGraphStore {
   getByWork(workId: string): ExecutionGraph | null;
 }
 
+export interface SpecStore {
+  save(spec: Spec): void;
+  getById(id: string): Spec | null;
+  getByWork(workId: string): Spec | null;
+}
+
 export interface CoreStores {
   work: WorkStore;
   tasks: TaskStore;
   graph: ExecutionGraphStore;
+  specs: SpecStore;
 }
