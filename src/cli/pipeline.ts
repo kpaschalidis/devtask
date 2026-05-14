@@ -128,7 +128,11 @@ export function registerPipelineCommands(program: Command): void {
 
         await pollUntil(() => {
           const w = stores.work.getById(workId);
-          return w?.status === 'completed' || w?.status === 'failed';
+          if (!w) return true;
+          if (w.status === 'completed' || w.status === 'failed') return true;
+          if (w.status === 'gated') return true;
+          if (w.pendingQuestions) return true;
+          return false;
         }, 2_000, () => {
           const w = stores.work.getById(workId);
           const tasks = stores.tasks.listByWork(workId);
