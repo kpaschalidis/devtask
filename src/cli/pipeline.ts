@@ -182,9 +182,53 @@ export function registerPipelineCommands(program: Command): void {
       }
     });
 
-  // ── work approve ───────────────────────────────────────────────────────────
+  // ── work approve (work-level gate) ────────────────────────────────────────
 
-  pw.command('approve <taskId>')
+  pw.command('approve <workId>')
+    .description('Approve the active gate for a work item (spec or plan)')
+    .action(async (workId: string) => {
+      try {
+        const paths = resolvePaths();
+        const config = readConfig(paths);
+        const { pipeline, stores, close } = createDevtaskPipeline(paths, config);
+        try {
+          const work = stores.work.getById(workId);
+          if (!work?.gateId) { console.error('No active gate for work'); process.exit(1); }
+          await pipeline.resumeWork(workId, work.gateId, { approved: true });
+          console.log(`Approved ${work.gateId} for ${workId}`);
+        } finally {
+          close();
+        }
+      } catch (err) {
+        printError(err);
+      }
+    });
+
+  // ── work reject (work-level gate) ─────────────────────────────────────────
+
+  pw.command('reject <workId>')
+    .description('Reject the active gate for a work item (spec or plan)')
+    .action(async (workId: string) => {
+      try {
+        const paths = resolvePaths();
+        const config = readConfig(paths);
+        const { pipeline, stores, close } = createDevtaskPipeline(paths, config);
+        try {
+          const work = stores.work.getById(workId);
+          if (!work?.gateId) { console.error('No active gate for work'); process.exit(1); }
+          await pipeline.resumeWork(workId, work.gateId, { approved: false });
+          console.log(`Rejected ${work.gateId} for ${workId}`);
+        } finally {
+          close();
+        }
+      } catch (err) {
+        printError(err);
+      }
+    });
+
+  // ── task approve (ship gate) ───────────────────────────────────────────────
+
+  pw.command('task-approve <taskId>')
     .description('Approve the ship review gate for a task')
     .action(async (taskId: string) => {
       try {
@@ -202,9 +246,9 @@ export function registerPipelineCommands(program: Command): void {
       }
     });
 
-  // ── work reject ────────────────────────────────────────────────────────────
+  // ── task reject (ship gate) ────────────────────────────────────────────────
 
-  pw.command('reject <taskId>')
+  pw.command('task-reject <taskId>')
     .description('Reject the ship review gate for a task')
     .action(async (taskId: string) => {
       try {

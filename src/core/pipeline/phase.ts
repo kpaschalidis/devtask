@@ -76,6 +76,36 @@ export interface VerifyPhase {
 }
 
 // ---------------------------------------------------------------------------
+// Gate factory — a WorkPhase that suspends for human approval
+// ---------------------------------------------------------------------------
+
+function now() { return new Date().toISOString(); }
+
+export function createGate(
+  id: string,
+  getArtifact: (ctx: WorkPhaseContext) => unknown,
+): WorkPhase {
+  return {
+    id,
+    async execute(ctx: WorkPhaseContext): Promise<PhaseOutcome> {
+      const { workId, stores, resumeData, suspend } = ctx;
+
+      if (resumeData !== null) {
+        const { approved } = resumeData as { approved: boolean };
+        const work = stores.work.getById(workId);
+        if (work) stores.work.save({ ...work, gateId: undefined, updatedAt: now() });
+        return approved ? 'completed' : 'rejected';
+      }
+
+      const work = stores.work.getById(workId);
+      if (work) stores.work.save({ ...work, status: 'gated', gateId: id, updatedAt: now() });
+      await suspend({ artifact: getArtifact(ctx) });
+      return 'completed';
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Pipeline config
 // ---------------------------------------------------------------------------
 

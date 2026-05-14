@@ -15,6 +15,7 @@ export interface Work {
   description: string | null;
   status: WorkStatus;
   specId?: string;
+  gateId?: string;             // set when status === 'gated', cleared on resume
   mastraRunId?: string;
   createdAt: string;
   updatedAt: string;
