@@ -61,7 +61,14 @@ export function createPipeline(config: PipelineConfig): Pipeline {
       const task = stores.tasks.getById(taskId);
       if (!task?.mastraRunId) throw new CoreError(`No active run for task: ${taskId}`);
       const run = await mastra.getWorkflow('task-pipeline').createRun({ runId: task.mastraRunId });
-      await run.resume({ step: phaseId, resumeData: { data: resumeData } });
+      const result = await run.resume({ step: phaseId, resumeData: { data: resumeData } });
+      const current = stores.tasks.getById(taskId);
+      if (current && result.status === 'success') {
+        stores.tasks.save({ ...current, status: 'completed', updatedAt: now() });
+      } else if (current && result.status === 'failed') {
+        stores.tasks.save({ ...current, status: 'failed', updatedAt: now() });
+      }
+      // 'suspended' → stays 'gated', next resumeTask call will drive it forward
     },
   };
 }
@@ -101,12 +108,19 @@ function buildWorkWorkflow(workPhases: WorkPhase[], config: PipelineConfig, stor
       const graph = stores.graph.getByWork(workId);
       if (!graph) throw new CoreError(`No execution graph for work: ${workId}`);
 
+      const w = stores.work.getById(workId);
+      if (w) stores.work.save({ ...w, status: 'running', updatedAt: now() });
+
       const mastra = new Mastra({
         workflows: { 'task-pipeline': buildTaskWorkflow(config.taskPhases, config) },
         storage,
       });
 
       const success = await runExecPhase(graph, mastra, stores, logger);
+
+      const final = stores.work.getById(workId);
+      if (final) stores.work.save({ ...final, status: success ? 'completed' : 'failed', updatedAt: now() });
+
       return { workId, success };
     },
   });
