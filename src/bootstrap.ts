@@ -45,6 +45,7 @@ export function createDevtaskPipeline(paths: DevtaskPaths, config: DevtaskConfig
     ports: { agentRunner, runtimeBackend, publishProvider: null, ciProvider: null, contextProvider: null },
     stores,
     logger: consoleLogger(),
+    storageDir: paths.baseDir,
   });
 
   return { pipeline, stores, close: () => stores.close() };

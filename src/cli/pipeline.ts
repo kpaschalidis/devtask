@@ -148,6 +148,30 @@ export function registerPipelineCommands(program: Command): void {
       }
     });
 
+  // ── work list ──────────────────────────────────────────────────────────────
+
+  pw.command('list')
+    .description('List all active work items')
+    .action(() => {
+      try {
+        const paths = resolvePaths();
+        const config = readConfig(paths);
+        const { stores, close } = createDevtaskPipeline(paths, config);
+        try {
+          const works = stores.work.listActive();
+          if (works.length === 0) { console.log('No active work items.'); return; }
+          printTable(
+            ['ID', 'STATUS', 'TITLE'],
+            works.map((w) => [w.id.slice(0, 8), w.status, w.title]),
+          );
+        } finally {
+          close();
+        }
+      } catch (err) {
+        printError(err);
+      }
+    });
+
   // ── work status ────────────────────────────────────────────────────────────
 
   pw.command('status <workId>')
@@ -165,6 +189,13 @@ export function registerPipelineCommands(program: Command): void {
           console.log(`Title:  ${work.title}`);
           console.log(`Status: ${work.status}`);
           console.log(`Repos:  ${work.repoPaths.join(', ')}`);
+          if (work.gateId) console.log(`Gate:   ${work.gateId} (waiting for approve/reject)`);
+          if (work.pendingQuestions) {
+            console.log('\n── Pending Questions ──────────────────────────────');
+            console.log(work.pendingQuestions);
+            console.log('───────────────────────────────────────────────────');
+            console.log('Answer with: pipeline work answer <workId> "<response>"');
+          }
 
           const tasks = stores.tasks.listByWork(workId);
           if (tasks.length > 0) {
@@ -174,6 +205,55 @@ export function registerPipelineCommands(program: Command): void {
               tasks.map((t) => [t.id.slice(0, 8), t.status, t.title]),
             );
           }
+        } finally {
+          close();
+        }
+      } catch (err) {
+        printError(err);
+      }
+    });
+
+  // ── work answer ────────────────────────────────────────────────────────────
+
+  pw.command('answer <workId> <response>')
+    .description('Answer the pending Q&A questions for a work item')
+    .action(async (workId: string, response: string) => {
+      try {
+        const paths = resolvePaths();
+        const config = readConfig(paths);
+        const { pipeline, stores, close } = createDevtaskPipeline(paths, config);
+        try {
+          const work = stores.work.getById(workId);
+          if (!work) { console.error(`Work not found: ${workId}`); process.exit(1); }
+          if (!work.pendingQuestions) { console.error('No pending questions for this work item.'); process.exit(1); }
+
+          const phaseId = work.status === 'refining' ? 'refine'
+            : work.status === 'architecting' ? 'architect'
+            : null;
+          if (!phaseId) { console.error(`Work is not in a Q&A phase (status: ${work.status})`); process.exit(1); }
+
+          await pipeline.resumeWork(workId, phaseId, { answer: response });
+          console.log(`Answer submitted to ${phaseId} phase.`);
+        } finally {
+          close();
+        }
+      } catch (err) {
+        printError(err);
+      }
+    });
+
+  // ── task message ───────────────────────────────────────────────────────────
+
+  pw.command('task-message <taskId> <message>')
+    .description('Send a steering message to a running task agent')
+    .action(async (taskId: string, message: string) => {
+      try {
+        const paths = resolvePaths();
+        const config = readConfig(paths);
+        const { pipeline, close } = createDevtaskPipeline(paths, config);
+        try {
+          await pipeline.messageTask(taskId, message);
+          console.log(`Message sent to task ${taskId}`);
         } finally {
           close();
         }

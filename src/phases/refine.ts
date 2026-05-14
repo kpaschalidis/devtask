@@ -24,17 +24,16 @@ function buildInitialPrompt(title: string, description: string | null, repoOverv
   ].filter(Boolean).join('\n');
 }
 
-function buildResumePrompt(history: QAEntry[], newAnswers: Record<string, string>): string {
-  const lines: string[] = [];
-  for (const entry of history) {
-    lines.push('## Previous Round');
-    for (const q of entry.questions) lines.push(`**Q:** ${q}`);
-    for (const [q, a] of Object.entries(entry.answers)) lines.push(`**Q:** ${q}`, `**A:** ${a}`, '');
-  }
-  lines.push('## Your Answers');
-  for (const [q, a] of Object.entries(newAnswers)) lines.push(`**Q:** ${q}`, `**A:** ${a}`, '');
-  lines.push('Continue refining or output the final spec followed by ' + DONE_MARKER);
-  return lines.join('\n');
+function buildResumePrompt(questions: string, answer: string): string {
+  return [
+    '## Your Questions',
+    questions,
+    '',
+    '## User Response',
+    answer,
+    '',
+    'Continue refining or output the final spec followed by ' + DONE_MARKER,
+  ].join('\n');
 }
 
 function extractSpec(output: string): string | null {
@@ -75,11 +74,13 @@ export const refinePhase: WorkPhase = {
     let prompt: string;
 
     if (resumeData !== null) {
-      const answers = resumeData as Record<string, string>;
-      const entry: QAEntry = { questions: [], answers };
+      const { answer } = resumeData as { answer: string };
+      const questions = work.pendingQuestions ?? '';
+      const entry: QAEntry = { questions: [questions], answers: { response: answer } };
       spec = { ...spec, qaHistory: [...spec.qaHistory, entry], updatedAt: now() };
       stores.specs.save(spec);
-      prompt = buildResumePrompt(spec.qaHistory, answers);
+      stores.work.save({ ...work, pendingQuestions: undefined, updatedAt: now() });
+      prompt = buildResumePrompt(questions, answer);
     } else {
       const repoOverview = contextProvider
         ? await contextProvider.overview(work.repoPaths[0] ?? '')
@@ -105,11 +106,13 @@ export const refinePhase: WorkPhase = {
               logger.info({ workId }, 'Spec locked');
               return 'completed';
             }
-            await suspend({ questions: fullOutput, round: spec.qaHistory.length + 1 });
+            stores.work.save({ ...stores.work.getById(workId)!, pendingQuestions: fullOutput, updatedAt: now() });
+            await suspend({ questions: fullOutput });
             return 'completed';
           }
           case 'input_required':
-            await suspend({ questions: event.prompt, round: spec.qaHistory.length + 1 });
+            stores.work.save({ ...stores.work.getById(workId)!, pendingQuestions: event.prompt, updatedAt: now() });
+            await suspend({ questions: event.prompt });
             return 'completed';
           case 'failed':
             logger.error({ workId, error: event.error }, 'Refine agent failed');

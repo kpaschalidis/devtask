@@ -16,6 +16,7 @@ export interface Work {
   status: WorkStatus;
   specId?: string;
   gateId?: string;             // set when status === 'gated', cleared on resume
+  pendingQuestions?: string;   // set when phase suspends for Q&A, cleared on resume
   mastraRunId?: string;
   createdAt: string;
   updatedAt: string;

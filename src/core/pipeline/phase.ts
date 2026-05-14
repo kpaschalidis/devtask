@@ -121,6 +121,7 @@ export interface PipelineConfig {
   ports: PipelinePorts;
   stores: CoreStores;
   logger: Logger;
+  storageDir?: string;  // if set, Mastra workflow state persists to disk
 }
 
 // ---------------------------------------------------------------------------
@@ -131,4 +132,5 @@ export interface Pipeline {
   startWork(workId: string): Promise<void>;
   resumeWork(workId: string, phaseId: string, resumeData: unknown): Promise<void>;
   resumeTask(taskId: string, phaseId: string, resumeData: unknown): Promise<void>;
+  messageTask(taskId: string, message: string): Promise<void>;
 }

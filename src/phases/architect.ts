@@ -49,11 +49,16 @@ function buildInitialPrompt(
   ].filter(Boolean).join('\n');
 }
 
-function buildResumePrompt(answers: Record<string, string>): string {
-  const lines = ['## Your Answers'];
-  for (const [q, a] of Object.entries(answers)) lines.push(`**Q:** ${q}`, `**A:** ${a}`, '');
-  lines.push('Continue planning or output the final JSON plan followed by ' + DONE_MARKER);
-  return lines.join('\n');
+function buildResumePrompt(questions: string, answer: string): string {
+  return [
+    '## Your Questions',
+    questions,
+    '',
+    '## User Response',
+    answer,
+    '',
+    'Continue planning or output the final JSON plan followed by ' + DONE_MARKER,
+  ].join('\n');
 }
 
 function extractPlan(output: string): { tasks: Partial<Task>[] } | null {
@@ -92,7 +97,10 @@ export const architectPhase: WorkPhase = {
     let prompt: string;
 
     if (resumeData !== null) {
-      prompt = buildResumePrompt(resumeData as Record<string, string>);
+      const { answer } = resumeData as { answer: string };
+      const questions = work.pendingQuestions ?? '';
+      stores.work.save({ ...work, pendingQuestions: undefined, updatedAt: now() });
+      prompt = buildResumePrompt(questions, answer);
     } else {
       const repoOverview = contextProvider
         ? await contextProvider.overview(work.repoPaths[0] ?? '')
@@ -143,10 +151,12 @@ export const architectPhase: WorkPhase = {
               return 'completed';
             }
             // No plan yet — agent has questions
+            stores.work.save({ ...stores.work.getById(workId)!, pendingQuestions: fullOutput, updatedAt: now() });
             await suspend({ questions: fullOutput });
             return 'completed';
           }
           case 'input_required':
+            stores.work.save({ ...stores.work.getById(workId)!, pendingQuestions: event.prompt, updatedAt: now() });
             await suspend({ questions: event.prompt });
             return 'completed';
           case 'failed':

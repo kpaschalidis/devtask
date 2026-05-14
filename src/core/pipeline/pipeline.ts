@@ -1,6 +1,8 @@
+import path from 'node:path';
 import { Mastra } from '@mastra/core';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { MastraCompositeStore, WorkflowsInMemory, InMemoryDB } from '@mastra/core/storage';
+import { LibSQLStore } from '@mastra/libsql';
 import { z } from 'zod';
 import type { WorkPhase, TaskPhasesConfig, PipelineConfig, Pipeline, WorkPhaseContext, TaskPhaseContext } from './phase.js';
 import { getReadyTasks, hasFailedTask } from './scheduler.js';
@@ -57,6 +59,13 @@ export function createPipeline(config: PipelineConfig): Pipeline {
       await run.resume({ step: phaseId, resumeData: { data: resumeData } });
     },
 
+    async messageTask(taskId: string, message: string) {
+      const task = stores.tasks.getById(taskId);
+      if (!task?.sessionHandle) throw new CoreError(`No active session for task: ${taskId}`);
+      if (!config.ports.agentRunner.sendInput) throw new CoreError('AgentRunner does not support sendInput');
+      await config.ports.agentRunner.sendInput(task.sessionHandle, message);
+    },
+
     async resumeTask(taskId: string, phaseId: string, resumeData: unknown) {
       const task = stores.tasks.getById(taskId);
       if (!task?.mastraRunId) throw new CoreError(`No active run for task: ${taskId}`);
@@ -77,15 +86,24 @@ export function createPipeline(config: PipelineConfig): Pipeline {
 // Internal — Mastra instance + workflows
 // ---------------------------------------------------------------------------
 
+function buildStorage(storageDir?: string): MastraCompositeStore {
+  if (storageDir) {
+    return new LibSQLStore({
+      id: 'devtask',
+      url: `file:${path.join(storageDir, 'mastra.db')}`,
+    });
+  }
+  const db = new InMemoryDB();
+  const workflowsStore = new WorkflowsInMemory({ db });
+  return new MastraCompositeStore({ id: 'devtask', domains: { workflows: workflowsStore } });
+}
+
 function buildMastra(
   workPhases: WorkPhase[],
   taskPhases: TaskPhasesConfig,
   config: PipelineConfig,
 ): Mastra {
-  const db = new InMemoryDB();
-  const workflowsStore = new WorkflowsInMemory({ db });
-  const storage = new MastraCompositeStore({ id: 'devtask', domains: { workflows: workflowsStore } });
-
+  const storage = buildStorage(config.storageDir);
   const taskWorkflow = buildTaskWorkflow(taskPhases, config);
   const workWorkflow = buildWorkWorkflow(workPhases, config, storage);
 
@@ -113,7 +131,7 @@ function buildWorkWorkflow(workPhases: WorkPhase[], config: PipelineConfig, stor
 
       const mastra = new Mastra({
         workflows: { 'task-pipeline': buildTaskWorkflow(config.taskPhases, config) },
-        storage,
+        storage, // same instance — shares persistent workflow state
       });
 
       const success = await runExecPhase(graph, mastra, stores, logger);
@@ -165,8 +183,11 @@ function createWorkPhaseStep(phase: WorkPhase, config: PipelineConfig) {
       };
 
       const outcome = await phase.execute(ctx);
-      if (outcome === 'failed') throw new Error(`Phase '${phase.id}' failed`);
-      if (outcome === 'rejected') throw new Error(`Phase '${phase.id}' rejected`);
+      if (outcome === 'failed' || outcome === 'rejected') {
+        const w = stores.work.getById(workId);
+        if (w && w.status !== 'failed') stores.work.save({ ...w, status: 'failed', updatedAt: now() });
+        throw new Error(`Phase '${phase.id}' ${outcome}`);
+      }
 
       return { ...inputData as object, workId };
     },
