@@ -148,3 +148,7 @@ export function workItemApprovedGraphPath(paths: DevtaskPaths, id: string): stri
 export function workItemMaterializationPath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemDir(paths, id), "materialization.json");
 }
+
+export function workItemResultsDir(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "results");
+}

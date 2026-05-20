@@ -2,14 +2,17 @@ import { Command } from "commander";
 import { resolveWorkspacePaths } from "../paths.js";
 import { getWorkBoard } from "../services/board-service.js";
 import {
+  checkWorkCi,
   cleanupWork,
+  createWorkPullRequests,
   createManualWork,
   getWork,
   importJiraWork,
   listWork,
   materializeWork,
   planWork,
-  readWorkPlanRecord
+  readWorkPlanRecord,
+  verifyWork
 } from "../services/work-service.js";
 import { printError, printTable } from "./common.js";
 
@@ -144,6 +147,27 @@ export function registerWorkCommands(program: Command): void {
     });
 
   work
+    .command("verify")
+    .description("Run configured verify commands across repo worktrees.")
+    .argument("<work-id>")
+    .action(async (workId: string) => {
+      try {
+        const result = await verifyWork(resolveWorkspacePaths(), workId);
+        printTable(
+          ["REPO", "TASK", "STATUS", "DETAIL"],
+          result.tasks.map((task) => [
+            task.repoId,
+            task.taskId,
+            task.status,
+            task.error ?? (task.commands.map((entry) => `${entry.status}:${entry.command}`).join(" | ") || "-")
+          ])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("implement")
     .description("Materialize repo-local tasks and worktrees for a work item.")
     .argument("<work-id>")
@@ -154,6 +178,39 @@ export function registerWorkCommands(program: Command): void {
         printTable(
           ["REPO", "TASK", "BRANCH", "WORKTREE"],
           materialization.tasks.map((task) => [task.repoId, task.taskId, task.branch, task.worktreePath])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("pr")
+    .description("Create pull requests for repo worktrees when they are publish-ready.")
+    .argument("<work-id>")
+    .option("--ready", "Create ready pull requests instead of drafts")
+    .action(async (workId: string, options: { ready?: boolean }) => {
+      try {
+        const result = await createWorkPullRequests(resolveWorkspacePaths(), workId, { draft: options.ready !== true });
+        printTable(
+          ["REPO", "TASK", "STATUS", "PR", "DETAIL"],
+          result.tasks.map((task) => [task.repoId, task.taskId, task.status, task.prUrl ?? "-", task.detail])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("ci")
+    .description("Check provider CI for repo pull requests.")
+    .argument("<work-id>")
+    .action(async (workId: string) => {
+      try {
+        const result = await checkWorkCi(resolveWorkspacePaths(), workId);
+        printTable(
+          ["REPO", "TASK", "STATUS", "DETAIL", "URL"],
+          result.tasks.map((task) => [task.repoId, task.taskId, task.status, task.detail, task.url ?? "-"])
         );
       } catch (error) {
         printError(error);

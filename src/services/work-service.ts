@@ -1,6 +1,8 @@
+import fs from "node:fs";
 import type { DevtaskConfig } from "../config.js";
 import { readConfig } from "../config.js";
 import type { DevtaskPaths } from "../paths.js";
+import { resolvePaths, taskMetaPath, workItemResultsDir } from "../paths.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { approveWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
 import {
@@ -18,6 +20,64 @@ import {
 } from "../work-store.js";
 import { fetchJiraIssue, writeJiraSourceArtifacts } from "../jira.js";
 import { updateRecentWork } from "../global-index.js";
+import { readTaskMeta, writeTaskMeta } from "../meta.js";
+import { runCommand } from "../process-runner.js";
+import { checkProviderCi, createProviderPullRequest, preflightScmForPullRequest, type CiCheckResult } from "../scm.js";
+import type { TaskMeta } from "../types.js";
+
+export interface VerifyCommandResult {
+  command: string;
+  status: "passed" | "failed";
+  exitCode: number | null;
+  output: string;
+}
+
+export interface VerifyTaskResult {
+  repoId: string;
+  taskId: string;
+  worktreePath: string;
+  status: "passed" | "failed" | "skipped";
+  commands: VerifyCommandResult[];
+  error: string | null;
+}
+
+export interface VerifyWorkResult {
+  workId: string;
+  tasks: VerifyTaskResult[];
+  generatedAt: string;
+}
+
+export interface PullRequestTaskResult {
+  repoId: string;
+  taskId: string;
+  branch: string;
+  worktreePath: string;
+  status: "created" | "skipped" | "failed";
+  prUrl: string | null;
+  detail: string;
+}
+
+export interface PullRequestWorkResult {
+  workId: string;
+  tasks: PullRequestTaskResult[];
+  generatedAt: string;
+}
+
+export interface CiTaskResult {
+  repoId: string;
+  taskId: string;
+  branch: string;
+  worktreePath: string;
+  status: CiCheckResult["status"] | "skipped" | "failed";
+  detail: string;
+  url: string | null;
+}
+
+export interface CiWorkResult {
+  workId: string;
+  tasks: CiTaskResult[];
+  generatedAt: string;
+}
 
 export function createManualWork(
   paths: DevtaskPaths,
@@ -84,4 +144,275 @@ export function readWorkPlanRecord(paths: DevtaskPaths, workId: string): WorkPla
 
 export async function cleanupWork(paths: DevtaskPaths, workId: string, options: WorkCleanupOptions = {}): Promise<WorkCleanupResult> {
   return cleanupWorkItem(paths, getWorkItem(paths, workId), options);
+}
+
+export async function verifyWork(paths: DevtaskPaths, workId: string): Promise<VerifyWorkResult> {
+  const materialization = requireMaterialization(paths, workId);
+  const tasks: VerifyTaskResult[] = [];
+
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const config = readConfig(repoPaths);
+    if (config.verify.length === 0) {
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        worktreePath: task.worktreePath,
+        status: "skipped",
+        commands: [],
+        error: null
+      });
+      continue;
+    }
+
+    const commandResults: VerifyCommandResult[] = [];
+    let taskStatus: VerifyTaskResult["status"] = "passed";
+    let taskError: string | null = null;
+
+    for (const command of config.verify) {
+      const result = await runCommand("sh", ["-c", command], { cwd: task.worktreePath });
+      const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n").trim();
+      const status: VerifyCommandResult["status"] = result.exitCode === 0 ? "passed" : "failed";
+      commandResults.push({
+        command,
+        status,
+        exitCode: result.exitCode,
+        output
+      });
+      if (status === "failed") {
+        taskStatus = "failed";
+        taskError = output || `Command failed with exit code ${result.exitCode ?? "unknown"}`;
+        break;
+      }
+    }
+
+    tasks.push({
+      repoId: task.repoId,
+      taskId: task.taskId,
+      worktreePath: task.worktreePath,
+      status: taskStatus,
+      commands: commandResults,
+      error: taskError
+    });
+  }
+
+  const result: VerifyWorkResult = {
+    workId,
+    tasks,
+    generatedAt: new Date().toISOString()
+  };
+  writeWorkResult(paths, workId, "verify", result);
+  return result;
+}
+
+export async function createWorkPullRequests(
+  paths: DevtaskPaths,
+  workId: string,
+  options: { draft?: boolean } = {}
+): Promise<PullRequestWorkResult> {
+  const item = getWorkItem(paths, workId);
+  const materialization = requireMaterialization(paths, workId);
+  const multiRepo = materialization.tasks.length > 1;
+  const tasks: PullRequestTaskResult[] = [];
+
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const metaPath = taskMetaPath(repoPaths, task.taskId);
+    const meta = readTaskMeta(metaPath);
+    const preflight = await preflightScmForPullRequest(task.worktreePath, { draft: options.draft === true });
+
+    if (meta.prUrl) {
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: "skipped",
+        prUrl: meta.prUrl,
+        detail: "pull request already exists"
+      });
+      continue;
+    }
+
+    if (preflight.access !== "ok") {
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: "failed",
+        prUrl: null,
+        detail: preflight.accessDetail ?? "SCM access check failed"
+      });
+      continue;
+    }
+
+    if (!preflight.clean) {
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: "failed",
+        prUrl: null,
+        detail: "worktree has uncommitted changes"
+      });
+      continue;
+    }
+
+    if (preflight.commits < 1) {
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: "skipped",
+        prUrl: null,
+        detail: "no commits to publish"
+      });
+      continue;
+    }
+
+    try {
+      const prUrl = await createProviderPullRequest(task.worktreePath, {
+        title: buildPullRequestTitle(item, task.repoId, multiRepo),
+        body: buildPullRequestBody(item, task.repoId),
+        draft: options.draft === true,
+        branch: task.branch
+      });
+      writeTaskMeta(metaPath, {
+        ...meta,
+        status: "pr-open",
+        prUrl,
+        updatedAt: new Date().toISOString()
+      });
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: "created",
+        prUrl,
+        detail: "pull request created"
+      });
+    } catch (error) {
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: "failed",
+        prUrl: null,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  const result: PullRequestWorkResult = {
+    workId,
+    tasks,
+    generatedAt: new Date().toISOString()
+  };
+  writeWorkResult(paths, workId, "pr", result);
+  return result;
+}
+
+export async function checkWorkCi(paths: DevtaskPaths, workId: string): Promise<CiWorkResult> {
+  const materialization = requireMaterialization(paths, workId);
+  const tasks: CiTaskResult[] = [];
+
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const metaPath = taskMetaPath(repoPaths, task.taskId);
+    const meta = readTaskMeta(metaPath);
+
+    if (!meta.prUrl) {
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: "skipped",
+        detail: "no pull request url recorded",
+        url: null
+      });
+      continue;
+    }
+
+    try {
+      const result = await checkProviderCi(task.worktreePath, meta.prUrl, task.branch);
+      writeTaskMeta(metaPath, {
+        ...meta,
+        status: ciStatusToTaskStatus(result.status),
+        updatedAt: new Date().toISOString()
+      });
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: result.status,
+        detail: result.detail,
+        url: result.url
+      });
+    } catch (error) {
+      tasks.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        status: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+        url: meta.prUrl
+      });
+    }
+  }
+
+  const result: CiWorkResult = {
+    workId,
+    tasks,
+    generatedAt: new Date().toISOString()
+  };
+  writeWorkResult(paths, workId, "ci", result);
+  return result;
+}
+
+function requireMaterialization(paths: DevtaskPaths, workId: string): WorkMaterialization {
+  const materialization = readWorkMaterialization(paths, workId);
+  if (!materialization) {
+    throw new Error(`Work ${workId} is not materialized. Run devtask work implement ${workId} first.`);
+  }
+  return materialization;
+}
+
+function writeWorkResult(paths: DevtaskPaths, workId: string, name: string, value: unknown): void {
+  const dir = workItemResultsDir(paths, workId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(`${dir}/${name}.json`, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function buildPullRequestTitle(item: WorkItem, repoId: string, multiRepo: boolean): string {
+  return multiRepo ? `${item.id}: ${item.source.title} (${repoId})` : `${item.id}: ${item.source.title}`;
+}
+
+function buildPullRequestBody(item: WorkItem, repoId: string): string {
+  return [
+    `Work: ${item.id}`,
+    `Repo: ${repoId}`,
+    `Source: ${item.source.artifact}`,
+    "",
+    "Created by devtask."
+  ].join("\n");
+}
+
+function ciStatusToTaskStatus(status: CiCheckResult["status"]): TaskMeta["status"] {
+  switch (status) {
+    case "passed":
+      return "ci-passed";
+    case "running":
+      return "ci-running";
+    case "failed":
+    case "unknown":
+      return "ci-failed";
+  }
 }
