@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { resolveWorkspacePaths } from "../paths.js";
 import { getWorkBoard } from "../services/board-service.js";
 import {
+  checkWork,
   checkWorkCi,
   cleanupWork,
   createWorkPullRequests,
@@ -12,6 +13,7 @@ import {
   materializeWork,
   planWork,
   readWorkPlanRecord,
+  reviewWork,
   specWork,
   verifyWork
 } from "../services/work-service.js";
@@ -171,6 +173,52 @@ export function registerWorkCommands(program: Command): void {
         printTable(
           ["REPO", "TASK", "STATUS", "PLAN", "WORKTREE_CHANGED"],
           result.repoPlans.map((task) => [task.repoId, task.taskId, task.status, task.planPath, String(task.worktreeChanged)])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("review")
+    .description("Create a durable review packet summarizing repo state and latest artifacts.")
+    .argument("<work-id>")
+    .action(async (workId: string) => {
+      try {
+        const result = await reviewWork(resolveWorkspacePaths(), workId);
+        printTable(
+          ["REPO", "TASK", "CLEAN", "COMMITS", "PR", "CHECK", "VERIFY", "CI"],
+          result.tasks.map((task) => [
+            task.repoId,
+            task.taskId,
+            String(task.clean),
+            String(task.commits),
+            task.prUrl ?? "-",
+            task.latestCheck ?? "-",
+            task.latestVerify ?? "-",
+            task.latestCi ?? "-"
+          ])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("check")
+    .description("Run deterministic repo-level checks across repo worktrees.")
+    .argument("<work-id>")
+    .action(async (workId: string) => {
+      try {
+        const result = await checkWork(resolveWorkspacePaths(), workId);
+        printTable(
+          ["REPO", "TASK", "STATUS", "DETAIL"],
+          result.tasks.map((task) => [
+            task.repoId,
+            task.taskId,
+            task.status,
+            task.error ?? (task.commands.map((entry) => `${entry.status}:${entry.command}`).join(" | ") || "-")
+          ])
         );
       } catch (error) {
         printError(error);

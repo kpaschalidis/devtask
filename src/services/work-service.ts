@@ -23,7 +23,14 @@ import { fetchJiraIssue, writeJiraSourceArtifacts } from "../jira.js";
 import { updateRecentWork } from "../global-index.js";
 import { readTaskMeta, writeTaskMeta } from "../meta.js";
 import { runCommand } from "../process-runner.js";
-import { checkProviderCi, createProviderPullRequest, preflightScmForPullRequest, type CiCheckResult } from "../scm.js";
+import {
+  checkProviderCi,
+  countBranchCommits,
+  createProviderPullRequest,
+  hasUncommittedChanges,
+  preflightScmForPullRequest,
+  type CiCheckResult
+} from "../scm.js";
 import type { TaskMeta } from "../types.js";
 
 export interface VerifyCommandResult {
@@ -96,6 +103,27 @@ export interface WorkSpecResult {
   graphPath: string;
   materialized: boolean;
   repoPlans: RepoPlanTaskResult[];
+  generatedAt: string;
+}
+
+export interface ReviewTaskResult {
+  repoId: string;
+  taskId: string;
+  branch: string;
+  worktreePath: string;
+  clean: boolean;
+  commits: number;
+  prUrl: string | null;
+  changedFiles: string[];
+  diffStat: string;
+  latestCheck: string | null;
+  latestVerify: string | null;
+  latestCi: string | null;
+}
+
+export interface ReviewWorkResult {
+  workId: string;
+  tasks: ReviewTaskResult[];
   generatedAt: string;
 }
 
@@ -242,6 +270,58 @@ export async function cleanupWork(paths: DevtaskPaths, workId: string, options: 
 }
 
 export async function verifyWork(paths: DevtaskPaths, workId: string): Promise<VerifyWorkResult> {
+  const result = await runDeterministicChecks(paths, workId);
+  writeWorkResult(paths, workId, "verify", result);
+  return result;
+}
+
+export async function checkWork(paths: DevtaskPaths, workId: string): Promise<VerifyWorkResult> {
+  const result = await runDeterministicChecks(paths, workId);
+  writeWorkResult(paths, workId, "check", result);
+  return result;
+}
+
+export async function reviewWork(paths: DevtaskPaths, workId: string): Promise<ReviewWorkResult> {
+  const materialization = requireMaterialization(paths, workId);
+  const latestCheck = readWorkResultSummary(paths, workId, "check");
+  const latestVerify = readWorkResultSummary(paths, workId, "verify");
+  const latestCi = readWorkResultSummary(paths, workId, "ci");
+  const tasks: ReviewTaskResult[] = [];
+
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+    const clean = !(await hasUncommittedChanges(task.worktreePath));
+    const commits = await countBranchCommits(task.worktreePath).catch(() => 0);
+    const changedFiles = await readGitStatusShort(task.worktreePath);
+    const diffStat = await readGitDiffStat(task.worktreePath);
+
+    tasks.push({
+      repoId: task.repoId,
+      taskId: task.taskId,
+      branch: task.branch,
+      worktreePath: task.worktreePath,
+      clean,
+      commits,
+      prUrl: meta.prUrl,
+      changedFiles,
+      diffStat,
+      latestCheck,
+      latestVerify,
+      latestCi
+    });
+  }
+
+  const result: ReviewWorkResult = {
+    workId,
+    tasks,
+    generatedAt: new Date().toISOString()
+  };
+  writeWorkResult(paths, workId, "review", result);
+  return result;
+}
+
+async function runDeterministicChecks(paths: DevtaskPaths, workId: string): Promise<VerifyWorkResult> {
   const materialization = requireMaterialization(paths, workId);
   const tasks: VerifyTaskResult[] = [];
 
@@ -296,7 +376,6 @@ export async function verifyWork(paths: DevtaskPaths, workId: string): Promise<V
     tasks,
     generatedAt: new Date().toISOString()
   };
-  writeWorkResult(paths, workId, "verify", result);
   return result;
 }
 
@@ -486,6 +565,23 @@ function writeWorkResult(paths: DevtaskPaths, workId: string, name: string, valu
   fs.writeFileSync(`${dir}/${name}.json`, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function readWorkResultSummary(paths: DevtaskPaths, workId: string, name: string): string | null {
+  try {
+    const value = JSON.parse(fs.readFileSync(`${workItemResultsDir(paths, workId)}/${name}.json`, "utf8")) as {
+      tasks?: Array<{ status?: unknown }>;
+    };
+    if (!Array.isArray(value.tasks) || value.tasks.length === 0) {
+      return null;
+    }
+    const statuses = value.tasks
+      .map((task) => (typeof task.status === "string" ? task.status : null))
+      .filter((status): status is string => Boolean(status));
+    return statuses.length > 0 ? statuses.join(",") : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildPullRequestTitle(item: WorkItem, repoId: string, multiRepo: boolean): string {
   return multiRepo ? `${item.id}: ${item.source.title} (${repoId})` : `${item.id}: ${item.source.title}`;
 }
@@ -510,4 +606,17 @@ function ciStatusToTaskStatus(status: CiCheckResult["status"]): TaskMeta["status
     case "unknown":
       return "ci-failed";
   }
+}
+
+async function readGitStatusShort(worktreePath: string): Promise<string[]> {
+  const result = await runCommand("git", ["status", "--short"], { cwd: worktreePath });
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+}
+
+async function readGitDiffStat(worktreePath: string): Promise<string> {
+  const result = await runCommand("git", ["diff", "--stat"], { cwd: worktreePath });
+  return result.stdout.trim();
 }
