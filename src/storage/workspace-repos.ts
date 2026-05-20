@@ -9,6 +9,7 @@ export interface WorkspaceRepo {
   repoPath: string;
   scope: string | null;
   kind: string | null;
+  pathHint: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -17,6 +18,7 @@ interface SharedWorkspaceRepo {
   id: string;
   scope: string | null;
   kind: string | null;
+  pathHint: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -45,6 +47,17 @@ export interface AddWorkspaceRepoOptions {
   kind?: string | null;
 }
 
+export interface RepoBindingStatus {
+  id: string;
+  scope: string | null;
+  kind: string | null;
+  pathHint: string | null;
+  repoPath: string | null;
+  bound: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export function listWorkspaceRepos(paths: DevtaskPaths): WorkspaceRepo[] {
   const shared = readSharedReposFile(paths).repos;
   const localBindings = new Map(readLocalReposFile(paths).repos.map((repo) => [repo.id, repo]));
@@ -60,6 +73,7 @@ export function listWorkspaceRepos(paths: DevtaskPaths): WorkspaceRepo[] {
           repoPath: binding.repoPath,
           scope: repo.scope,
           kind: repo.kind,
+          pathHint: repo.pathHint,
           createdAt: repo.createdAt,
           updatedAt: maxIso(repo.updatedAt, binding.updatedAt)
         }
@@ -106,6 +120,7 @@ export function addWorkspaceRepo(paths: DevtaskPaths, options: AddWorkspaceRepoO
     id: options.id,
     scope,
     kind,
+    pathHint: repoPath,
     createdAt: now,
     updatedAt: now
   };
@@ -130,6 +145,7 @@ export function addWorkspaceRepo(paths: DevtaskPaths, options: AddWorkspaceRepoO
     repoPath,
     scope: sharedRepo.scope,
     kind: sharedRepo.kind,
+    pathHint: sharedRepo.pathHint,
     createdAt: sharedRepo.createdAt,
     updatedAt: sharedRepo.updatedAt
   };
@@ -158,9 +174,114 @@ export function removeWorkspaceRepo(paths: DevtaskPaths, id: string): WorkspaceR
     repoPath: binding?.repoPath ?? "",
     scope: repo.scope,
     kind: repo.kind,
+    pathHint: repo.pathHint,
     createdAt: repo.createdAt,
     updatedAt: repo.updatedAt
   };
+}
+
+export function listRepoBindingStatuses(paths: DevtaskPaths): RepoBindingStatus[] {
+  const shared = readSharedReposFile(paths).repos;
+  const bindings = new Map(readLocalReposFile(paths).repos.map((repo) => [repo.id, repo]));
+  return shared
+    .map((repo) => {
+      const binding = bindings.get(repo.id);
+      return {
+        id: repo.id,
+        scope: repo.scope,
+        kind: repo.kind,
+        pathHint: repo.pathHint,
+        repoPath: binding?.repoPath ?? null,
+        bound: Boolean(binding),
+        createdAt: repo.createdAt,
+        updatedAt: binding ? maxIso(repo.updatedAt, binding.updatedAt) : repo.updatedAt
+      };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function bindWorkspaceRepo(paths: DevtaskPaths, repoId: string, repoPathInput: string): WorkspaceRepo {
+  const shared = readSharedReposFile(paths);
+  const repo = shared.repos.find((item) => item.id === repoId);
+  if (!repo) {
+    throw new DevtaskError(`Workspace repo ${repoId} does not exist`);
+  }
+
+  const repoPaths = resolvePaths(resolveWorkspaceRelativePath(paths, repoPathInput));
+  const repoPath = fs.realpathSync(repoPaths.root);
+  const scopePath = repo.scope ? path.join(repoPath, repo.scope) : repoPath;
+  if (!fs.existsSync(scopePath)) {
+    throw new DevtaskError(`Workspace repo scope does not exist: ${scopePath}`);
+  }
+
+  const local = readLocalReposFile(paths);
+  const duplicate = local.repos.find((item) => item.id !== repoId && item.repoPath === repoPath);
+  if (duplicate) {
+    throw new DevtaskError(`Local repo path is already bound to ${duplicate.id}`);
+  }
+
+  const now = new Date().toISOString();
+  const binding: LocalWorkspaceRepoBinding = {
+    id: repoId,
+    repoPath,
+    createdAt: local.repos.find((item) => item.id === repoId)?.createdAt ?? now,
+    updatedAt: now
+  };
+
+  writeLocalReposFile(paths, {
+    schemaVersion: 1,
+    repos: [...local.repos.filter((item) => item.id !== repoId), binding].sort((a, b) => a.id.localeCompare(b.id))
+  });
+
+  return {
+    id: repo.id,
+    repoPath,
+    scope: repo.scope,
+    kind: repo.kind,
+    pathHint: repo.pathHint,
+    createdAt: repo.createdAt,
+    updatedAt: maxIso(repo.updatedAt, now)
+  };
+}
+
+export function setWorkspaceRepoPathHints(paths: DevtaskPaths, hints: Array<{ id: string; pathHint: string | null }>): void {
+  const file = readSharedReposFile(paths);
+  const hintMap = new Map(hints.map((item) => [item.id, item.pathHint]));
+  writeSharedReposFile(paths, {
+    schemaVersion: 1,
+    repos: file.repos.map((repo) =>
+      hintMap.has(repo.id)
+        ? {
+            ...repo,
+            pathHint: hintMap.get(repo.id) ?? null,
+            updatedAt: new Date().toISOString()
+          }
+        : repo
+    )
+  });
+}
+
+export function seedLocalRepoBindingsFromHints(paths: DevtaskPaths): void {
+  const shared = readSharedReposFile(paths);
+  const local = readLocalReposFile(paths);
+  const existing = new Map(local.repos.map((item) => [item.id, item]));
+  const now = new Date().toISOString();
+  const repos = [...local.repos];
+  for (const repo of shared.repos) {
+    if (existing.has(repo.id) || !repo.pathHint) {
+      continue;
+    }
+    repos.push({
+      id: repo.id,
+      repoPath: repo.pathHint,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+  writeLocalReposFile(paths, {
+    schemaVersion: 1,
+    repos: repos.sort((a, b) => a.id.localeCompare(b.id))
+  });
 }
 
 function readSharedReposFile(paths: DevtaskPaths): WorkspaceReposFile {
@@ -230,6 +351,7 @@ function parseSharedRepo(value: unknown): SharedWorkspaceRepo {
     id,
     scope: value.scope === null || value.scope === undefined ? null : normalizeScope(requireString(value, "scope")),
     kind: value.kind === null || value.kind === undefined ? null : normalizeOptionalString(requireString(value, "kind")),
+    pathHint: value.pathHint === null || value.pathHint === undefined ? null : requireString(value, "pathHint"),
     createdAt: requireString(value, "createdAt"),
     updatedAt: requireString(value, "updatedAt")
   };
@@ -242,7 +364,8 @@ function parseLocalBinding(value: unknown): LocalWorkspaceRepoBinding {
 
   const id = requireString(value, "id");
   assertValidRepoId(id);
-  const repoPath = fs.realpathSync(resolvePaths(requireString(value, "repoPath")).root);
+  const repoPathValue = path.resolve(requireString(value, "repoPath"));
+  const repoPath = fs.existsSync(repoPathValue) ? fs.realpathSync(repoPathValue) : repoPathValue;
   return {
     id,
     repoPath,

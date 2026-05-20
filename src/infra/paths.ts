@@ -59,6 +59,10 @@ function buildWorkspacePaths(root: string, workspaceId: string): DevtaskPaths {
   };
 }
 
+export function resolveWorkspacePathsForId(root: string, workspaceId: string): DevtaskPaths {
+  return buildWorkspacePaths(path.resolve(root), workspaceId);
+}
+
 export function globalDevtaskDir(): string {
   if (process.env.DEVTASK_HOME?.trim()) {
     return path.resolve(process.env.DEVTASK_HOME);

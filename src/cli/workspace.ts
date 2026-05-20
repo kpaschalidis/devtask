@@ -1,6 +1,9 @@
 import { Command } from "commander";
 import { resolveWorkspacePaths } from "../infra/paths.js";
 import {
+  createWorkspace,
+  exportWorkspaceBundle,
+  importWorkspaceBundle,
   initializeCurrentWorkspace,
   listRecentWorkspaceWork,
   listRegisteredWorkspaces,
@@ -15,10 +18,12 @@ export function registerWorkspaceCommands(program: Command): void {
     .command("init")
     .description("Initialize devtask in the current directory as a workspace.")
     .option("--no-register", "Do not add the workspace to the global index")
-    .action((options: { register?: boolean }) => {
+    .action(async (options: { register?: boolean }) => {
       try {
         const result = initializeCurrentWorkspace(process.cwd(), { register: options.register !== false });
-        console.log(`Initialized workspace at ${result.paths.baseDir}`);
+        console.log(`Initialized workspace ${result.paths.workspaceId ?? "-"}`);
+        console.log(`Workspace root: ${result.paths.root}`);
+        console.log(`Storage: ${result.paths.baseDir}`);
         if (result.registered) {
           console.log(`Registered workspace ${result.registered.id}`);
         }
@@ -27,7 +32,67 @@ export function registerWorkspaceCommands(program: Command): void {
       }
     });
 
-  const workspace = program.command("workspace").description("Manage workspaces and workspace discovery.");
+  const workspace = program.command("workspace").description("Manage workspaces and workspace bundles.");
+
+  workspace
+    .command("create")
+    .description("Create a workspace at the current directory.")
+    .requiredOption("--id <workspace-id>")
+    .requiredOption("--name <name>")
+    .option("--no-register", "Do not add the workspace to the global index")
+    .action(async (options: { id: string; name: string; register?: boolean }) => {
+      try {
+        const result = createWorkspace(process.cwd(), {
+          id: options.id,
+          name: options.name,
+          register: options.register !== false
+        });
+        console.log(`Created workspace ${options.id}`);
+        console.log(`Workspace root: ${result.paths.root}`);
+        console.log(`Storage: ${result.paths.baseDir}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  workspace
+    .command("import")
+    .description("Import a shareable workspace bundle into the current or specified root.")
+    .requiredOption("--file <bundle.zip>")
+    .option("--root <path>")
+    .option("--no-register", "Do not add the workspace to the global index")
+    .action(async (options: { file: string; root?: string; register?: boolean }) => {
+      try {
+        const result = await importWorkspaceBundle({
+          file: options.file,
+          root: options.root,
+          register: options.register !== false
+        });
+        console.log(`Imported workspace ${result.paths.workspaceId ?? "-"}`);
+        console.log(`Workspace root: ${result.paths.root}`);
+        console.log(`Storage: ${result.paths.baseDir}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  workspace
+    .command("export")
+    .description("Export a workspace bundle.")
+    .requiredOption("--workspace <workspace-id>")
+    .requiredOption("--out <file.zip>")
+    .action(async (options: { workspace: string; out: string }) => {
+      try {
+        const result = await exportWorkspaceBundle({
+          workspaceId: options.workspace,
+          outFile: options.out
+        });
+        console.log(`Exported workspace ${result.workspace.id}`);
+        console.log(`Bundle: ${result.outFile}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
 
   workspace
     .command("show")
@@ -36,6 +101,7 @@ export function registerWorkspaceCommands(program: Command): void {
       try {
         const paths = resolveWorkspacePaths();
         console.log(`Workspace: ${paths.root}`);
+        console.log(`Workspace ID: ${paths.workspaceId ?? "-"}`);
         console.log(`Storage: ${paths.baseDir}`);
       } catch (error) {
         printError(error);

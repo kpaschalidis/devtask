@@ -53,17 +53,17 @@ export function registerWorkspace(paths: DevtaskPaths, id = paths.workspaceId ??
   const now = new Date().toISOString();
   const workspacePath = fs.realpathSync(paths.root);
   const index = readGlobalIndex();
-  const existing = index.workspaces.find((workspace) => workspace.path === workspacePath);
+  const existing = index.workspaces.find((workspace) => workspace.path === workspacePath || workspace.id === id);
   const entry: GlobalWorkspaceEntry = {
-    id: existing?.id ?? uniqueWorkspaceId(index, id, workspacePath),
+    id: existing?.id ?? id,
     path: workspacePath,
     kind: "workspace",
     lastSeenAt: now
   };
   writeGlobalIndex({
     schemaVersion: 1,
-    workspaces: [...index.workspaces.filter((workspace) => workspace.path !== workspacePath), entry].sort((a, b) =>
-      a.id.localeCompare(b.id)
+    workspaces: [...index.workspaces.filter((workspace) => workspace.path !== workspacePath && workspace.id !== entry.id), entry].sort(
+      (a, b) => a.id.localeCompare(b.id)
     ),
     recentWork: index.recentWork.map((work) =>
       work.workspacePath === workspacePath ? { ...work, workspaceId: entry.id, workspacePath } : work
@@ -183,18 +183,6 @@ async function buildRecentWorkEntry(
 
 function defaultWorkspaceId(root: string): string {
   return path.basename(root).replace(/[^a-zA-Z0-9._-]+/g, "-") || "workspace";
-}
-
-function uniqueWorkspaceId(index: GlobalIndex, desired: string, workspacePath: string): string {
-  const existing = new Set(index.workspaces.filter((entry) => entry.path !== workspacePath).map((entry) => entry.id));
-  if (!existing.has(desired)) {
-    return desired;
-  }
-  let suffix = 2;
-  while (existing.has(`${desired}-${suffix}`)) {
-    suffix += 1;
-  }
-  return `${desired}-${suffix}`;
 }
 
 function parseGlobalIndex(value: unknown): GlobalIndex {

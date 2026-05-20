@@ -1,31 +1,33 @@
 # devtask
 
-`devtask` is a local control plane for managing multiple AI-assisted work items across multiple repositories.
+`devtask` is a local tool I use to manage AI-assisted work across multiple projects, workspaces, repos, and tickets.
 
-It is workspace-first and work-first:
+It is built for a setup like:
+- multiple repos per product
+- vague Jira tickets that need refinement before coding
+- one or more developers working locally with Codex
+- deterministic checks plus agent-assisted planning and review
 
-- register repos once per workspace
-- create or import work
-- build a work spec across affected repos
-- materialize repo-local worktrees and sessions
-- run check, review, verify, PR, and CI capabilities independently
-- inspect everything from one board
-
-`devtask` wraps repo-local agent work. It does not try to replace the agent.
+`devtask` is not trying to be a workflow engine. It is a local control plane around:
+- workspaces
+- repo bindings
+- work items
+- shared specs and plans
+- repo-local worktrees
+- agent sessions
 
 ## Requirements
 
+- Node.js 22.x
 - Git with worktree support
-- Node.js 22.x and npm from the same installation
 - Codex CLI installed and authenticated
-- tmux recommended for attachable sessions
 - provider auth for PR/CI operations:
   - GitHub: `gh`
   - Bitbucket Cloud: `BITBUCKET_EMAIL` and `BITBUCKET_API_TOKEN`
   - GitLab: `glab`
 - Jira auth if you import work from Jira
 
-See [Auth And Environment](docs/auth-and-environment.md).
+See [docs/auth-and-environment.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/auth-and-environment.md).
 
 ## Install
 
@@ -38,83 +40,111 @@ devtask --help
 
 ## Quick Start
 
-Single repo:
+Create a workspace and register it locally:
 
 ```bash
-cd /path/to/repo
-devtask init
-
-devtask work create fix-login \
-  --title "Fix login redirect loop" \
-  --body "Fix the redirect loop and add regression coverage."
-
-devtask work spec fix-login
-devtask work board fix-login
+cd /path/to/product
+devtask workspace create --id platform --name Platform
 ```
 
-Multi repo:
+Add repos to that workspace:
 
 ```bash
-cd /path/to/product-workspace
-devtask init
-devtask repo add backend ./backend --kind backend
+devtask repo add backend ./backend --kind service
 devtask repo add web ./web --kind frontend
-
-devtask work import jira APP-123
-devtask work spec APP-123
-devtask work board APP-123
 ```
 
-Typical work flow:
+Create or import work:
+
+```bash
+devtask work import jira APP-123
+```
+
+Refine and plan it:
 
 ```bash
 devtask work spec APP-123
+devtask work plan APP-123
+devtask work repo-plan APP-123
+```
+
+Then execute and validate:
+
+```bash
 devtask work implement APP-123
 devtask work check APP-123
-devtask work review APP-123
 devtask work verify APP-123
+devtask work review APP-123
 devtask work pr APP-123 --ready
-devtask work ci APP-123
 ```
 
-These are capabilities, not hard gates. `devtask` records results and suggests next actions, but the developer stays in control.
-
-## Main Commands
+Use the board to keep track of active work:
 
 ```bash
-devtask workspace list
-devtask repo list
-devtask work list
 devtask board
-devtask board work <work-id>
-devtask session list <work-id>
-devtask worktree list <work-id>
+devtask board work APP-123
 ```
 
-Per-work capabilities:
+## Team Onboarding
+
+Workspaces are local-first and exportable.
+
+Tech lead:
 
 ```bash
-devtask work plan <work-id>
-devtask work spec <work-id>
-devtask work implement <work-id>
-devtask work check <work-id>
-devtask work review <work-id>
-devtask work verify <work-id>
-devtask work pr <work-id> --ready
-devtask work ci <work-id>
-devtask work cleanup <work-id> --dry-run
+devtask workspace create --id platform --name Platform
+devtask workspace export --workspace platform --out platform.bundle.zip
 ```
+
+Another developer:
+
+```bash
+devtask workspace import --file platform.bundle.zip
+devtask repo bind --workspace platform backend /path/to/backend
+devtask repo bind --workspace platform web /path/to/web
+```
+
+Repo paths inside the bundle are only hints. Each developer owns their own local bindings.
+
+## Main Flow
+
+The intended flow is:
+
+```text
+spec -> plan -> repo-plan -> implement -> check/verify -> review -> pr
+```
+
+Notes:
+- `spec` refines the ticket into a shared spec artifact
+- `plan` builds the global multi-repo plan
+- `repo-plan` builds per-repo implementation plans
+- `check` and `verify` are deterministic
+- `review` is agent-backed
+- later commands are mostly guided, not hard-gated
+
+## Storage Model
+
+Shared and local workspace state live under:
+
+```text
+~/.devtask/workspaces/<workspaceId>/
+```
+
+Split into:
+- `shared/` for workspace metadata, shared docs, approved spec, global plan, repo plans
+- `local/` for local bindings, runtime state, results, reviews
+
+Repo-local state is intentionally minimal:
+- worktrees only
+
+See [docs/storage-model.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/storage-model.md) and [docs/plan-workspace-team-onboarding.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/plan-workspace-team-onboarding.md).
 
 ## Documentation
 
-- [Getting Started](docs/getting-started.md)
-- [Auth And Environment](docs/auth-and-environment.md)
-- [Storage Model](docs/storage-model.md)
-- [Config Contract](docs/config-contract.md)
-- [Artifact Contract](docs/artifact-contract.md)
-- [CLI Redesign](docs/cli-redesign.md)
-- [Control Plane Phases](docs/control-plane-phases.md)
-
-## Scope
-
-`devtask` is intentionally local-first. It manages workspaces, repos, work items, worktrees, sessions, and durable artifacts. Final merge judgment stays with the developer and the provider UI.
+- [docs/getting-started.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/getting-started.md)
+- [docs/cli-reference.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/cli-reference.md)
+- [docs/auth-and-environment.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/auth-and-environment.md)
+- [docs/storage-model.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/storage-model.md)
+- [docs/config-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/config-contract.md)
+- [docs/artifact-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/artifact-contract.md)
+- [docs/plan-workspace-team-onboarding.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/plan-workspace-team-onboarding.md)
