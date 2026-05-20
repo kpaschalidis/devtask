@@ -88,7 +88,7 @@ Notes:
 
 ### `shared/config.json`
 
-Workspace-wide config. Current schema lives in [config-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/config-contract.md).
+Workspace-wide config. Current schema lives in [config-contract.md](config-contract.md).
 
 ### `shared/repos.json`
 

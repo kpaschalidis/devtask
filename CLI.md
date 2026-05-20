@@ -90,7 +90,9 @@ devtask work cleanup <work-id> [--dry-run]
 Notes:
 - `spec` refines the source into a spec artifact
 - `plan` builds the global work plan
-- `repo-plan` builds per-repo implementation plans
+- `repo-plan` is triggered manually and builds per-repo implementation plans for all affected repos in the work item
+- current `repo-plan` execution is sequential, not parallel
+- `implement` materializes repo tasks and worktrees for all repos in the work item
 - `check` and `verify` are deterministic
 - `review` is agent-backed
 
@@ -108,6 +110,8 @@ Single work board:
 devtask board work <work-id>
 ```
 
+Current board UX is terminal table output built from read models. It is not a TUI yet.
+
 ## Session
 
 Repo task sessions:
@@ -124,6 +128,7 @@ Current CLI support is narrower than the target direction:
 - `show`
 - `attach`
 - `send`
+- current session steering is tmux-backed
 
 ## Worktree
 
@@ -144,4 +149,4 @@ devtask config model [model]
 devtask config jira [--base-url <url>] [--email <email>] [--cloud-id <cloudId>]
 ```
 
-See [docs/architecture/config-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/config-contract.md) for the current config model.
+See [docs/architecture/config-contract.md](docs/architecture/config-contract.md) for the current config model.

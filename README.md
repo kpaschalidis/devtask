@@ -27,7 +27,7 @@ It is built for setups with:
   - GitLab: `glab`
 - Jira auth if you import work from Jira
 
-See [docs/auth-and-environment.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/auth-and-environment.md).
+See [docs/auth-and-environment.md](docs/auth-and-environment.md).
 
 ## Install
 
@@ -68,6 +68,8 @@ devtask work plan APP-123
 devtask work repo-plan APP-123
 ```
 
+`work repo-plan` is triggered manually and covers every affected repo in the work item. Today it runs one repo plan after another under a single command.
+
 Then execute and validate:
 
 ```bash
@@ -78,12 +80,16 @@ devtask work review APP-123
 devtask work pr APP-123 --ready
 ```
 
+`work implement <work-id>` materializes repo tasks and worktrees for all repos in the work item.
+
 Use the board to keep track of active work:
 
 ```bash
 devtask board
 devtask board work APP-123
 ```
+
+Current board UX is terminal output, not a TUI. It renders workspace and work tables from the current read models.
 
 ## Team Onboarding
 
@@ -117,7 +123,7 @@ spec -> plan -> repo-plan -> implement -> check/verify -> review -> pr
 Notes:
 - `spec` refines the ticket into a shared spec artifact
 - `plan` builds the global multi-repo plan
-- `repo-plan` builds per-repo implementation plans
+- `repo-plan` builds per-repo implementation plans for all affected repos
 - `check` and `verify` are deterministic
 - `review` is agent-backed
 - later commands are mostly guided, not hard-gated
@@ -137,13 +143,13 @@ Split into:
 Repo-local state is intentionally minimal:
 - worktrees only
 
-See [docs/architecture/storage-model.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/storage-model.md) and [docs/architecture/workspace-team-onboarding.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/workspace-team-onboarding.md).
+See [docs/architecture/storage-model.md](docs/architecture/storage-model.md) and [docs/architecture/workspace-team-onboarding.md](docs/architecture/workspace-team-onboarding.md).
 
 ## Documentation
 
-- [CLI.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/CLI.md)
-- [docs/auth-and-environment.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/auth-and-environment.md)
-- [docs/architecture/storage-model.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/storage-model.md)
-- [docs/architecture/config-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/config-contract.md)
-- [docs/architecture/artifact-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/artifact-contract.md)
-- [docs/architecture/workspace-team-onboarding.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/workspace-team-onboarding.md)
+- [CLI.md](CLI.md)
+- [docs/auth-and-environment.md](docs/auth-and-environment.md)
+- [docs/architecture/storage-model.md](docs/architecture/storage-model.md)
+- [docs/architecture/config-contract.md](docs/architecture/config-contract.md)
+- [docs/architecture/artifact-contract.md](docs/architecture/artifact-contract.md)
+- [docs/architecture/workspace-team-onboarding.md](docs/architecture/workspace-team-onboarding.md)
