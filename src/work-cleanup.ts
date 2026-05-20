@@ -29,7 +29,7 @@ export async function cleanupWorkItem(
   if (materialization) {
     for (const task of materialization.tasks) {
       const repoPaths = resolvePaths(task.repoPath);
-      const plan = await planTaskCleanup(repoPaths, task.taskId);
+      const plan = await planTaskCleanup(repoPaths, task.taskId, { keepMetadata: true });
       taskPlans.push({ target: task.target, plan });
       blockers.push(...plan.blockers.map((blocker) => `${task.target}/${task.taskId}: ${blocker}`));
     }
@@ -37,7 +37,7 @@ export async function cleanupWorkItem(
 
   const dir = workItemDir(paths, item.id);
   if (fs.existsSync(dir)) {
-    actions.push(`remove work item metadata ${dir}`);
+    actions.push(`preserve work history ${dir}`);
   } else {
     actions.push("nothing to remove");
   }
@@ -48,12 +48,11 @@ export async function cleanupWorkItem(
 
   if (!options.dryRun && materialization) {
     for (const task of materialization.tasks) {
-      await cleanupTask(resolvePaths(task.repoPath), task.taskId, { force: options.force === true });
+      await cleanupTask(resolvePaths(task.repoPath), task.taskId, {
+        force: options.force === true,
+        keepMetadata: true
+      });
     }
-  }
-
-  if (!options.dryRun && fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
   }
 
   return { taskPlans, actions, blockers };
