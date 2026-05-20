@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildPlanPromptForTest, hasTaskPlan, readLatestPlan } from "../src/planner.js";
-import { resolvePaths, planMarkdownPath } from "../src/paths.js";
-import { createTask } from "../src/task-store.js";
+import { resolvePaths, planMarkdownPath } from "../src/infra/paths.js";
+import { createTask } from "../src/storage/task-store.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("planner artifacts", () => {

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { DevtaskPaths } from "./paths.js";
+import type { DevtaskPaths } from "../infra/paths.js";
 import {
   resultJsonPath,
   scriptsDir,
@@ -11,14 +11,14 @@ import {
   workspaceReposPath,
   workspaceJsonPath,
   worktreePath
-} from "./paths.js";
-import { assertValidTaskId } from "./task-id.js";
+} from "../infra/paths.js";
+import { assertValidTaskId } from "../task-id.js";
 import { readTaskMeta, writeTaskMeta } from "./meta.js";
-import { createTaskWorktree } from "./git.js";
-import { DevtaskError } from "./errors.js";
-import { reconcileTaskRuntime } from "./task-runtime.js";
-import type { TaskMeta, TaskSummary } from "./types.js";
-import { buildCodexCommand, readConfig, writeConfig, DEFAULT_CONFIG } from "./config.js";
+import { createTaskWorktree } from "../infra/git.js";
+import { DevtaskError } from "../infra/errors.js";
+import { reconcileTaskRuntime } from "../task-runtime.js";
+import type { TaskMeta, TaskSummary } from "../types.js";
+import { buildCodexCommand, readConfig, writeConfig, DEFAULT_CONFIG } from "../infra/config.js";
 
 export interface CreateTaskOptions {
   goal?: string;

@@ -1,8 +1,8 @@
 import fs from "node:fs";
-import type { DevtaskPaths } from "../paths.js";
+import type { DevtaskPaths } from "../infra/paths.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { readWorkPlanRecord } from "../services/work-service.js";
-import { listWorkItems, type WorkItem } from "../work-store.js";
+import { listWorkItems, type WorkItem } from "../storage/work-store.js";
 import { listSessions } from "../services/session-service.js";
 import { recommendWorkNextAction } from "./next-actions.js";
 

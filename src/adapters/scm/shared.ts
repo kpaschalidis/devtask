@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
-import { DevtaskError } from "../../errors.js";
-import { runCommand, runCommandOrThrow } from "../../process-runner.js";
+import { DevtaskError } from "../../infra/errors.js";
+import { runCommand, runCommandOrThrow } from "../../infra/process-runner.js";
 
 export type ScmProvider = "github" | "bitbucket" | "gitlab";
 

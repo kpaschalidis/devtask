@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { resolveWorkspacePaths } from "../paths.js";
+import { resolveWorkspacePaths } from "../infra/paths.js";
 import { addRepo, getRepo, listRepos, removeRepo } from "../services/repo-service.js";
 import { printError, printTable } from "./common.js";
 

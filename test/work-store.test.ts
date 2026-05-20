@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { normalizeJiraIssue, writeJiraSourceArtifacts } from "../src/adapters/jira.js";
-import { resolveWorkspacePathsForInit, workItemJsonPath, workItemSourcePath, workItemStatePath } from "../src/paths.js";
-import { initializeWorkspace } from "../src/task-store.js";
-import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems } from "../src/work-store.js";
+import { resolveWorkspacePathsForInit, workItemJsonPath, workItemSourcePath, workItemStatePath } from "../src/infra/paths.js";
+import { initializeWorkspace } from "../src/storage/task-store.js";
+import { createJiraWorkItem, createManualWorkItem, getWorkItem, listWorkItems } from "../src/storage/work-store.js";
 
 describe("work store", () => {
   it("creates durable manual work items", () => {

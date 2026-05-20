@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { DevtaskConfig } from "./config.js";
-import { buildCodexCommand } from "./config.js";
-import type { DevtaskPaths } from "./paths.js";
-import { workItemDir } from "./paths.js";
-import { runCommand } from "./process-runner.js";
-import { newRunId } from "./run-record.js";
-import { listWorkspaceRepos, type WorkspaceRepo } from "./workspace-repos.js";
-import type { WorkItem } from "./work-store.js";
+import type { DevtaskConfig } from "./infra/config.js";
+import { buildCodexCommand } from "./infra/config.js";
+import type { DevtaskPaths } from "./infra/paths.js";
+import { workItemDir } from "./infra/paths.js";
+import { runCommand } from "./infra/process-runner.js";
+import { newRunId } from "./infra/run-record.js";
+import { listWorkspaceRepos, type WorkspaceRepo } from "./storage/workspace-repos.js";
+import type { WorkItem } from "./storage/work-store.js";
 
 export interface WorkPlanRecord {
   schemaVersion: 1;

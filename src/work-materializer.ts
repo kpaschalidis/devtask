@@ -1,19 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DevtaskError } from "./errors.js";
-import { buildCodexCommand, readConfig } from "./config.js";
-import type { DevtaskPaths } from "./paths.js";
+import { DevtaskError } from "./infra/errors.js";
+import { buildCodexCommand, readConfig } from "./infra/config.js";
+import type { DevtaskPaths } from "./infra/paths.js";
 import {
   taskMetaPath,
   workItemDir,
   workItemGraphSnapshotPath,
   workItemMaterializationPath
-} from "./paths.js";
+} from "./infra/paths.js";
 import { assertValidTaskId } from "./task-id.js";
-import { createTask, initializeStore } from "./task-store.js";
+import { createTask, initializeStore } from "./storage/task-store.js";
 import type { TaskMeta } from "./types.js";
-import { getWorkspaceRepo, type WorkspaceRepo } from "./workspace-repos.js";
-import type { WorkItem } from "./work-store.js";
+import { getWorkspaceRepo, type WorkspaceRepo } from "./storage/workspace-repos.js";
+import type { WorkItem } from "./storage/work-store.js";
 import { workGraphPath, workPlanPath } from "./work-planner.js";
 
 export const WORK_DEPENDENCY_TYPES = ["run", "review", "validation"] as const;

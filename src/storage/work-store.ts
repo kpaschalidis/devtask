@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DevtaskError } from "./errors.js";
-import type { DevtaskPaths } from "./paths.js";
-import { workItemDir, workItemJsonPath, workItemSourcePath, workItemStatePath } from "./paths.js";
+import { DevtaskError } from "../infra/errors.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { workItemDir, workItemJsonPath, workItemSourcePath, workItemStatePath } from "../infra/paths.js";
 
 export type WorkItemStatus = "created";
 

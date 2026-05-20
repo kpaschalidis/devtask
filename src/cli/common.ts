@@ -1,4 +1,4 @@
-import { DevtaskError } from "../errors.js";
+import { DevtaskError } from "../infra/errors.js";
 
 export function printError(error: unknown): never {
   if (error instanceof DevtaskError) {

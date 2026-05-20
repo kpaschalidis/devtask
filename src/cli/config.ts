@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import { readConfig, writeConfig } from "../config.js";
-import { resolveWorkspacePaths } from "../paths.js";
+import { readConfig, writeConfig } from "../infra/config.js";
+import { resolveWorkspacePaths } from "../infra/paths.js";
 import { printError } from "./common.js";
 
 export function registerConfigCommands(program: Command): void {

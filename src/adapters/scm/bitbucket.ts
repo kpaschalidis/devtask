@@ -1,4 +1,4 @@
-import { DevtaskError } from "../../errors.js";
+import { DevtaskError } from "../../infra/errors.js";
 import type { CiCheckResult, PullRequestOptions, RemoteInfo } from "./shared.js";
 import {
   bitbucketBasicAuthHeader,

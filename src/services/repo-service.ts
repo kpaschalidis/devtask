@@ -1,11 +1,11 @@
-import type { DevtaskPaths } from "../paths.js";
+import type { DevtaskPaths } from "../infra/paths.js";
 import {
   addWorkspaceRepo,
   getWorkspaceRepo,
   listWorkspaceRepos,
   removeWorkspaceRepo,
   type WorkspaceRepo
-} from "../workspace-repos.js";
+} from "../storage/workspace-repos.js";
 
 export type RepoRecord = WorkspaceRepo;
 

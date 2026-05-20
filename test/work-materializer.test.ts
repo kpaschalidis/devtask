@@ -6,14 +6,14 @@ import {
   taskMetaPath,
   workItemGraphSnapshotPath,
   workItemMaterializationPath
-} from "../src/paths.js";
-import { resolveWorkspacePathsForInit } from "../src/paths.js";
-import { initializeWorkspace } from "../src/task-store.js";
-import { addWorkspaceRepo } from "../src/workspace-repos.js";
-import { createManualWorkItem } from "../src/work-store.js";
+} from "../src/infra/paths.js";
+import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
+import { initializeWorkspace } from "../src/storage/task-store.js";
+import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
+import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan, readWorkGraph } from "../src/work-materializer.js";
 import { workGraphPath } from "../src/work-planner.js";
-import { readTaskMeta } from "../src/meta.js";
+import { readTaskMeta } from "../src/storage/meta.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("work materializer", () => {

@@ -2,10 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { globalIndexPath, readGlobalIndex, registerWorkspace, updateRecentWork } from "../src/global-index.js";
-import { resolveWorkspacePathsForInit } from "../src/paths.js";
-import { initializeWorkspace } from "../src/task-store.js";
-import { createManualWorkItem } from "../src/work-store.js";
+import { globalIndexPath, readGlobalIndex, registerWorkspace, updateRecentWork } from "../src/storage/global-index.js";
+import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
+import { initializeWorkspace } from "../src/storage/task-store.js";
+import { createManualWorkItem } from "../src/storage/work-store.js";
 
 describe("global index", () => {
   const originalHome = process.env.DEVTASK_HOME;

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runCommandOrThrow } from "../src/process-runner.js";
+import { runCommandOrThrow } from "../src/infra/process-runner.js";
 
 export async function makeTempRepo(options: { withCommit?: boolean } = {}): Promise<string> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-test-"));

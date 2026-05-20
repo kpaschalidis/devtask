@@ -1,9 +1,9 @@
-import type { DevtaskPaths } from "../paths.js";
-import { resolvePaths } from "../paths.js";
-import { DevtaskError } from "../errors.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { resolvePaths } from "../infra/paths.js";
+import { DevtaskError } from "../infra/errors.js";
 import { readWorkMaterialization } from "../work-materializer.js";
-import { attachTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionExists } from "../tmux.js";
-import { getTask } from "../task-store.js";
+import { attachTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionExists } from "../infra/tmux.js";
+import { getTask } from "../storage/task-store.js";
 
 export interface SessionSummary {
   workId: string;

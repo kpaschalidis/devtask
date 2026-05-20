@@ -1,4 +1,4 @@
-import { DevtaskError } from "../../errors.js";
+import { DevtaskError } from "../../infra/errors.js";
 import { checkBitbucketCi, createBitbucketPullRequest } from "./bitbucket.js";
 import { checkGitHubCi, createGitHubPullRequest } from "./github.js";
 import {

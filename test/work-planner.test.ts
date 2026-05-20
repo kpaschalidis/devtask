@@ -2,10 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveWorkspacePathsForInit, workItemDir } from "../src/paths.js";
-import { initializeWorkspace } from "../src/task-store.js";
-import { addWorkspaceRepo } from "../src/workspace-repos.js";
-import { createManualWorkItem } from "../src/work-store.js";
+import { resolveWorkspacePathsForInit, workItemDir } from "../src/infra/paths.js";
+import { initializeWorkspace } from "../src/storage/task-store.js";
+import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
+import { createManualWorkItem } from "../src/storage/work-store.js";
 import { buildWorkPlanPromptForTest, workGraphPath, workPlanAddDirsForTest, workPlanPath } from "../src/work-planner.js";
 import { makeTempRepo } from "./helpers.js";
 

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { DevtaskPaths } from "../paths.js";
-import { resolveWorkspacePaths, resolveWorkspacePathsForInit } from "../paths.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { resolveWorkspacePaths, resolveWorkspacePathsForInit } from "../infra/paths.js";
 import {
   findIndexedWork,
   readGlobalIndex,
@@ -10,9 +10,9 @@ import {
   removeWorkspaceFromIndex,
   type GlobalRecentWorkEntry,
   type GlobalWorkspaceEntry
-} from "../global-index.js";
-import { initializeStore, initializeWorkspace } from "../task-store.js";
-import { addWorkspaceRepo, listWorkspaceRepos } from "../workspace-repos.js";
+} from "../storage/global-index.js";
+import { initializeStore, initializeWorkspace } from "../storage/task-store.js";
+import { addWorkspaceRepo, listWorkspaceRepos } from "../storage/workspace-repos.js";
 
 export interface InitWorkspaceOptions {
   register?: boolean;

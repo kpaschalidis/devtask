@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import { cleanupTask, planTaskCleanup, type CleanupPlan } from "./cleanup.js";
-import type { DevtaskPaths } from "./paths.js";
-import { resolvePaths, workItemDir } from "./paths.js";
+import type { DevtaskPaths } from "./infra/paths.js";
+import { resolvePaths, workItemDir } from "./infra/paths.js";
 import { readWorkMaterialization } from "./work-materializer.js";
-import type { WorkItem } from "./work-store.js";
+import type { WorkItem } from "./storage/work-store.js";
 
 export interface WorkCleanupOptions {
   dryRun?: boolean;

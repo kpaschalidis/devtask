@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { resolveWorkspacePaths } from "../paths.js";
+import { resolveWorkspacePaths } from "../infra/paths.js";
 import { attachSession, getSession, listSessions, sendSessionMessage } from "../services/session-service.js";
 import { printError, printTable } from "./common.js";
 

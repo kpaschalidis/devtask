@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DevtaskError } from "../src/errors.js";
-import { resolvePaths } from "../src/paths.js";
-import { createTask, getTask, initializeStore, listTasks } from "../src/task-store.js";
+import { DevtaskError } from "../src/infra/errors.js";
+import { resolvePaths } from "../src/infra/paths.js";
+import { createTask, getTask, initializeStore, listTasks } from "../src/storage/task-store.js";
 import { makeTempRepo } from "./helpers.js";
-import { readConfig, writeConfig } from "../src/config.js";
-import { runCommandOrThrow } from "../src/process-runner.js";
+import { readConfig, writeConfig } from "../src/infra/config.js";
+import { runCommandOrThrow } from "../src/infra/process-runner.js";
 
 describe("task store", () => {
   it("initializes storage directories", async () => {

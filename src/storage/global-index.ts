@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DevtaskError } from "./errors.js";
-import type { DevtaskPaths } from "./paths.js";
-import { workGraphPath, workPlanPath } from "./work-planner.js";
+import { DevtaskError } from "../infra/errors.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { workGraphPath, workPlanPath } from "../work-planner.js";
 import { getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
-import { buildWorkspaceBoardRow } from "./board/workspace-board.js";
+import { buildWorkspaceBoardRow } from "../board/workspace-board.js";
 
 export interface GlobalWorkspaceEntry {
   id: string;

@@ -1,4 +1,4 @@
-import type { WorkItem } from "../work-store.js";
+import type { WorkItem } from "../storage/work-store.js";
 
 export function recommendWorkNextAction(
   item: WorkItem,

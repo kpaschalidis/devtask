@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { DevtaskPaths } from "./paths.js";
-import { planMarkdownPath, taskDir, taskMetaPath } from "./paths.js";
-import { buildCodexCommand } from "./config.js";
-import { newRunId } from "./run-record.js";
-import { runCommand } from "./process-runner.js";
-import { readTaskMeta, writeTaskMeta } from "./meta.js";
+import type { DevtaskPaths } from "./infra/paths.js";
+import { planMarkdownPath, taskDir, taskMetaPath } from "./infra/paths.js";
+import { buildCodexCommand } from "./infra/config.js";
+import { newRunId } from "./infra/run-record.js";
+import { runCommand } from "./infra/process-runner.js";
+import { readTaskMeta, writeTaskMeta } from "./storage/meta.js";
 import type { TaskMeta } from "./types.js";
 
 export interface PlanRecord {

@@ -1,8 +1,8 @@
 import fs from "node:fs";
-import type { DevtaskConfig } from "../config.js";
-import { readConfig } from "../config.js";
-import type { DevtaskPaths } from "../paths.js";
-import { resolvePaths, taskMetaPath, workItemResultsDir } from "../paths.js";
+import type { DevtaskConfig } from "../infra/config.js";
+import { readConfig } from "../infra/config.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { resolvePaths, taskMetaPath, workItemResultsDir } from "../infra/paths.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
 import { readLatestPlan, runPlanAgent, type PlanAgentStart, type PlanRecord } from "../planner.js";
@@ -18,11 +18,11 @@ import {
   getWorkItem,
   listWorkItems,
   type WorkItem
-} from "../work-store.js";
+} from "../storage/work-store.js";
 import { fetchJiraIssue, writeJiraSourceArtifacts } from "../adapters/jira.js";
-import { updateRecentWork } from "../global-index.js";
-import { readTaskMeta, writeTaskMeta } from "../meta.js";
-import { runCommand } from "../process-runner.js";
+import { updateRecentWork } from "../storage/global-index.js";
+import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
+import { runCommand } from "../infra/process-runner.js";
 import {
   checkProviderCi,
   countBranchCommits,

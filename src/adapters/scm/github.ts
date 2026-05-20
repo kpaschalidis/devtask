@@ -1,5 +1,5 @@
-import { DevtaskError } from "../../errors.js";
-import { runCommand, runCommandOrThrow } from "../../process-runner.js";
+import { DevtaskError } from "../../infra/errors.js";
+import { runCommand, runCommandOrThrow } from "../../infra/process-runner.js";
 import type { CiCheckResult, PullRequestOptions } from "./shared.js";
 import { pushBranch } from "./shared.js";
 

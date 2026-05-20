@@ -7,7 +7,7 @@ import {
   normalizeJiraIssue,
   writeJiraSourceArtifacts
 } from "../src/adapters/jira.js";
-import { resolveWorkspacePathsForInit } from "../src/paths.js";
+import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("jira source integration", () => {

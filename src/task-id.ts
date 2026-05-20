@@ -1,4 +1,4 @@
-import { DevtaskError } from "./errors.js";
+import { DevtaskError } from "./infra/errors.js";
 
 const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 

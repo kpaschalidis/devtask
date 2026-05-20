@@ -2,11 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { taskDir, workItemDir, workItemMaterializationPath, resolvePaths, resolveWorkspacePathsForInit } from "../src/paths.js";
-import { createTask } from "../src/task-store.js";
+import { taskDir, workItemDir, workItemMaterializationPath, resolvePaths, resolveWorkspacePathsForInit } from "../src/infra/paths.js";
+import { createTask } from "../src/storage/task-store.js";
 import { cleanupWorkItem } from "../src/work-cleanup.js";
-import { createManualWorkItem } from "../src/work-store.js";
-import { initializeWorkspace } from "../src/task-store.js";
+import { createManualWorkItem } from "../src/storage/work-store.js";
+import { initializeWorkspace } from "../src/storage/task-store.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("work cleanup", () => {

@@ -1,7 +1,7 @@
 import fs from "node:fs";
-import { DevtaskError } from "./errors.js";
-import { atomicWriteFileSync } from "./atomic-write.js";
-import { TASK_STATUSES, type TaskMeta, type TaskRuntimeInfo, type TaskStatus } from "./types.js";
+import { DevtaskError } from "../infra/errors.js";
+import { atomicWriteFileSync } from "../infra/atomic-write.js";
+import { TASK_STATUSES, type TaskMeta, type TaskRuntimeInfo, type TaskStatus } from "../types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { cleanupTask, planTaskCleanup } from "../src/cleanup.js";
-import { DevtaskError } from "../src/errors.js";
-import { resolvePaths } from "../src/paths.js";
-import { createTask } from "../src/task-store.js";
+import { DevtaskError } from "../src/infra/errors.js";
+import { resolvePaths } from "../src/infra/paths.js";
+import { createTask } from "../src/storage/task-store.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("cleanup", () => {

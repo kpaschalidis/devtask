@@ -2,9 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DevtaskError } from "../src/errors.js";
-import { findRepoRoot, resolvePaths, resolveWorkspacePaths, resolveWorkspacePathsForInit } from "../src/paths.js";
-import { initializeWorkspace } from "../src/task-store.js";
+import { DevtaskError } from "../src/infra/errors.js";
+import { findRepoRoot, resolvePaths, resolveWorkspacePaths, resolveWorkspacePathsForInit } from "../src/infra/paths.js";
+import { initializeWorkspace } from "../src/storage/task-store.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("paths", () => {

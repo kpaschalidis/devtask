@@ -1,4 +1,4 @@
-import type { DevtaskPaths } from "../paths.js";
+import type { DevtaskPaths } from "../infra/paths.js";
 import { buildWorkspaceBoard, type WorkspaceBoardRow } from "../board/workspace-board.js";
 import { buildWorkBoard, type RepoTaskBoardRow } from "../board/work-board.js";
 

@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { writeTaskMeta, readTaskMeta } from "./meta.js";
-import { isProcessAlive } from "./processes.js";
-import type { DevtaskPaths } from "./paths.js";
-import { taskMetaPath } from "./paths.js";
-import { tmuxSessionExists } from "./tmux.js";
+import { writeTaskMeta, readTaskMeta } from "./storage/meta.js";
+import { isProcessAlive } from "./infra/processes.js";
+import type { DevtaskPaths } from "./infra/paths.js";
+import { taskMetaPath } from "./infra/paths.js";
+import { tmuxSessionExists } from "./infra/tmux.js";
 import type { TaskMeta } from "./types.js";
 
 export function reconcileTaskRuntime(paths: DevtaskPaths, meta: TaskMeta): TaskMeta {

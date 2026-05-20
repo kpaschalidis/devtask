@@ -1,8 +1,8 @@
 import fs from "node:fs";
-import { DevtaskError } from "./errors.js";
-import { taskDir, taskMetaPath, type DevtaskPaths } from "./paths.js";
-import { readTaskMeta } from "./meta.js";
-import { runCommand, runCommandOrThrow } from "./process-runner.js";
+import { DevtaskError } from "./infra/errors.js";
+import { taskDir, taskMetaPath, type DevtaskPaths } from "./infra/paths.js";
+import { readTaskMeta } from "./storage/meta.js";
+import { runCommand, runCommandOrThrow } from "./infra/process-runner.js";
 
 export interface CleanupOptions {
   dryRun?: boolean;

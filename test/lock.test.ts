@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { acquireLock, releaseLock } from "../src/lock.js";
+import { acquireLock, releaseLock } from "../src/infra/lock.js";
 
 describe("lock", () => {
   it("acquires and releases an atomic lock", () => {

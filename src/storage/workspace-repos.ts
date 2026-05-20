@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DevtaskError } from "./errors.js";
-import type { DevtaskPaths } from "./paths.js";
-import { resolvePaths, workspaceReposPath } from "./paths.js";
+import { DevtaskError } from "../infra/errors.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { resolvePaths, workspaceReposPath } from "../infra/paths.js";
 
 export interface WorkspaceRepo {
   id: string;

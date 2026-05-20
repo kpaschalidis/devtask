@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { resolveWorkspacePaths } from "../paths.js";
+import { resolveWorkspacePaths } from "../infra/paths.js";
 import { getWorkBoard } from "../services/board-service.js";
 import {
   checkWork,

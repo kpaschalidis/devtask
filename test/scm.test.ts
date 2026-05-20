@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DevtaskError } from "../src/errors.js";
-import { runCommandOrThrow } from "../src/process-runner.js";
+import { DevtaskError } from "../src/infra/errors.js";
+import { runCommandOrThrow } from "../src/infra/process-runner.js";
 import { checkProviderCi, parseRemoteUrl } from "../src/adapters/scm/index.js";
 import { makeTempRepo } from "./helpers.js";
 

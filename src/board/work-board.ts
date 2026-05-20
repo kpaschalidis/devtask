@@ -1,10 +1,10 @@
 import fs from "node:fs";
-import type { DevtaskPaths } from "../paths.js";
-import { planMarkdownPath, resolvePaths, workItemResultsDir } from "../paths.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { planMarkdownPath, resolvePaths, workItemResultsDir } from "../infra/paths.js";
 import { hasTaskPlan } from "../planner.js";
 import { readWorkMaterialization } from "../work-materializer.js";
-import { getTask } from "../task-store.js";
-import { getWorkItem } from "../work-store.js";
+import { getTask } from "../storage/task-store.js";
+import { getWorkItem } from "../storage/work-store.js";
 
 export interface RepoTaskBoardRow {
   repo: string;

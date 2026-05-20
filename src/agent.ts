@@ -1,4 +1,4 @@
-import { captureOutputAsync, getForegroundCommand, isSessionAliveAsync, sendKeyAsync } from "./tmux.js";
+import { captureOutputAsync, getForegroundCommand, isSessionAliveAsync, sendKeyAsync } from "./infra/tmux.js";
 
 export const CODEX_PROCESS_NAME = "codex";
 export const CLAUDE_PROCESS_NAME = "claude";
