@@ -1,10 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskConfig } from "./infra/config.js";
-import { buildCodexCommand } from "./adapters/codex/command.js";
+import { createDefaultAgentRunner, runAgentPrompt } from "./agent.js";
 import type { DevtaskPaths } from "./infra/paths.js";
 import { workItemDir, workItemSpecPath } from "./infra/paths.js";
-import { runCommand } from "./infra/process-runner.js";
 import { newRunId } from "./infra/run-record.js";
 import { listWorkspaceRepos, type WorkspaceRepo } from "./storage/workspace-repos.js";
 import type { WorkItem } from "./storage/work-store.js";
@@ -75,37 +74,33 @@ export async function runWorkPlanner(
 
   const previousPlan = artifactSnapshot(planPath);
   const previousGraph = artifactSnapshot(graphPath);
-  const command = buildCodexCommand({
+  const runner = createDefaultAgentRunner(config);
+  const startOptions = {
+    workspacePath: paths.root,
     model: config.codex.model,
     fullAuto: config.codex.fullAuto,
     skipGitRepoCheck: true,
-    addDirs: workPlanAddDirs(workItem, repos)
-  });
-  options.onStart?.({ command, promptPath, outputPath, planPath, graphPath });
-  const startedAt = new Date().toISOString();
-  const output = fs.createWriteStream(outputPath, { flags: "w" });
-  const result = await runCommand("sh", ["-c", command], {
-    cwd: paths.root,
+    addDirs: workPlanAddDirs(workItem, repos),
     env: {
       ...process.env,
       DEVTASK_TASK_DIR: dir,
       DEVTASK_TASK_PATH: promptPath,
       DEVTASK_WORK_PLAN_PATH: planPath,
       DEVTASK_WORK_GRAPH_PATH: graphPath
-    },
-    onStdout: (chunk) => {
-      output.write(chunk);
+    }
+  } as const;
+  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  options.onStart?.({ command, promptPath, outputPath, planPath, graphPath });
+  const startedAt = new Date().toISOString();
+  const result = await runAgentPrompt(runner, startOptions, prompt, {
+    outputPath,
+    onOutput: (chunk) => {
       options.onStdout?.(chunk);
-    },
-    onStderr: (chunk) => {
-      output.write(chunk);
-      options.onStderr?.(chunk);
     }
   });
-  await closeStream(output);
   const finishedAt = new Date().toISOString();
   const status =
-    result.exitCode === 0 && isFreshNonEmptyArtifact(planPath, previousPlan) && isFreshValidGraph(graphPath, previousGraph)
+    result.status === "completed" && isFreshNonEmptyArtifact(planPath, previousPlan) && isFreshValidGraph(graphPath, previousGraph)
       ? "planned"
       : "failed";
 
@@ -121,7 +116,7 @@ export async function runWorkPlanner(
     graphPath,
     startedAt,
     finishedAt,
-    exitCode: result.exitCode
+    exitCode: result.status === "completed" ? 0 : null
   };
   fs.writeFileSync(path.join(runsDir, `${planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
   return record;
@@ -219,12 +214,6 @@ function readTextIfExists(filePath: string): string {
   }
 }
 
-function closeStream(stream: fs.WriteStream): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stream.once("error", reject);
-    stream.end(resolve);
-  });
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

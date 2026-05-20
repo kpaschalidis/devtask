@@ -8,35 +8,8 @@ import { StringDecoder } from 'node:string_decoder';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-
-export interface SessionHandle {
-  id: string;
-  threadId?: string | null;
-}
-
-export type ActivityState = 'idle' | 'active' | 'waiting_input' | 'errored' | 'unknown';
-
-export interface RunOptions {
-  model?: string | null;
-  stallMs?: number;
-  maxTurnMs?: number;
-}
-
-export type RunEvent =
-  | { kind: 'output'; text: string }
-  | { kind: 'input_required'; prompt: string }
-  | { kind: 'completed' }
-  | { kind: 'failed'; error: string }
-  | { kind: 'stalled' }
-  | { kind: 'turn_complete' };
-
-export interface AgentRunner {
-  start(workspacePath: string): Promise<SessionHandle>;
-  run(session: SessionHandle, prompt: string, options?: RunOptions): AsyncIterable<RunEvent>;
-  sendInput?(session: SessionHandle, message: string): Promise<void>;
-  isAlive?(session: SessionHandle): Promise<boolean>;
-  getActivityState?(session: SessionHandle): Promise<ActivityState>;
-}
+import type { ActivityState, AgentRunner, AgentStartOptions, RunEvent, RunOptions, SessionHandle } from '../../agent.js';
+import { buildCodexCommand } from './command.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -207,8 +180,14 @@ export async function resolveCodexBinary(): Promise<string> {
   return 'codex';
 }
 
-function buildCodexLaunchCommand(binary: string, model?: string): string {
+function buildCodexLaunchCommand(binary: string, options: AgentStartOptions, fallbackModel?: string): string {
   const parts = [shellEscape(binary), '-c', 'check_for_update_on_startup=false', '--ask-for-approval', 'never'];
+  if (options.fullAuto !== false) parts.push('--full-auto');
+  if (options.skipGitRepoCheck) parts.push('--skip-git-repo-check');
+  for (const dir of options.addDirs ?? []) {
+    parts.push('--add-dir', shellEscape(dir));
+  }
+  const model = options.model ?? fallbackModel ?? null;
   if (model) parts.push('--model', shellEscape(model));
   return parts.join(' ');
 }
@@ -423,18 +402,28 @@ export class CodexAgentRunner implements AgentRunner {
 
   constructor(private readonly config: CodexAgentRunnerConfig = {}) {}
 
-  async start(workspacePath: string): Promise<SessionHandle> {
+  buildStartCommand(options: AgentStartOptions): string {
+    return buildCodexCommand({
+      model: options.model ?? this.config.model ?? null,
+      fullAuto: options.fullAuto,
+      skipGitRepoCheck: options.skipGitRepoCheck,
+      addDirs: options.addDirs
+    });
+  }
+
+  async start(options: AgentStartOptions): Promise<SessionHandle> {
     const binary = await this.getResolvedBinary();
     const sessionName = `devtask-${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 
-    await tmuxCreateSession(sessionName, workspacePath, {
+    await tmuxCreateSession(sessionName, options.workspacePath, {
       CODEX_DISABLE_UPDATE_CHECK: '1',
+      ...(options.env ?? {})
     });
 
-    const launchCommand = buildCodexLaunchCommand(binary, this.config.model);
+    const launchCommand = buildCodexLaunchCommand(binary, options, this.config.model);
     await tmuxSendLaunchCommand(sessionName, launchCommand);
 
-    this.sessionStates.set(sessionName, { workspacePath, jsonlPath: null, jsonlOffset: 0 });
+    this.sessionStates.set(sessionName, { workspacePath: options.workspacePath, jsonlPath: null, jsonlOffset: 0 });
 
     return { id: sessionName, threadId: '' };
   }

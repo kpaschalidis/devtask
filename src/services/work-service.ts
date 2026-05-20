@@ -4,7 +4,7 @@ import type { DevtaskConfig } from "../infra/config.js";
 import { readConfig } from "../infra/config.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { resolvePaths, taskMetaPath, workItemDir, workItemResultsDir, workItemSpecPath } from "../infra/paths.js";
-import { buildCodexCommand } from "../adapters/codex/command.js";
+import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
 import { readLatestPlan, runPlanAgent, type PlanAgentStart, type PlanRecord } from "../repo-plan.js";
@@ -635,42 +635,38 @@ async function runSpecAgent(
   const prompt = buildSpecPrompt(item, specPath);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
-  const command = buildCodexCommand({
+  const runner = createDefaultAgentRunner(config);
+  const startOptions = {
+    workspacePath: paths.root,
     model: config.codex.model,
     fullAuto: config.codex.fullAuto,
     skipGitRepoCheck: true,
-    addDirs: [path.dirname(item.source.artifact)]
-  });
-  options.onStart?.({ command, promptPath, outputPath, specPath });
-  const output = fs.createWriteStream(outputPath, { flags: "w" });
-  const result = await runCommand("sh", ["-c", command], {
-    cwd: paths.root,
+    addDirs: [path.dirname(item.source.artifact)],
     env: {
       ...process.env,
       DEVTASK_TASK_DIR: workItemDir(paths, item.id),
       DEVTASK_TASK_PATH: promptPath,
       DEVTASK_WORK_SPEC_PATH: specPath
-    },
-    onStdout: (chunk) => {
-      output.write(chunk);
+    }
+  } as const;
+  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  options.onStart?.({ command, promptPath, outputPath, specPath });
+  const result = await runAgentPrompt(runner, startOptions, prompt, {
+    outputPath,
+    onOutput: (chunk) => {
       options.onStdout?.(chunk);
-    },
-    onStderr: (chunk) => {
-      output.write(chunk);
-      options.onStderr?.(chunk);
     }
   });
-  await closeStream(output);
   const currentSpec = readTextIfExists(specPath).trim();
   const status: WorkSpecResult["status"] =
-    result.exitCode === 0 && currentSpec.length > 0 ? "spec-ready" : "failed";
+    result.status === "completed" && currentSpec.length > 0 ? "spec-ready" : "failed";
   return {
     workId: item.id,
     status,
     specPath,
     promptPath,
     outputPath,
-    exitCode: result.exitCode,
+    exitCode: result.status === "completed" ? 0 : null,
     generatedAt: new Date().toISOString()
   };
 }
@@ -711,30 +707,28 @@ async function runReviewAgent(
   );
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
-  const output = fs.createWriteStream(outputPath, { flags: "w" });
-  const command = buildCodexCommand({
+  const runner = createDefaultAgentRunner(config);
+  const startOptions = {
+    workspacePath: task.worktreePath,
     model: config.codex.model,
     fullAuto: false,
     skipGitRepoCheck: true,
-    addDirs: [workItemDir(paths, workId)]
-  });
-  const execResult = await runCommand("sh", ["-c", command], {
-    cwd: task.worktreePath,
+    addDirs: [workItemDir(paths, workId)],
     env: {
       ...process.env,
       DEVTASK_TASK_DIR: workItemDir(paths, workId),
       DEVTASK_TASK_PATH: promptPath,
       DEVTASK_REVIEW_PATH: reviewPath,
       DEVTASK_REVIEW_RESULT_PATH: resultPath
-    },
-    onStdout: (chunk) => output.write(chunk),
-    onStderr: (chunk) => output.write(chunk)
+    }
+  } as const;
+  const execResult = await runAgentPrompt(runner, startOptions, prompt, {
+    outputPath
   });
-  await closeStream(output);
 
   const parsed = readReviewResult(resultPath);
   const status: ReviewTaskResult["status"] =
-    execResult.exitCode !== 0 ? "failed" : parsed?.status ?? "failed";
+    execResult.status !== "completed" ? "failed" : parsed?.status ?? "failed";
   return {
     repoId: task.repoId,
     taskId: task.taskId,

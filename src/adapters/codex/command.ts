@@ -1,5 +1,5 @@
 export function buildCodexCommand(
-  options: { model?: string | null; fullAuto?: boolean; skipGitRepoCheck?: boolean; addDirs?: string[] } = {}
+  options: { model?: string | null; fullAuto?: boolean; skipGitRepoCheck?: boolean; addDirs?: readonly string[] } = {}
 ): string {
   const args = ["codex", "exec"];
   if (options.fullAuto !== false) {

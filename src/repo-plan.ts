@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./infra/paths.js";
 import { planMarkdownPath, taskDir, taskMetaPath } from "./infra/paths.js";
-import { buildCodexCommand } from "./adapters/codex/command.js";
+import { createDefaultAgentRunner, runAgentPrompt } from "./agent.js";
 import { newRunId } from "./infra/run-record.js";
 import { runCommand } from "./infra/process-runner.js";
 import { readTaskMeta, writeTaskMeta } from "./storage/meta.js";
@@ -61,12 +61,18 @@ export async function runPlanAgent(
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const beforeStatus = await readGitStatus(meta.worktreePath);
-  const command = buildCodexCommand({ model: options.model, fullAuto: options.fullAuto });
-  options.onStart?.({ command, outputPath, promptPath, planPath });
-  const startedAt = new Date().toISOString();
-  const output = fs.createWriteStream(outputPath, { flags: "w" });
-  const result = await runCommand("sh", ["-c", command], {
-    cwd: meta.worktreePath,
+  const runner = createDefaultAgentRunner({
+    schemaVersion: 1,
+    codex: { model: options.model ?? null, fullAuto: options.fullAuto !== false },
+    runtime: { mode: "attachable", backend: "tmux" },
+    runtimeConfigured: false,
+    jira: { baseUrl: null, email: null, cloudId: null },
+    verify: []
+  });
+  const startOptions = {
+    workspacePath: meta.worktreePath,
+    model: options.model,
+    fullAuto: options.fullAuto,
     env: {
       ...process.env,
       DEVTASK_TASK_DIR: taskDir(paths, meta.id),
@@ -74,17 +80,17 @@ export async function runPlanAgent(
       DEVTASK_PLAN_PATH: runtimePlanPath,
       DEVTASK_STATE_PATH: runtimeStatePath,
       DEVTASK_RESULT_PATH: runtimeResultPath
-    },
-    onStdout: (chunk) => {
-      output.write(chunk);
+    }
+  } as const;
+  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  options.onStart?.({ command, outputPath, promptPath, planPath });
+  const startedAt = new Date().toISOString();
+  const result = await runAgentPrompt(runner, startOptions, prompt, {
+    outputPath,
+    onOutput: (chunk) => {
       options.onStdout?.(chunk);
-    },
-    onStderr: (chunk) => {
-      output.write(chunk);
-      options.onStderr?.(chunk);
     }
   });
-  await closeStream(output);
   const finishedAt = new Date().toISOString();
   persistRuntimePlan(runtimePlanPath, planPath);
   persistRuntimeResult(runtimeResultPath, meta.resultPath);
@@ -96,7 +102,7 @@ export async function runPlanAgent(
   const planContent = readTextIfExists(planPath).trim();
   const resultStatus = readResultStatus(meta.resultPath);
   const status =
-    result.exitCode !== 0 || worktreeChanged || !planContent
+    result.status !== "completed" || worktreeChanged || !planContent
       ? "failed"
       : resultStatus === "blocked"
         ? "blocked"
@@ -113,7 +119,7 @@ export async function runPlanAgent(
     planPath,
     startedAt,
     finishedAt,
-    exitCode: result.exitCode,
+    exitCode: result.status === "completed" ? 0 : null,
     worktreeChanged
   };
 
@@ -208,11 +214,4 @@ function removeIfExists(filePath: string): void {
       throw error;
     }
   }
-}
-
-function closeStream(stream: fs.WriteStream): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stream.once("error", reject);
-    stream.end(resolve);
-  });
 }

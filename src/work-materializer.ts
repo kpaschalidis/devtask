@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { buildAgentBootstrapCommand } from "./agent.js";
 import { DevtaskError } from "./infra/errors.js";
 import { readConfig } from "./infra/config.js";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { buildCodexCommand } from "./adapters/codex/command.js";
 import {
   taskMetaPath,
   workItemDir,
@@ -307,7 +307,8 @@ function buildRepoTaskGoal(
 
 function buildMaterializedTaskCommand(paths: DevtaskPaths, repoPaths: DevtaskPaths, workItem: WorkItem): string {
   const config = readConfig(repoPaths);
-  return buildCodexCommand({
+  return buildAgentBootstrapCommand(config, {
+    workspacePath: repoPaths.root,
     model: config.codex.model,
     fullAuto: config.codex.fullAuto,
     addDirs: [workItemDir(paths, workItem.id), path.dirname(workItem.source.artifact)]

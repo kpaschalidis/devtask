@@ -19,7 +19,7 @@ import { DevtaskError } from "../infra/errors.js";
 import { reconcileTaskRuntime } from "../task-runtime.js";
 import type { TaskMeta, TaskSummary } from "../types.js";
 import { readConfig, writeConfig, DEFAULT_CONFIG } from "../infra/config.js";
-import { buildCodexCommand } from "../adapters/codex/command.js";
+import { buildAgentBootstrapCommand } from "../agent.js";
 
 export interface CreateTaskOptions {
   goal?: string;
@@ -97,7 +97,11 @@ export async function createTask(
   const now = new Date().toISOString();
   const config = readConfig(paths);
   const model = options.model ?? config.codex.model;
-  const defaultCommand = buildCodexCommand({ model, fullAuto: config.codex.fullAuto });
+  const defaultCommand = buildAgentBootstrapCommand(config, {
+    workspacePath: targetWorktreePath,
+    model,
+    fullAuto: config.codex.fullAuto
+  });
 
   fs.writeFileSync(
     taskPath,
