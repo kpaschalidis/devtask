@@ -3,7 +3,7 @@ import path from "node:path";
 import type { DevtaskConfig } from "./infra/config.js";
 import { buildCodexCommand } from "./infra/config.js";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { workItemDir } from "./infra/paths.js";
+import { workItemDir, workItemSpecPath } from "./infra/paths.js";
 import { runCommand } from "./infra/process-runner.js";
 import { newRunId } from "./infra/run-record.js";
 import { listWorkspaceRepos, type WorkspaceRepo } from "./storage/workspace-repos.js";
@@ -67,8 +67,9 @@ export async function runWorkPlanner(
   const outputPath = path.join(runsDir, `${planId}.md`);
   const planPath = workPlanPath(paths, workItem.id);
   const graphPath = workGraphPath(paths, workItem.id);
+  const specPath = workItemSpecPath(paths, workItem.id);
   const repos = listWorkspaceRepos(paths);
-  const prompt = buildWorkPlanPrompt(paths, workItem, repos, planPath, graphPath);
+  const prompt = buildWorkPlanPrompt(paths, workItem, repos, planPath, graphPath, specPath);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const previousPlan = artifactSnapshot(planPath);
@@ -151,7 +152,7 @@ export function buildWorkPlanPromptForTest(
   planPath: string,
   graphPath: string
 ): string {
-  return buildWorkPlanPrompt(paths, workItem, repos, planPath, graphPath);
+  return buildWorkPlanPrompt(paths, workItem, repos, planPath, graphPath, workItemSpecPath(paths, workItem.id));
 }
 
 export function workPlanAddDirsForTest(workItem: WorkItem, repos: WorkspaceRepo[]): string[] {
@@ -163,8 +164,10 @@ function buildWorkPlanPrompt(
   workItem: WorkItem,
   repos: WorkspaceRepo[],
   planPath: string,
-  graphPath: string
+  graphPath: string,
+  specPath: string
 ): string {
+  const hasSpec = fs.existsSync(specPath) && fs.readFileSync(specPath, "utf8").trim().length > 0;
   return [
     `Plan work item ${workItem.id}.`,
     "",
@@ -181,12 +184,16 @@ function buildWorkPlanPrompt(
     `- Write the human-readable plan to: ${planPath}.`,
     `- Write the machine-readable graph JSON to: ${graphPath}.`,
     "",
-    "Work source:",
+    "Primary planning input:",
     "",
-    `- type: ${workItem.source.type}`,
-    `- title: ${workItem.source.title}`,
-    `- artifact: ${workItem.source.artifact}`,
-    ...("url" in workItem.source ? [`- url: ${workItem.source.url}`] : []),
+    ...(hasSpec
+      ? [`- spec artifact: ${specPath}`, `- original source artifact: ${workItem.source.artifact}`]
+      : [
+          `- type: ${workItem.source.type}`,
+          `- title: ${workItem.source.title}`,
+          `- artifact: ${workItem.source.artifact}`,
+          ...("url" in workItem.source ? [`- url: ${workItem.source.url}`] : [])
+        ]),
     "",
     "Workspace repos:",
     "",
@@ -201,7 +208,9 @@ function buildWorkPlanPrompt(
         )
       : ["- (none configured)"]),
     "",
-    "Read the work source artifact before planning.",
+    ...(hasSpec
+      ? ["Read the work spec artifact first. Use the original source only for additional context."]
+      : ["Read the work source artifact before planning."]),
     "",
     "Markdown plan sections:",
     "1. Summary",

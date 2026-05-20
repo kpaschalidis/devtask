@@ -2,13 +2,16 @@ import type { WorkItem } from "../storage/work-store.js";
 
 export function recommendWorkNextAction(
   item: WorkItem,
-  options: { hasPlan: boolean; isMaterialized: boolean; hasActiveSession: boolean }
+  options: { hasSpec: boolean; hasPlan: boolean; isMaterialized: boolean; hasActiveSession: boolean }
 ): string {
+  if (!options.hasSpec) {
+    return `devtask work spec ${shellQuote(item.id)}`;
+  }
   if (!options.hasPlan) {
     return `devtask work plan ${shellQuote(item.id)}`;
   }
   if (!options.isMaterialized) {
-    return `devtask work implement ${shellQuote(item.id)}`;
+    return `devtask work repo-plan ${shellQuote(item.id)}`;
   }
   if (options.hasActiveSession) {
     return `devtask work board ${shellQuote(item.id)}`;

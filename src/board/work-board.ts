@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { planMarkdownPath, resolvePaths, workItemResultsDir } from "../infra/paths.js";
+import { planMarkdownPath, resolvePaths, workItemResultsDir, workItemSpecPath } from "../infra/paths.js";
 import { hasTaskPlan } from "../planner.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { getTask } from "../storage/task-store.js";
@@ -67,19 +67,24 @@ function buildUnmaterializedWorkRow(
   paths: DevtaskPaths,
   item: ReturnType<typeof getWorkItem>
 ): RepoTaskBoardRow {
+  const hasSpec = fs.existsSync(workItemSpecPath(paths, item.id));
   const hasPlan = fs.existsSync(planMarkdownPath(paths, item.id));
   return {
     repo: "-",
     task: item.id,
-    phase: hasPlan ? "implementation" : "planning",
-    status: hasPlan ? "ready" : "pending",
-    last: hasPlan ? "planned" : "created",
+    phase: hasPlan ? "planning" : hasSpec ? "spec" : "spec",
+    status: hasPlan ? "planned" : hasSpec ? "spec-ready" : "pending",
+    last: hasPlan ? "planned" : hasSpec ? "spec-ready" : "created",
     blocked: "-",
     check: "-",
     review: "-",
     pr: "-",
     updated: item.updatedAt,
-    next: hasPlan ? `devtask work implement ${shellQuote(item.id)}` : `devtask work plan ${shellQuote(item.id)}`
+    next: hasPlan
+      ? `devtask work repo-plan ${shellQuote(item.id)}`
+      : hasSpec
+        ? `devtask work plan ${shellQuote(item.id)}`
+        : `devtask work spec ${shellQuote(item.id)}`
   };
 }
 
@@ -154,7 +159,7 @@ function nextCommand(
   ci: string
 ): string {
   if (!hasRepoPlan) {
-    return `devtask work plan ${shellQuote(workId)}`;
+    return `devtask work repo-plan ${shellQuote(workId)}`;
   }
   if (hasSession && (status === "running" || status === "paused")) {
     return `devtask session attach ${shellQuote(workId)} ${shellQuote(repoId)}`;

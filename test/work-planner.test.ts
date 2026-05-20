@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveWorkspacePathsForInit, workItemDir } from "../src/infra/paths.js";
+import { resolveWorkspacePathsForInit, workItemDir, workItemSpecPath } from "../src/infra/paths.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
@@ -72,5 +72,22 @@ describe("work planner", () => {
       path.dirname(item.source.artifact),
       path.join(repoConfig.repoPath, "packages", "api")
     ]);
+  });
+
+  it("prefers the refined spec artifact when present", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-planner-spec-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "manual-1",
+      title: "Improve onboarding",
+      body: "Clarify install steps."
+    });
+    fs.writeFileSync(workItemSpecPath(paths, item.id), "# Refined spec\n\nUse a clearer installer flow.\n");
+
+    const prompt = buildWorkPlanPromptForTest(paths, item, [], workPlanPath(paths, item.id), workGraphPath(paths, item.id));
+
+    expect(prompt).toContain(`- spec artifact: ${workItemSpecPath(paths, item.id)}`);
+    expect(prompt).toContain("Read the work spec artifact first.");
   });
 });

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { Command } from "commander";
 import { resolveWorkspacePaths } from "../infra/paths.js";
 import { getWorkBoard } from "../services/board-service.js";
@@ -13,6 +14,7 @@ import {
   materializeWork,
   planWork,
   readWorkPlanRecord,
+  repoPlanWork,
   reviewWork,
   specWork,
   verifyWork
@@ -114,12 +116,18 @@ export function registerWorkCommands(program: Command): void {
     .argument("<work-id>")
     .action((workId: string) => {
       try {
+        const paths = resolveWorkspacePaths();
+        const specPath = `${paths.workDir}/${workId}/spec.md`;
+        if (!fs.existsSync(specPath)) {
+          console.log(`Next: devtask work spec ${workId}`);
+          return;
+        }
         const record = readWorkPlanRecord(resolveWorkspacePaths(), workId);
         if (!record) {
           console.log(`Next: devtask work plan ${workId}`);
           return;
         }
-        console.log(record.status === "planned" ? `Next: devtask work implement ${workId}` : `Next: devtask work plan ${workId}`);
+        console.log(record.status === "planned" ? `Next: devtask work repo-plan ${workId}` : `Next: devtask work plan ${workId}`);
       } catch (error) {
         printError(error);
       }
@@ -127,7 +135,7 @@ export function registerWorkCommands(program: Command): void {
 
   work
     .command("plan")
-    .description("Run the global work planner.")
+    .description("Run the global work planner from the refined spec.")
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
@@ -151,25 +159,40 @@ export function registerWorkCommands(program: Command): void {
 
   work
     .command("spec")
-    .description("Build the work spec by combining global planning with repo-local planning.")
+    .description("Refine the work source into an implementation-ready spec.")
+    .argument("<work-id>")
+    .action(async (workId: string) => {
+      try {
+        const result = await specWork(resolveWorkspacePaths(), workId, {
+          onStart: (start) => {
+            console.log(`Prompt: ${start.promptPath}`);
+            console.log(`Spec: ${start.specPath}`);
+            console.log(`Output: ${start.outputPath}`);
+            console.log(`Command: ${start.command}`);
+          }
+        });
+        console.log("");
+        console.log(`Spec status: ${result.status}`);
+        console.log(`Spec path: ${result.specPath}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("repo-plan")
+    .description("Run repo-local implementation planning after the global plan is ready.")
     .argument("<work-id>")
     .option("--refresh", "Rerun repo-local planning even if a repo plan already exists")
     .action(async (workId: string, options: { refresh?: boolean }) => {
       try {
-        const result = await specWork(resolveWorkspacePaths(), workId, {
+        const result = await repoPlanWork(resolveWorkspacePaths(), workId, {
           refresh: options.refresh === true,
-          onPlanStart: (start) => {
-            console.log(`Global prompt: ${start.promptPath}`);
-            console.log(`Global plan: ${start.planPath}`);
-            console.log(`Global graph: ${start.graphPath}`);
-          },
           onRepoPlanStart: (repoId, start) => {
             console.log(`Repo ${repoId} prompt: ${start.promptPath}`);
             console.log(`Repo ${repoId} plan: ${start.planPath}`);
           }
         });
-        console.log("");
-        console.log(`Global plan status: ${result.planStatus}`);
         printTable(
           ["REPO", "TASK", "STATUS", "PLAN", "WORKTREE_CHANGED"],
           result.repoPlans.map((task) => [task.repoId, task.taskId, task.status, task.planPath, String(task.worktreeChanged)])
@@ -181,19 +204,18 @@ export function registerWorkCommands(program: Command): void {
 
   work
     .command("review")
-    .description("Create a durable review packet summarizing repo state and latest artifacts.")
+    .description("Run an agent-backed review for each repo task.")
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
         const result = await reviewWork(resolveWorkspacePaths(), workId);
         printTable(
-          ["REPO", "TASK", "CLEAN", "COMMITS", "PR", "CHECK", "VERIFY", "CI"],
+          ["REPO", "TASK", "STATUS", "SUMMARY", "CHECK", "VERIFY", "CI"],
           result.tasks.map((task) => [
             task.repoId,
             task.taskId,
-            String(task.clean),
-            String(task.commits),
-            task.prUrl ?? "-",
+            task.status,
+            task.summary,
             task.latestCheck ?? "-",
             task.latestVerify ?? "-",
             task.latestCi ?? "-"
