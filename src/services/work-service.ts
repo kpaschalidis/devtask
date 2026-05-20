@@ -5,6 +5,7 @@ import type { DevtaskPaths } from "../paths.js";
 import { resolvePaths, taskMetaPath, workItemResultsDir } from "../paths.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { approveWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
+import { readLatestPlan, runPlanAgent, type PlanAgentStart, type PlanRecord } from "../planner.js";
 import {
   readLatestWorkPlanRecord,
   runWorkPlanner,
@@ -79,6 +80,25 @@ export interface CiWorkResult {
   generatedAt: string;
 }
 
+export interface RepoPlanTaskResult {
+  repoId: string;
+  taskId: string;
+  status: PlanRecord["status"];
+  planPath: string;
+  outputPath: string;
+  worktreeChanged: boolean;
+}
+
+export interface WorkSpecResult {
+  workId: string;
+  planStatus: WorkPlanRecord["status"];
+  planPath: string;
+  graphPath: string;
+  materialized: boolean;
+  repoPlans: RepoPlanTaskResult[];
+  generatedAt: string;
+}
+
 export function createManualWork(
   paths: DevtaskPaths,
   options: { id: string; title: string; body?: string | null }
@@ -125,6 +145,81 @@ export async function planWork(
   const record = await runWorkPlanner(paths, item, config, options);
   await updateRecentWork(paths, item);
   return record;
+}
+
+export async function specWork(
+  paths: DevtaskPaths,
+  workId: string,
+  options: {
+    refresh?: boolean;
+    onPlanStart?: (start: WorkPlanStart) => void;
+    onRepoPlanStart?: (repoId: string, start: PlanAgentStart) => void;
+    onStdout?: (chunk: string) => void;
+    onStderr?: (chunk: string) => void;
+  } = {}
+): Promise<WorkSpecResult> {
+  const config: DevtaskConfig = readConfig(paths);
+  const item = getWorkItem(paths, workId);
+  const planRecord = await runWorkPlanner(paths, item, config, {
+    onStart: options.onPlanStart,
+    onStdout: options.onStdout,
+    onStderr: options.onStderr
+  });
+
+  if (planRecord.status !== "planned") {
+    throw new Error(`Global work plan failed for ${workId}`);
+  }
+
+  const existingMaterialization = readWorkMaterialization(paths, workId);
+  const materialization = existingMaterialization ?? (await approveWorkPlan(paths, item));
+  const repoPlans: RepoPlanTaskResult[] = [];
+
+  for (const task of materialization.tasks) {
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+    const latestPlan = readLatestPlan(repoPaths, task.taskId);
+
+    if (latestPlan && !options.refresh) {
+      repoPlans.push({
+        repoId: task.repoId,
+        taskId: task.taskId,
+        status: latestPlan.status,
+        planPath: latestPlan.planPath,
+        outputPath: latestPlan.outputPath,
+        worktreeChanged: latestPlan.worktreeChanged
+      });
+      continue;
+    }
+
+    const record = await runPlanAgent(repoPaths, meta, {
+      model: meta.model,
+      fullAuto: true,
+      onStart: (start) => options.onRepoPlanStart?.(task.repoId, start),
+      onStdout: options.onStdout,
+      onStderr: options.onStderr
+    });
+    repoPlans.push({
+      repoId: task.repoId,
+      taskId: task.taskId,
+      status: record.status,
+      planPath: record.planPath,
+      outputPath: record.outputPath,
+      worktreeChanged: record.worktreeChanged
+    });
+  }
+
+  const result: WorkSpecResult = {
+    workId,
+    planStatus: planRecord.status,
+    planPath: planRecord.planPath,
+    graphPath: planRecord.graphPath,
+    materialized: existingMaterialization !== null,
+    repoPlans,
+    generatedAt: new Date().toISOString()
+  };
+  writeWorkResult(paths, workId, "spec", result);
+  await updateRecentWork(paths, item);
+  return result;
 }
 
 export async function materializeWork(paths: DevtaskPaths, workId: string): Promise<WorkMaterialization> {

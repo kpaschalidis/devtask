@@ -12,6 +12,7 @@ import {
   materializeWork,
   planWork,
   readWorkPlanRecord,
+  specWork,
   verifyWork
 } from "../services/work-service.js";
 import { printError, printTable } from "./common.js";
@@ -141,6 +142,36 @@ export function registerWorkCommands(program: Command): void {
         });
         console.log("");
         console.log(`Plan status: ${record.status}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("spec")
+    .description("Build the work spec by combining global planning with repo-local planning.")
+    .argument("<work-id>")
+    .option("--refresh", "Rerun repo-local planning even if a repo plan already exists")
+    .action(async (workId: string, options: { refresh?: boolean }) => {
+      try {
+        const result = await specWork(resolveWorkspacePaths(), workId, {
+          refresh: options.refresh === true,
+          onPlanStart: (start) => {
+            console.log(`Global prompt: ${start.promptPath}`);
+            console.log(`Global plan: ${start.planPath}`);
+            console.log(`Global graph: ${start.graphPath}`);
+          },
+          onRepoPlanStart: (repoId, start) => {
+            console.log(`Repo ${repoId} prompt: ${start.promptPath}`);
+            console.log(`Repo ${repoId} plan: ${start.planPath}`);
+          }
+        });
+        console.log("");
+        console.log(`Global plan status: ${result.planStatus}`);
+        printTable(
+          ["REPO", "TASK", "STATUS", "PLAN", "WORKTREE_CHANGED"],
+          result.repoPlans.map((task) => [task.repoId, task.taskId, task.status, task.planPath, String(task.worktreeChanged)])
+        );
       } catch (error) {
         printError(error);
       }
