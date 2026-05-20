@@ -6,7 +6,7 @@ import { resolveWorkspacePathsForInit, workItemDir, workItemSpecPath } from "../
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
-import { buildWorkPlanPromptForTest, workGraphPath, workPlanAddDirsForTest, workPlanPath } from "../src/work-planner.js";
+import { buildWorkPlanPromptForTest, workGraphPath, workPlanAddDirsForTest, workPlanPath } from "../src/global-plan.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("work planner", () => {

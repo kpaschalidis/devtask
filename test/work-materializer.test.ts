@@ -12,7 +12,7 @@ import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan, readWorkGraph } from "../src/work-materializer.js";
-import { workGraphPath } from "../src/work-planner.js";
+import { workGraphPath } from "../src/global-plan.js";
 import { readTaskMeta } from "../src/storage/meta.js";
 import { makeTempRepo } from "./helpers.js";
 

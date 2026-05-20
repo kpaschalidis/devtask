@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { DevtaskError } from "../infra/errors.js";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { workGraphPath, workPlanPath } from "../work-planner.js";
+import { workGraphPath, workPlanPath } from "../global-plan.js";
 import { getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 import { buildWorkspaceBoardRow } from "../board/workspace-board.js";
 

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
-import { buildCodexCommand, hasRuntimeConfig, readConfig, writeConfig } from "../src/infra/config.js";
+import { buildCodexCommand } from "../src/adapters/codex/command.js";
+import { hasRuntimeConfig, readConfig, writeConfig } from "../src/infra/config.js";
 import { resolvePaths } from "../src/infra/paths.js";
 import { makeTempRepo } from "./helpers.js";
 

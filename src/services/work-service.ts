@@ -1,18 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskConfig } from "../infra/config.js";
-import { buildCodexCommand, readConfig } from "../infra/config.js";
+import { readConfig } from "../infra/config.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { resolvePaths, taskMetaPath, workItemDir, workItemResultsDir, workItemSpecPath } from "../infra/paths.js";
+import { buildCodexCommand } from "../adapters/codex/command.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
-import { readLatestPlan, runPlanAgent, type PlanAgentStart, type PlanRecord } from "../planner.js";
+import { readLatestPlan, runPlanAgent, type PlanAgentStart, type PlanRecord } from "../repo-plan.js";
 import {
   readLatestWorkPlanRecord,
   runWorkPlanner,
   type WorkPlanRecord,
   type WorkPlanStart
-} from "../work-planner.js";
+} from "../global-plan.js";
 import {
   createJiraWorkItem,
   createManualWorkItem,
@@ -24,6 +25,8 @@ import { fetchJiraIssue, writeJiraSourceArtifacts } from "../adapters/jira.js";
 import { updateRecentWork } from "../storage/global-index.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { runCommand } from "../infra/process-runner.js";
+import { buildReviewPrompt } from "../prompts/review.js";
+import { buildSpecPrompt } from "../prompts/spec-plan.js";
 import {
   checkProviderCi,
   countBranchCommits,
@@ -672,43 +675,6 @@ async function runSpecAgent(
   };
 }
 
-function buildSpecPrompt(item: WorkItem, specPath: string): string {
-  return [
-    `Refine work item ${item.id} into an implementation-ready spec.`,
-    "",
-    "You are in the devtask work spec activity.",
-    "",
-    "Role:",
-    "- Read the original work source carefully.",
-    "- Clarify the request into a concise, implementation-ready spec.",
-    "- Do not produce a repo plan or dependency graph yet.",
-    "- Do not edit repository files, run tests, or mutate git state.",
-    `- Write the spec markdown to: ${specPath}.`,
-    "",
-    "Source:",
-    `- type: ${item.source.type}`,
-    `- title: ${item.source.title}`,
-    `- artifact: ${item.source.artifact}`,
-    ...("url" in item.source ? [`- url: ${item.source.url}`] : []),
-    "",
-    "Spec sections:",
-    "1. Summary",
-    "2. Problem Statement",
-    "3. In Scope",
-    "4. Out of Scope",
-    "5. Functional Requirements",
-    "6. Acceptance Criteria",
-    "7. Constraints and Assumptions",
-    "8. Open Questions",
-    "",
-    "Rules:",
-    "- Keep the spec grounded in the source artifact.",
-    "- Make assumptions explicit instead of hiding them.",
-    "- If the ticket is vague, capture the ambiguity under Open Questions instead of inventing certainty.",
-    "- Do not include code changes or a repo execution graph."
-  ].join("\n");
-}
-
 async function runReviewAgent(
   paths: DevtaskPaths,
   workId: string,
@@ -784,61 +750,6 @@ async function runReviewAgent(
     latestVerify: signals.latestVerify,
     latestCi: signals.latestCi
   };
-}
-
-function buildReviewPrompt(
-  task: WorkMaterialization["tasks"][number],
-  meta: TaskMeta,
-  reviewPath: string,
-  resultPath: string,
-  context: {
-    clean: boolean;
-    commits: number;
-    changedFiles: string[];
-    diffStat: string;
-    latestCheck: string | null;
-    latestVerify: string | null;
-    latestCi: string | null;
-  }
-): string {
-  return [
-    `Review repo task ${task.taskId} for work ${task.graphTaskId}.`,
-    "",
-    "You are in the devtask review activity.",
-    "",
-    "Role:",
-    "- Review the current repository changes.",
-    "- Do not modify files, run fixes, or mutate git state.",
-    "- Use the deterministic signals as supporting evidence, not as a substitute for reviewing the changes.",
-    `- Write markdown findings to: ${reviewPath}.`,
-    `- Write JSON review result to: ${resultPath}.`,
-    "",
-    "Context:",
-    `- repo id: ${task.repoId}`,
-    `- task id: ${task.taskId}`,
-    `- branch: ${task.branch}`,
-    `- worktree: ${task.worktreePath}`,
-    `- pr url: ${meta.prUrl ?? "-"}`,
-    `- worktree clean: ${String(context.clean)}`,
-    `- branch commits: ${String(context.commits)}`,
-    `- latest check: ${context.latestCheck ?? "-"}`,
-    `- latest verify: ${context.latestVerify ?? "-"}`,
-    `- latest ci: ${context.latestCi ?? "-"}`,
-    "",
-    "Changed files:",
-    ...(context.changedFiles.length > 0 ? context.changedFiles.map((file) => `- ${file}`) : ["- none"]),
-    "",
-    "Diff stat:",
-    context.diffStat || "-",
-    "",
-    "Review output rules:",
-    "- If you find no actionable issues, mark the review as approved.",
-    "- If you find issues, mark the review as findings and list them clearly.",
-    "- If there is not enough context to review safely, mark the review as blocked.",
-    "",
-    "JSON format:",
-    '{"status":"approved|findings|blocked","summary":"short summary","findings":["finding 1","finding 2"]}'
-  ].join("\n");
 }
 
 function readReviewResult(filePath: string): { status: ReviewTaskResult["status"]; summary: string; findings: string[] } | null {

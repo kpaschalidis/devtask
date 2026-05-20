@@ -18,7 +18,8 @@ import { createTaskWorktree } from "../infra/git.js";
 import { DevtaskError } from "../infra/errors.js";
 import { reconcileTaskRuntime } from "../task-runtime.js";
 import type { TaskMeta, TaskSummary } from "../types.js";
-import { buildCodexCommand, readConfig, writeConfig, DEFAULT_CONFIG } from "../infra/config.js";
+import { readConfig, writeConfig, DEFAULT_CONFIG } from "../infra/config.js";
+import { buildCodexCommand } from "../adapters/codex/command.js";
 
 export interface CreateTaskOptions {
   goal?: string;

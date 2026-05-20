@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildPlanPromptForTest, hasTaskPlan, readLatestPlan } from "../src/planner.js";
+import { buildPlanPromptForTest, hasTaskPlan, readLatestPlan } from "../src/repo-plan.js";
 import { resolvePaths, planMarkdownPath } from "../src/infra/paths.js";
 import { createTask } from "../src/storage/task-store.js";
 import { makeTempRepo } from "./helpers.js";

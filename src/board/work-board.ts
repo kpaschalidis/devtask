@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { planMarkdownPath, resolvePaths, workItemResultsDir, workItemSpecPath } from "../infra/paths.js";
-import { hasTaskPlan } from "../planner.js";
+import { hasTaskPlan } from "../repo-plan.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { getTask } from "../storage/task-store.js";
 import { getWorkItem } from "../storage/work-store.js";

@@ -2,11 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./infra/paths.js";
 import { planMarkdownPath, taskDir, taskMetaPath } from "./infra/paths.js";
-import { buildCodexCommand } from "./infra/config.js";
+import { buildCodexCommand } from "./adapters/codex/command.js";
 import { newRunId } from "./infra/run-record.js";
 import { runCommand } from "./infra/process-runner.js";
 import { readTaskMeta, writeTaskMeta } from "./storage/meta.js";
 import type { TaskMeta } from "./types.js";
+import { buildRepoPlanPrompt } from "./prompts/repo-plan.js";
 
 export interface PlanRecord {
   schemaVersion: 1;
@@ -54,7 +55,9 @@ export async function runPlanAgent(
   removeIfExists(runtimePlanPath);
   removeIfExists(runtimeStatePath);
   removeIfExists(runtimeResultPath);
-  const prompt = buildPlanPrompt(meta, runtimePlanPath, planPath);
+  const task = readTextIfExists(meta.taskPath).trim();
+  const state = readTextIfExists(meta.statePath).trim();
+  const prompt = buildRepoPlanPrompt(meta, runtimePlanPath, planPath, task || "(task file is empty)", state || "(state file is empty)");
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const beforeStatus = await readGitStatus(meta.worktreePath);
@@ -151,60 +154,9 @@ export function buildPlanPromptForTest(
   writablePlanPath: string,
   finalPlanPath = writablePlanPath
 ): string {
-  return buildPlanPrompt(meta, writablePlanPath, finalPlanPath);
-}
-
-function buildPlanPrompt(meta: TaskMeta, writablePlanPath: string, finalPlanPath: string): string {
   const task = readTextIfExists(meta.taskPath).trim();
   const state = readTextIfExists(meta.statePath).trim();
-  return [
-    `Plan task ${meta.id}.`,
-    "",
-    "You are in the devtask planning stage.",
-    "",
-    "Task:",
-    "",
-    task || "(task file is empty)",
-    "",
-    "Current state:",
-    "",
-    state || "(state file is empty)",
-    "",
-    "Goal:",
-    "Create an implementation plan only. Do not modify source code, tests, docs, config, package files, generated files, git state, or any other repository file.",
-    `The only file you may write is this worktree-local devtask plan artifact: ${writablePlanPath}.`,
-    `Devtask will persist that plan to: ${finalPlanPath}.`,
-    "Do not update task state during planning, even if the task instructions mention state updates.",
-    "",
-    "Before writing the plan:",
-    "- Inspect the repository structure.",
-    "- Read the task and current state.",
-    "- Read relevant files needed to understand existing patterns.",
-    "- Prefer local conventions over new abstractions.",
-    "- Do not invent requirements that are not present in the task.",
-    "",
-    "Write the plan with these Markdown sections:",
-    "1. Summary",
-    "2. Task Inputs",
-    "3. Relevant Existing Files",
-    "4. Current Behavior / Current Structure",
-    "5. Proposed Changes",
-    "6. Step-by-Step Implementation Plan",
-    "7. Tests / Checks",
-    "8. Risks and Assumptions",
-    "9. Out of Scope",
-    "10. Open Questions or Blockers",
-    "",
-    "Planning rules:",
-    "- Every implementation step must name the expected files, modules, or areas it will touch.",
-    "- Mark assumptions explicitly.",
-    "- Keep the plan scoped to the task goal.",
-    "- Do not include code patches unless a small interface sketch is necessary to remove ambiguity.",
-    "- Make the plan precise enough that another agent can implement it without re-discovering the whole task.",
-    "",
-    "If the task is blocked, write a short blocked plan and set $DEVTASK_RESULT_PATH to {\"status\":\"blocked\",\"reason\":\"...\"}.",
-    "Otherwise, leave $DEVTASK_RESULT_PATH unchanged and ensure the plan file is complete."
-  ].join("\n");
+  return buildRepoPlanPrompt(meta, writablePlanPath, finalPlanPath, task || "(task file is empty)", state || "(state file is empty)");
 }
 
 async function readGitStatus(worktreePath: string): Promise<string> {
