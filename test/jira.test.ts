@@ -6,7 +6,7 @@ import {
   fetchJiraIssue,
   normalizeJiraIssue,
   writeJiraSourceArtifacts
-} from "../src/jira.js";
+} from "../src/adapters/jira.js";
 import { resolveWorkspacePathsForInit } from "../src/paths.js";
 import { makeTempRepo } from "./helpers.js";
 

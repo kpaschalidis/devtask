@@ -19,7 +19,7 @@ import {
   listWorkItems,
   type WorkItem
 } from "../work-store.js";
-import { fetchJiraIssue, writeJiraSourceArtifacts } from "../jira.js";
+import { fetchJiraIssue, writeJiraSourceArtifacts } from "../adapters/jira.js";
 import { updateRecentWork } from "../global-index.js";
 import { readTaskMeta, writeTaskMeta } from "../meta.js";
 import { runCommand } from "../process-runner.js";
@@ -30,7 +30,7 @@ import {
   hasUncommittedChanges,
   preflightScmForPullRequest,
   type CiCheckResult
-} from "../scm.js";
+} from "../adapters/scm/index.js";
 import type { TaskMeta } from "../types.js";
 
 export interface VerifyCommandResult {

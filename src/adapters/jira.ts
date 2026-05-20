@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DevtaskError } from "./errors.js";
-import type { DevtaskConfig } from "./config.js";
-import type { DevtaskPaths } from "./paths.js";
+import { DevtaskError } from "../errors.js";
+import type { DevtaskConfig } from "../config.js";
+import type { DevtaskPaths } from "../paths.js";
 
 export interface JiraIssue {
   key: string;

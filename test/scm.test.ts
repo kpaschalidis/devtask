@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DevtaskError } from "../src/errors.js";
 import { runCommandOrThrow } from "../src/process-runner.js";
-import { checkProviderCi, parseRemoteUrl } from "../src/scm.js";
+import { checkProviderCi, parseRemoteUrl } from "../src/adapters/scm/index.js";
 import { makeTempRepo } from "./helpers.js";
 
 const originalBitbucketEmail = process.env.BITBUCKET_EMAIL;
