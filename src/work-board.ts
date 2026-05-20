@@ -1,16 +1,10 @@
-import { readConfig } from "./config.js";
-import { DevtaskError } from "./errors.js";
+import fs from "node:fs";
 import type { DevtaskPaths } from "./paths.js";
-import { resolvePaths } from "./paths.js";
-import { readStageLedger, STAGE_NAMES, type StageContract } from "./stage-contracts.js";
-import { buildTaskReview } from "./task-inspection.js";
-import { getTask } from "./task-store.js";
+import { planMarkdownPath, resolvePaths } from "./paths.js";
+import { hasTaskPlan } from "./planner.js";
 import { readWorkMaterialization } from "./work-materializer.js";
-import { readWorkStageLedger, WORK_STAGE_NAMES, type WorkStageContract } from "./work-stage-contracts.js";
-import { getWorkSpecState } from "./work-spec-state.js";
-import { planWorkRun } from "./work-runner.js";
+import { getTask } from "./task-store.js";
 import type { WorkItem } from "./work-store.js";
-import { buildBoardRow } from "./workflow.js";
 
 export interface WorkBoardRow {
   target: string;
@@ -27,183 +21,128 @@ export interface WorkBoardRow {
 }
 
 export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): Promise<WorkBoardRow[]> {
-  const spec = getWorkSpecState(paths, item);
   const materialization = readWorkMaterialization(paths, item.id);
   if (!materialization) {
-    return [buildUnmaterializedWorkRow(paths, item, spec)];
+    return [buildUnmaterializedWorkRow(paths, item)];
   }
 
-  const runPlan = safePlanWorkRun(paths, item);
-  const runSkippedByTask = new Map(runPlan?.skipped.map((task) => [task.taskId, task]) ?? []);
-  const runReadyTaskIds = new Set(runPlan?.ready.map((task) => task.taskId) ?? []);
-  const rows: WorkBoardRow[] = [];
-  for (const task of materialization.tasks) {
-    try {
-      const repoPaths = resolvePaths(task.repoPath);
-      const config = readConfig(repoPaths);
-      const row = buildBoardRow(await buildTaskReview(repoPaths, getTask(repoPaths, task.taskId)), config);
-      const runSkipped = runSkippedByTask.get(task.taskId);
-      const specTask = spec.tasks.find((candidate) => candidate.taskId === task.taskId);
-      const actionableRunSkip = runSkipped?.reason === "run complete" ? null : runSkipped;
-      const waitingForSpec = spec.status !== "ready" && row.stage === "plan";
-      const status = waitingForSpec
-        ? specTaskStatus(spec.status, specTask)
-        : row.stage === "run" && runReadyTaskIds.has(task.taskId)
-          ? "ready"
-          : row.stage === "run" && actionableRunSkip
-            ? "waiting"
-            : row.status;
-      rows.push({
-        target: task.target,
-        task: row.id,
-        stage: waitingForSpec ? specBoardStage(spec.status) : row.stage,
-        status,
-        last: latestStageSummary(readStageLedger(repoPaths, task.taskId)),
-        blocked: waitingForSpec ? specTask?.reason ?? spec.reason ?? "-" : actionableRunSkip?.reason ?? "-",
-        check: row.check,
-        review: row.review,
-        pr: row.pr,
-        updated: row.updated,
-        next: waitingForSpec
-          ? spec.next
-          : actionableRunSkip
-            ? blockedWorkNext(item.id, actionableRunSkip.reason)
-            : row.status === "running"
-              ? "in progress"
-              : workLevelNext(item.id, task.repoPath, row.stage, row.status, row.next)
-      });
-    } catch (error) {
-      if (!(error instanceof DevtaskError)) {
-        throw error;
-      }
-      rows.push({
-        target: task.target,
-        task: task.taskId,
-        stage: "task",
-        status: "missing",
-        last: "-",
-        blocked: "-",
-        check: "-",
-        review: "-",
-        pr: "-",
-        updated: materialization.materializedAt,
-        next: error.message
-      });
-    }
-  }
-
-  return rows;
+  return materialization.tasks.map((task) => {
+    const repoPaths = resolvePaths(task.repoPath);
+    const meta = getTask(repoPaths, task.taskId);
+    const hasRepoPlan = hasTaskPlan(repoPaths, task.taskId);
+    const stage = hasRepoPlan ? deriveTaskStage(meta.status) : "planning";
+    return {
+      target: task.target,
+      task: task.taskId,
+      stage,
+      status: simplifyStatus(meta.status, hasRepoPlan),
+      last: meta.status,
+      blocked: meta.lifecycle?.runtime.reason ?? "-",
+      check: "-",
+      review: "-",
+      pr: meta.prUrl ? "open" : "-",
+      updated: meta.updatedAt,
+      next: nextCommand(item.id, task.target, hasRepoPlan, meta.status, meta.tmuxSession !== null)
+    };
+  });
 }
 
-function blockedWorkNext(workId: string, reason: string): string {
-  if (reason === "needs repo-plan") {
-    return `devtask work spec ${shellQuote(workId)}`;
-  }
-  return reason;
-}
-
-function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem, spec: ReturnType<typeof getWorkSpecState>): WorkBoardRow {
-  const stages = readWorkStageLedger(paths, item.id);
-  const latest = latestWorkStage(stages);
+function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem): WorkBoardRow {
+  const hasPlan = fs.existsSync(planMarkdownPath(paths, item.id));
   return {
     target: "-",
     task: item.id,
-    stage: "spec",
-    status: workSpecBoardStatus(spec.status),
-    last: latest ? `${latest.stage} ${latest.status}` : "-",
-    blocked: spec.reason ?? latest?.reason ?? "-",
+    stage: hasPlan ? "implement" : "planning",
+    status: hasPlan ? "ready" : "pending",
+    last: hasPlan ? "planned" : "created",
+    blocked: "-",
     check: "-",
     review: "-",
     pr: "-",
-    updated: latest?.finishedAt ?? latest?.startedAt ?? item.updatedAt,
-    next: spec.next
+    updated: item.updatedAt,
+    next: hasPlan ? `devtask work implement ${shellQuote(item.id)}` : `devtask work plan ${shellQuote(item.id)}`
   };
 }
 
-function specTaskStatus(specStatus: ReturnType<typeof getWorkSpecState>["status"], task: ReturnType<typeof getWorkSpecState>["tasks"][number] | undefined): string {
-  if (specStatus === "repo-planning") {
-    return task?.status === "planned" ? "ready" : "running";
+function deriveTaskStage(status: string): string {
+  switch (status) {
+    case "created":
+    case "planned":
+      return "planning";
+    case "running":
+    case "paused":
+      return "implementing";
+    case "review":
+      return "review";
+    case "approved":
+    case "pr-open":
+      return "pr";
+    case "ci-running":
+    case "ci-failed":
+    case "ci-passed":
+      return "ci";
+    case "done":
+      return "done";
+    case "blocked":
+    case "failed":
+    case "cancelled":
+      return "blocked";
+    default:
+      return "implementing";
   }
-  if (!task) {
+}
+
+function simplifyStatus(status: string, hasRepoPlan: boolean): string {
+  if (!hasRepoPlan) {
     return "pending";
   }
-  if (task.status === "planned") {
-    return "ready";
+  switch (status) {
+    case "created":
+    case "planned":
+      return "ready";
+    case "running":
+      return "running";
+    case "paused":
+      return "paused";
+    case "review":
+      return "reviewing";
+    case "approved":
+      return "ready-for-pr";
+    case "pr-open":
+      return "pr-open";
+    case "ci-running":
+      return "ci-running";
+    case "ci-failed":
+      return "ci-failed";
+    case "ci-passed":
+      return "done";
+    case "done":
+      return "done";
+    case "blocked":
+      return "blocked";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return status;
   }
-  return task.status;
 }
 
-function specBoardStage(status: ReturnType<typeof getWorkSpecState>["status"]): string {
-  if (status === "repo-planning" || status === "needs-repo-plan") {
-    return "repo-plan";
+function nextCommand(workId: string, target: string, hasRepoPlan: boolean, status: string, hasSession: boolean): string {
+  if (!hasRepoPlan) {
+    return `devtask work plan ${shellQuote(workId)}`;
   }
-  return "spec";
-}
-
-function workSpecBoardStatus(status: ReturnType<typeof getWorkSpecState>["status"]): string {
-  if (status === "ready") {
-    return "pending";
+  if (hasSession && (status === "running" || status === "paused")) {
+    return `devtask session attach ${shellQuote(workId)} ${shellQuote(target)}`;
   }
-  if (status === "planning" || status === "repo-planning") {
-    return "running";
+  if (status === "approved") {
+    return `devtask work pr ${shellQuote(workId)}`;
   }
-  if (status === "needs-plan" || status === "needs-materialization" || status === "needs-repo-plan") {
-    return "pending";
+  if (status === "pr-open") {
+    return `devtask work ci ${shellQuote(workId)}`;
   }
-  return status;
-}
-
-function safePlanWorkRun(paths: DevtaskPaths, item: WorkItem): ReturnType<typeof planWorkRun> | null {
-  try {
-    return planWorkRun(paths, item);
-  } catch {
-    return null;
-  }
-}
-
-function latestStageSummary(ledger: ReturnType<typeof readStageLedger>): string {
-  const latest = STAGE_NAMES.map((stage) => ledger.stages[stage])
-    .filter((stage): stage is StageContract => Boolean(stage))
-    .sort((a, b) => stageTime(b) - stageTime(a))
-    .at(0);
-  return latest ? `${latest.stage} ${latest.status}` : "-";
-}
-
-function latestWorkStage(ledger: ReturnType<typeof readWorkStageLedger>): WorkStageContract | null {
-  return WORK_STAGE_NAMES.map((stage) => ledger.stages[stage])
-    .filter((stage): stage is WorkStageContract => Boolean(stage))
-    .sort((a, b) => stageTime(b) - stageTime(a))
-    .at(0) ?? null;
-}
-
-function stageTime(stage: { finishedAt: string | null; startedAt: string | null }): number {
-  const value = Date.parse(stage.finishedAt ?? stage.startedAt ?? "");
-  return Number.isFinite(value) ? value : 0;
-}
-
-function workLevelNext(workId: string, repoPath: string, stage: string, status: string, fallback: string): string {
-  if (stage === "plan") {
-    return `devtask work spec ${shellQuote(workId)}`;
-  }
-  if (["run", "check", "fix", "review"].includes(stage)) {
-    return `devtask work exec ${shellQuote(workId)} --auto`;
-  }
-  if (stage === "approve") {
-    return `devtask work approve-exec ${shellQuote(workId)}`;
-  }
-  if (stage === "commit") {
-    return `devtask work commit ${shellQuote(workId)}`;
-  }
-  if (stage === "pr") {
-    return `devtask work pr ${shellQuote(workId)} --ready`;
-  }
-  if (stage === "ci") {
-    if (status === "pending") {
-      return `devtask work ci ${shellQuote(workId)}`;
-    }
-    return repoLocalNext(repoPath, fallback);
-  }
-  return fallback;
+  return `devtask work board ${shellQuote(workId)}`;
 }
 
 function shellQuote(value: string): string {
@@ -211,11 +150,4 @@ function shellQuote(value: string): string {
     return value;
   }
   return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function repoLocalNext(repoPath: string, fallback: string): string {
-  if (!fallback.startsWith("devtask ")) {
-    return fallback;
-  }
-  return `(cd ${shellQuote(repoPath)} && ${fallback})`;
 }

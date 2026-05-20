@@ -4,7 +4,6 @@ import { writeTaskMeta, readTaskMeta } from "./meta.js";
 import { isProcessAlive } from "./processes.js";
 import type { DevtaskPaths } from "./paths.js";
 import { taskMetaPath } from "./paths.js";
-import { readStageLedger, recordStage } from "./stage-contracts.js";
 import { tmuxSessionExists } from "./tmux.js";
 import type { TaskMeta } from "./types.js";
 
@@ -43,17 +42,6 @@ export function reconcileTaskRuntime(paths: DevtaskPaths, meta: TaskMeta): TaskM
     },
     updatedAt: now
   };
-
-  const runStage = readStageLedger(paths, latest.id).stages.run;
-  if (runStage?.status === "running") {
-    recordStage(paths, latest.id, "run", {
-      status: "failed",
-      input: runStage.input,
-      output: runStage.output,
-      artifacts: runStage.artifacts,
-      reason: staleRuntimeReason(latest)
-    });
-  }
 
   writeTaskMeta(taskMetaPath(paths, latest.id), next);
   return readTaskMeta(taskMetaPath(paths, latest.id));

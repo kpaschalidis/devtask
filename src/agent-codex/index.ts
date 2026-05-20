@@ -8,7 +8,35 @@ import { StringDecoder } from 'node:string_decoder';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { AgentRunner, RunEvent, RunOptions, ActivityState, SessionHandle } from '../core/ports/agent-runner.js';
+
+export interface SessionHandle {
+  id: string;
+  threadId?: string | null;
+}
+
+export type ActivityState = 'idle' | 'active' | 'waiting_input' | 'errored' | 'unknown';
+
+export interface RunOptions {
+  model?: string | null;
+  stallMs?: number;
+  maxTurnMs?: number;
+}
+
+export type RunEvent =
+  | { kind: 'output'; text: string }
+  | { kind: 'input_required'; prompt: string }
+  | { kind: 'completed' }
+  | { kind: 'failed'; error: string }
+  | { kind: 'stalled' }
+  | { kind: 'turn_complete' };
+
+export interface AgentRunner {
+  start(workspacePath: string): Promise<SessionHandle>;
+  run(session: SessionHandle, prompt: string, options?: RunOptions): AsyncIterable<RunEvent>;
+  sendInput?(session: SessionHandle, message: string): Promise<void>;
+  isAlive?(session: SessionHandle): Promise<boolean>;
+  getActivityState?(session: SessionHandle): Promise<ActivityState>;
+}
 
 const execFileAsync = promisify(execFile);
 

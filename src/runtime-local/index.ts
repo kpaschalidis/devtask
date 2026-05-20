@@ -3,10 +3,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { RuntimeBackend, WorkspaceInfo, ScriptResult } from '../core/ports/runtime-backend.js';
 import { createTaskWorktree } from '../git.js';
 
 const execFileAsync = promisify(execFile);
+
+export interface WorkspaceInfo {
+  path: string;
+  workId: string;
+  taskId: string;
+  branch: string | null;
+  repoPath: string;
+}
+
+export interface ScriptResult {
+  exitCode: number;
+  output: string;
+}
+
+export interface RuntimeBackend {
+  createWorkspace(workId: string, taskId: string, repoPath: string): Promise<WorkspaceInfo>;
+  removeWorkspace(workspace: WorkspaceInfo): Promise<void>;
+  runScript(workspace: WorkspaceInfo, script: string): Promise<ScriptResult>;
+}
 
 export interface LocalRuntimeConfig {
   // Root directory where git worktrees are created.
