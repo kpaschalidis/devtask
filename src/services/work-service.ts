@@ -4,7 +4,7 @@ import { readConfig } from "../config.js";
 import type { DevtaskPaths } from "../paths.js";
 import { resolvePaths, taskMetaPath, workItemResultsDir } from "../paths.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
-import { approveWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
+import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
 import { readLatestPlan, runPlanAgent, type PlanAgentStart, type PlanRecord } from "../planner.js";
 import {
   readLatestWorkPlanRecord,
@@ -200,7 +200,7 @@ export async function specWork(
   }
 
   const existingMaterialization = readWorkMaterialization(paths, workId);
-  const materialization = existingMaterialization ?? (await approveWorkPlan(paths, item));
+  const materialization = existingMaterialization ?? (await materializeWorkPlan(paths, item));
   const repoPlans: RepoPlanTaskResult[] = [];
 
   for (const task of materialization.tasks) {
@@ -253,7 +253,7 @@ export async function specWork(
 
 export async function materializeWork(paths: DevtaskPaths, workId: string): Promise<WorkMaterialization> {
   const item = getWorkItem(paths, workId);
-  const materialization = await approveWorkPlan(paths, item);
+  const materialization = await materializeWorkPlan(paths, item);
   await updateRecentWork(paths, item);
   return materialization;
 }

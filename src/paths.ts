@@ -141,8 +141,8 @@ export function workItemSourcePath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemDir(paths, id), "source.md");
 }
 
-export function workItemApprovedGraphPath(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemDir(paths, id), "approved-graph.json");
+export function workItemGraphSnapshotPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "graph.snapshot.json");
 }
 
 export function workItemMaterializationPath(paths: DevtaskPaths, id: string): string {

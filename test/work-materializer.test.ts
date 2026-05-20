@@ -4,14 +4,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   taskMetaPath,
-  workItemApprovedGraphPath,
+  workItemGraphSnapshotPath,
   workItemMaterializationPath
 } from "../src/paths.js";
 import { resolveWorkspacePathsForInit } from "../src/paths.js";
 import { initializeWorkspace } from "../src/task-store.js";
-import { addWorkspaceTarget } from "../src/workspace-targets.js";
+import { addWorkspaceRepo } from "../src/workspace-repos.js";
 import { createManualWorkItem } from "../src/work-store.js";
-import { approveWorkPlan, readWorkGraph } from "../src/work-materializer.js";
+import { materializeWorkPlan, readWorkGraph } from "../src/work-materializer.js";
 import { workGraphPath } from "../src/work-planner.js";
 import { readTaskMeta } from "../src/meta.js";
 import { makeTempRepo } from "./helpers.js";
@@ -27,7 +27,7 @@ describe("work materializer", () => {
       title: "Add API behavior",
       body: "Implement the backend part."
     });
-    addWorkspaceTarget(paths, {
+    addWorkspaceRepo(paths, {
       id: "backend",
       repoPath: repo,
       kind: "api"
@@ -42,7 +42,7 @@ describe("work materializer", () => {
           tasks: [
             {
               id: "work-123-backend",
-              target: "backend",
+              repoId: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
               dependencies: []
@@ -56,16 +56,16 @@ describe("work materializer", () => {
       )
     );
 
-    const materialization = await approveWorkPlan(paths, item);
+    const materialization = await materializeWorkPlan(paths, item);
 
     expect(materialization.tasks).toHaveLength(1);
     expect(materialization.tasks[0]).toMatchObject({
       graphTaskId: "work-123-backend",
-      target: "backend",
+      repoId: "backend",
       taskId: "work-123-backend",
       branch: "task/work-123-backend"
     });
-    expect(fs.existsSync(workItemApprovedGraphPath(paths, item.id))).toBe(true);
+    expect(fs.existsSync(workItemGraphSnapshotPath(paths, item.id))).toBe(true);
     expect(fs.existsSync(workItemMaterializationPath(paths, item.id))).toBe(true);
     expect(fs.existsSync(path.join(repo, ".devtask", "tasks", "work-123-backend", "meta.json"))).toBe(true);
     expect(fs.existsSync(path.join(repo, ".devtask", "worktrees", "work-123-backend"))).toBe(true);
@@ -92,7 +92,7 @@ describe("work materializer", () => {
           tasks: [
             {
               id: "work-123-backend",
-              target: "backend",
+              repoId: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
               dependencies: [{ task: "missing", type: "run", reason: "Missing dependency for validation." }]
@@ -126,14 +126,14 @@ describe("work materializer", () => {
           tasks: [
             {
               id: "work-123-backend",
-              target: "backend",
+              repoId: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
               dependencies: []
             },
             {
               id: "work-123-frontend",
-              target: "frontend",
+              repoId: "frontend",
               goal: "Implement frontend behavior.",
               owns: ["src/**"],
               dependencies: [
@@ -191,7 +191,7 @@ describe("work materializer", () => {
           tasks: [
             {
               id: "work-123-backend",
-              target: "backend",
+              repoId: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
               dependencies: [
@@ -213,8 +213,8 @@ describe("work materializer", () => {
     expect(() => readWorkGraph(paths, item.id)).toThrow("dependency type must be one of");
   });
 
-  it("rejects unknown target ids during approval", async () => {
-    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-target-"));
+  it("rejects unknown repo ids during materialization", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-repo-"));
     const paths = resolveWorkspacePathsForInit(workspace);
     initializeWorkspace(paths);
     const item = createManualWorkItem(paths, {
@@ -231,7 +231,7 @@ describe("work materializer", () => {
           tasks: [
             {
               id: "work-123-backend",
-              target: "backend",
+              repoId: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
               dependencies: []
@@ -245,7 +245,7 @@ describe("work materializer", () => {
       )
     );
 
-    await expect(approveWorkPlan(paths, item)).rejects.toThrow("Workspace target backend does not exist");
+    await expect(materializeWorkPlan(paths, item)).rejects.toThrow("Workspace repo backend does not exist");
   });
 
   it("rejects approval when the human-readable plan artifact is missing", async () => {
@@ -257,7 +257,7 @@ describe("work materializer", () => {
       id: "WORK-123",
       title: "Add API behavior"
     });
-    addWorkspaceTarget(paths, {
+    addWorkspaceRepo(paths, {
       id: "backend",
       repoPath: repo,
       kind: "api"
@@ -271,7 +271,7 @@ describe("work materializer", () => {
           tasks: [
             {
               id: "work-123-backend",
-              target: "backend",
+              repoId: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
               dependencies: []
@@ -285,7 +285,7 @@ describe("work materializer", () => {
       )
     );
 
-    await expect(approveWorkPlan(paths, item)).rejects.toThrow("Run devtask work plan WORK-123 first");
+    await expect(materializeWorkPlan(paths, item)).rejects.toThrow("Run devtask work plan WORK-123 first");
   });
 
   it("reports existing materialization before repo task preflight errors", async () => {
@@ -297,7 +297,7 @@ describe("work materializer", () => {
       id: "WORK-123",
       title: "Add API behavior"
     });
-    addWorkspaceTarget(paths, {
+    addWorkspaceRepo(paths, {
       id: "backend",
       repoPath: repo,
       kind: "api"
@@ -312,7 +312,7 @@ describe("work materializer", () => {
           tasks: [
             {
               id: "work-123-backend",
-              target: "backend",
+              repoId: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
               dependencies: []
@@ -325,8 +325,8 @@ describe("work materializer", () => {
         2
       )
     );
-    await approveWorkPlan(paths, item);
+    await materializeWorkPlan(paths, item);
 
-    await expect(approveWorkPlan(paths, item)).rejects.toThrow("has already been materialized");
+    await expect(materializeWorkPlan(paths, item)).rejects.toThrow("has already been materialized");
   });
 });

@@ -6,7 +6,7 @@ import type { DevtaskPaths } from "./paths.js";
 import {
   taskMetaPath,
   workItemDir,
-  workItemApprovedGraphPath,
+  workItemGraphSnapshotPath,
   workItemMaterializationPath
 } from "./paths.js";
 import { assertValidTaskId } from "./task-id.js";
@@ -54,13 +54,13 @@ export interface MaterializedWorkTask {
 export interface WorkMaterialization {
   schemaVersion: 1;
   workId: string;
-  approvedGraphPath: string;
+  graphSnapshotPath: string;
   materializedAt: string;
   tasks: MaterializedWorkTask[];
 }
 
-export async function approveWorkPlan(paths: DevtaskPaths, workItem: WorkItem): Promise<WorkMaterialization> {
-  const approvedGraphPath = workItemApprovedGraphPath(paths, workItem.id);
+export async function materializeWorkPlan(paths: DevtaskPaths, workItem: WorkItem): Promise<WorkMaterialization> {
+  const graphSnapshotPath = workItemGraphSnapshotPath(paths, workItem.id);
   const materializationPath = workItemMaterializationPath(paths, workItem.id);
   if (fs.existsSync(materializationPath)) {
     throw new DevtaskError(`Work item ${workItem.id} has already been materialized`);
@@ -71,7 +71,7 @@ export async function approveWorkPlan(paths: DevtaskPaths, workItem: WorkItem): 
   const repos = resolveGraphRepos(paths, graph);
   preflightMaterialization(repos, graph);
 
-  fs.writeFileSync(approvedGraphPath, `${JSON.stringify(graph, null, 2)}\n`);
+  fs.writeFileSync(graphSnapshotPath, `${JSON.stringify(graph, null, 2)}\n`);
 
   const tasks: MaterializedWorkTask[] = [];
   for (const graphTask of graph.tasks) {
@@ -91,7 +91,7 @@ export async function approveWorkPlan(paths: DevtaskPaths, workItem: WorkItem): 
   const materialization: WorkMaterialization = {
     schemaVersion: 1,
     workId: workItem.id,
-    approvedGraphPath,
+    graphSnapshotPath,
     materializedAt: new Date().toISOString(),
     tasks
   };
@@ -103,12 +103,12 @@ export function readWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
   return readAndValidateWorkGraph(paths, workId);
 }
 
-export function readApprovedWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
-  const approvedGraphPath = workItemApprovedGraphPath(paths, workId);
-  if (!fs.existsSync(approvedGraphPath)) {
-    throw new DevtaskError(`Approved work graph does not exist: ${approvedGraphPath}. Run devtask work approve-plan ${workId} first.`);
+export function readMaterializedWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
+  const graphSnapshotPath = workItemGraphSnapshotPath(paths, workId);
+  if (!fs.existsSync(graphSnapshotPath)) {
+    throw new DevtaskError(`Materialized work graph does not exist: ${graphSnapshotPath}. Run devtask work implement ${workId} first.`);
   }
-  return parseWorkGraph(JSON.parse(fs.readFileSync(approvedGraphPath, "utf8")) as unknown, workId);
+  return parseWorkGraph(JSON.parse(fs.readFileSync(graphSnapshotPath, "utf8")) as unknown, workId);
 }
 
 export function readWorkMaterialization(paths: DevtaskPaths, workId: string): WorkMaterialization | null {
@@ -150,7 +150,7 @@ function parseWorkMaterialization(value: unknown, expectedWorkId: string): WorkM
   return {
     schemaVersion: 1,
     workId,
-    approvedGraphPath: requireString(value, "approvedGraphPath", "work materialization"),
+    graphSnapshotPath: requireString(value, "graphSnapshotPath", "work materialization"),
     materializedAt: requireString(value, "materializedAt", "work materialization"),
     tasks: value.tasks.map(parseMaterializedWorkTask)
   };

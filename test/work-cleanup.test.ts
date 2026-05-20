@@ -10,7 +10,7 @@ import { initializeWorkspace } from "../src/task-store.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("work cleanup", () => {
-  it("removes work metadata and materialized repo task state", async () => {
+  it("preserves work history while removing materialized repo task state", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-cleanup-"));
     const repo = await makeTempRepo({ withCommit: true });
     const workspacePaths = resolveWorkspacePathsForInit(workspace);
@@ -28,12 +28,12 @@ describe("work cleanup", () => {
         {
           schemaVersion: 1,
           workId: item.id,
-          approvedGraphPath: path.join(workItemDir(workspacePaths, item.id), "approved-graph.json"),
+          graphSnapshotPath: path.join(workItemDir(workspacePaths, item.id), "graph.snapshot.json"),
           materializedAt: new Date().toISOString(),
           tasks: [
             {
               graphTaskId: "cleanup-task",
-              target: "app",
+              repoId: "app",
               repoPath: repo,
               scope: null,
               taskId: task.id,
@@ -54,8 +54,8 @@ describe("work cleanup", () => {
     expect(fs.existsSync(task.worktreePath)).toBe(true);
 
     await cleanupWorkItem(workspacePaths, item);
-    expect(fs.existsSync(workItemDir(workspacePaths, item.id))).toBe(false);
-    expect(fs.existsSync(taskDir(repoPaths, task.id))).toBe(false);
+    expect(fs.existsSync(workItemDir(workspacePaths, item.id))).toBe(true);
+    expect(fs.existsSync(taskDir(repoPaths, task.id))).toBe(true);
     expect(fs.existsSync(task.worktreePath)).toBe(false);
   });
 });
