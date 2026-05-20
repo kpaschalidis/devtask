@@ -1,14 +1,14 @@
 # devtask
 
-`devtask` is a local tool I use to manage AI-assisted work across multiple projects, workspaces, repos, and tickets.
+`devtask` is a local tool for managing AI-assisted work across multiple projects, workspaces, repos, and tickets.
 
-It is built for a setup like:
+It is built for setups with:
 - multiple repos per product
 - vague Jira tickets that need refinement before coding
 - one or more developers working locally with Codex
 - deterministic checks plus agent-assisted planning and review
 
-`devtask` is not trying to be a workflow engine. It is a local control plane around:
+`devtask` is not a workflow engine. It is a local control plane around:
 - workspaces
 - repo bindings
 - work items
@@ -89,14 +89,14 @@ devtask board work APP-123
 
 Workspaces are local-first and exportable.
 
-Tech lead:
+Create and export a workspace bundle:
 
 ```bash
 devtask workspace create --id platform --name Platform
 devtask workspace export --workspace platform --out platform.bundle.zip
 ```
 
-Another developer:
+Import it on another machine and bind local repos:
 
 ```bash
 devtask workspace import --file platform.bundle.zip
@@ -104,7 +104,7 @@ devtask repo bind --workspace platform backend /path/to/backend
 devtask repo bind --workspace platform web /path/to/web
 ```
 
-Repo paths inside the bundle are only hints. Each developer owns their own local bindings.
+Repo paths inside the bundle are only hints. Local bindings are per machine.
 
 ## Main Flow
 

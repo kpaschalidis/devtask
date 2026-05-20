@@ -12,7 +12,7 @@ The shared concept is:
 Not:
 - a single common local workspace root path across developers
 
-Each developer can keep repos wherever they want locally. They bind those local clone paths to shared repo ids.
+Each machine can keep repos wherever they are cloned locally. Local clone paths are bound to shared repo ids.
 
 ## Storage Layers
 
@@ -68,7 +68,7 @@ Current repo binding commands:
 - `devtask repo bindings --workspace <workspace-id>`
 - `devtask repo doctor --workspace <workspace-id>`
 
-## Tech Lead Flow
+## Workspace Creation Flow
 
 1. Create the workspace:
 
@@ -94,7 +94,7 @@ devtask repo add web ./web --kind frontend
 devtask workspace export --workspace platform --out platform.bundle.zip
 ```
 
-## Joining Developer Flow
+## Import Flow
 
 1. Import the bundle:
 
