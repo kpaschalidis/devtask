@@ -8,7 +8,9 @@ import {
   taskDir,
   taskMarkdownPath,
   taskMetaPath,
+  writeWorkspaceMarker,
   workspaceReposPath,
+  workspaceLocalReposPath,
   workspaceJsonPath,
   worktreePath
 } from "../infra/paths.js";
@@ -40,20 +42,30 @@ export function initializeStore(paths: DevtaskPaths): void {
 
 export function initializeWorkspace(paths: DevtaskPaths): void {
   fs.mkdirSync(paths.baseDir, { recursive: true });
+  fs.mkdirSync(paths.sharedDir, { recursive: true });
+  fs.mkdirSync(paths.localDir, { recursive: true });
   fs.mkdirSync(paths.workDir, { recursive: true });
   fs.mkdirSync(scriptsDir(paths), { recursive: true });
+  fs.mkdirSync(path.dirname(workspaceLocalReposPath(paths)), { recursive: true });
   if (!fs.existsSync(paths.configPath)) {
     writeConfig(paths, DEFAULT_CONFIG);
   }
   const markerPath = workspaceJsonPath(paths);
+  const now = new Date().toISOString();
+  if (paths.workspaceId) {
+    writeWorkspaceMarker(paths.root, paths.workspaceId, now);
+  }
   if (!fs.existsSync(markerPath)) {
     fs.writeFileSync(
       markerPath,
       JSON.stringify(
         {
           schemaVersion: 1,
-          mode: "workspace",
-          createdAt: new Date().toISOString()
+          id: paths.workspaceId ?? "workspace",
+          name: path.basename(paths.root),
+          root: paths.root,
+          createdAt: now,
+          updatedAt: now
         },
         null,
         2
@@ -63,6 +75,10 @@ export function initializeWorkspace(paths: DevtaskPaths): void {
   const reposPath = workspaceReposPath(paths);
   if (!fs.existsSync(reposPath)) {
     fs.writeFileSync(reposPath, `${JSON.stringify({ schemaVersion: 1, repos: [] }, null, 2)}\n`);
+  }
+  const localReposPath = workspaceLocalReposPath(paths);
+  if (!fs.existsSync(localReposPath)) {
+    fs.writeFileSync(localReposPath, `${JSON.stringify({ schemaVersion: 1, repos: [] }, null, 2)}\n`);
   }
 }
 

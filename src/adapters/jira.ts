@@ -146,7 +146,7 @@ export function normalizeJiraIssue(value: JiraFetchResponse, baseUrl: string): J
 }
 
 export function writeJiraSourceArtifacts(paths: DevtaskPaths, issue: JiraIssue): JiraSourceArtifacts {
-  const dir = path.join(paths.baseDir, "sources", "jira");
+  const dir = path.join(paths.sharedDir, "sources", "jira");
   fs.mkdirSync(dir, { recursive: true });
   const jsonPath = path.join(dir, `${issue.key}.json`);
   const markdownPath = path.join(dir, `${issue.key}.md`);

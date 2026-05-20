@@ -32,6 +32,10 @@ describe("paths", () => {
     expect(resolvePaths(repo)).toEqual({
       root: repo,
       baseDir: path.join(repo, ".devtask"),
+      markerDir: path.join(repo, ".devtask"),
+      sharedDir: path.join(repo, ".devtask"),
+      localDir: path.join(repo, ".devtask"),
+      workspaceId: null,
       configPath: path.join(repo, ".devtask", "config.json"),
       tasksDir: path.join(repo, ".devtask", "tasks"),
       worktreesDir: path.join(repo, ".devtask", "worktrees"),
@@ -41,22 +45,35 @@ describe("paths", () => {
 
   it("resolves a non-git workspace from a nested directory", () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-workspace-"));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-home-"));
     const nested = path.join(workspace, "products", "studio");
+    const previousHome = process.env.DEVTASK_HOME;
 
     try {
+      process.env.DEVTASK_HOME = home;
       fs.mkdirSync(nested, { recursive: true });
       const initialized = resolveWorkspacePathsForInit(workspace);
       initializeWorkspace(initialized);
 
       expect(resolveWorkspacePaths(nested)).toEqual({
         root: workspace,
-        baseDir: path.join(workspace, ".devtask"),
-        configPath: path.join(workspace, ".devtask", "config.json"),
-        tasksDir: path.join(workspace, ".devtask", "tasks"),
-        worktreesDir: path.join(workspace, ".devtask", "worktrees"),
-        workDir: path.join(workspace, ".devtask", "work")
+        baseDir: path.join(home, "workspaces", initialized.workspaceId!),
+        markerDir: path.join(workspace, ".devtask"),
+        sharedDir: path.join(home, "workspaces", initialized.workspaceId!, "shared"),
+        localDir: path.join(home, "workspaces", initialized.workspaceId!, "local"),
+        workspaceId: initialized.workspaceId,
+        configPath: path.join(home, "workspaces", initialized.workspaceId!, "shared", "config.json"),
+        tasksDir: path.join(home, "workspaces", initialized.workspaceId!, "local", "tasks"),
+        worktreesDir: path.join(home, "workspaces", initialized.workspaceId!, "local", "worktrees"),
+        workDir: path.join(home, "workspaces", initialized.workspaceId!, "shared", "work")
       });
     } finally {
+      if (previousHome === undefined) {
+        delete process.env.DEVTASK_HOME;
+      } else {
+        process.env.DEVTASK_HOME = previousHome;
+      }
+      fs.rmSync(home, { recursive: true, force: true });
       fs.rmSync(workspace, { recursive: true, force: true });
     }
   });

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { resolveWorkspacePaths, resolveWorkspacePathsForInit } from "../infra/paths.js";
+import { resolvePaths, resolveWorkspacePaths, resolveWorkspacePathsForInit } from "../infra/paths.js";
 import {
   findIndexedWork,
   readGlobalIndex,
@@ -25,7 +25,7 @@ export function initializeCurrentWorkspace(start = process.cwd(), options: InitW
   const paths = resolveWorkspacePathsForInit(start);
   initializeWorkspace(paths);
   if (fs.existsSync(path.join(paths.root, ".git"))) {
-    initializeStore(paths);
+    initializeStore(resolvePaths(paths.root));
     if (listWorkspaceRepos(paths).length === 0) {
       addWorkspaceRepo(paths, { id: "app", repoPath: ".", kind: "repo" });
     }

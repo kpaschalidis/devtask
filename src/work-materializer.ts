@@ -16,6 +16,7 @@ import type { TaskMeta } from "./types.js";
 import { getWorkspaceRepo, type WorkspaceRepo } from "./storage/workspace-repos.js";
 import type { WorkItem } from "./storage/work-store.js";
 import { workGraphPath, workPlanPath } from "./global-plan.js";
+import { resolvePaths } from "./infra/paths.js";
 
 export const WORK_DEPENDENCY_TYPES = ["run", "review", "validation"] as const;
 export type WorkDependencyType = (typeof WORK_DEPENDENCY_TYPES)[number];
@@ -251,15 +252,7 @@ function preflightMaterialization(repos: Map<string, WorkspaceRepo>, graph: Work
 }
 
 function resolveRepoPaths(repo: WorkspaceRepo): DevtaskPaths {
-  // Workspace repos are validated and canonicalized when read.
-  return {
-    root: repo.repoPath,
-    baseDir: path.join(repo.repoPath, ".devtask"),
-    configPath: path.join(repo.repoPath, ".devtask", "config.json"),
-    tasksDir: path.join(repo.repoPath, ".devtask", "tasks"),
-    worktreesDir: path.join(repo.repoPath, ".devtask", "worktrees"),
-    workDir: path.join(repo.repoPath, ".devtask", "work")
-  };
+  return resolvePaths(repo.repoPath);
 }
 
 function buildRepoTaskGoal(

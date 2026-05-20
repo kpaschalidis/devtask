@@ -3,7 +3,7 @@ import path from "node:path";
 import type { DevtaskConfig } from "./infra/config.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "./agent.js";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { workItemDir, workItemSpecPath } from "./infra/paths.js";
+import { workItemDir, workItemPlanRunsDir, workItemSpecPath } from "./infra/paths.js";
 import { newRunId } from "./infra/run-record.js";
 import { listWorkspaceRepos, type WorkspaceRepo } from "./storage/workspace-repos.js";
 import type { WorkItem } from "./storage/work-store.js";
@@ -33,7 +33,7 @@ export interface WorkPlanStart {
 }
 
 export function workPlansDir(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemDir(paths, id), "plans");
+  return workItemPlanRunsDir(paths, id);
 }
 
 export function workPlanPath(paths: DevtaskPaths, id: string): string {

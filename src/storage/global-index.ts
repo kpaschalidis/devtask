@@ -1,8 +1,7 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { DevtaskError } from "../infra/errors.js";
-import type { DevtaskPaths } from "../infra/paths.js";
+import { globalDevtaskDir, resolveWorkspacePaths, type DevtaskPaths } from "../infra/paths.js";
 import { workGraphPath, workPlanPath } from "../global-plan.js";
 import { getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 import { buildWorkspaceBoardRow } from "../board/workspace-board.js";
@@ -33,13 +32,6 @@ export interface GlobalIndex {
   updatedAt: string;
 }
 
-export function globalDevtaskDir(): string {
-  if (process.env.DEVTASK_HOME?.trim()) {
-    return path.resolve(process.env.DEVTASK_HOME);
-  }
-  return path.join(os.homedir(), ".devtask");
-}
-
 export function globalIndexPath(): string {
   return path.join(globalDevtaskDir(), "index.json");
 }
@@ -57,7 +49,7 @@ export function writeGlobalIndex(index: GlobalIndex): void {
   fs.writeFileSync(globalIndexPath(), `${JSON.stringify(index, null, 2)}\n`);
 }
 
-export function registerWorkspace(paths: DevtaskPaths, id = defaultWorkspaceId(paths.root)): GlobalWorkspaceEntry {
+export function registerWorkspace(paths: DevtaskPaths, id = paths.workspaceId ?? defaultWorkspaceId(paths.root)): GlobalWorkspaceEntry {
   const now = new Date().toISOString();
   const workspacePath = fs.realpathSync(paths.root);
   const index = readGlobalIndex();
@@ -158,16 +150,7 @@ export async function findIndexedWork(workId: string): Promise<GlobalRecentWorkE
 }
 
 export function pathsForWorkspace(workspacePath: string): DevtaskPaths {
-  const root = fs.realpathSync(workspacePath);
-  const baseDir = path.join(root, ".devtask");
-  return {
-    root,
-    baseDir,
-    configPath: path.join(baseDir, "config.json"),
-    tasksDir: path.join(baseDir, "tasks"),
-    worktreesDir: path.join(baseDir, "worktrees"),
-    workDir: path.join(baseDir, "work")
-  };
+  return resolveWorkspacePaths(workspacePath);
 }
 
 function emptyIndex(): GlobalIndex {

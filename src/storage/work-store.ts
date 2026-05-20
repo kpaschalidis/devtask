@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DevtaskError } from "../infra/errors.js";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { workItemDir, workItemJsonPath, workItemSourcePath, workItemStatePath } from "../infra/paths.js";
+import { workItemDir, workItemJsonPath, workItemLocalDir, workItemSourcePath, workItemStatePath } from "../infra/paths.js";
 
 export type WorkItemStatus = "created";
 
@@ -99,11 +99,13 @@ export function listWorkItems(paths: DevtaskPaths): WorkItem[] {
 
 function prepareWorkItemDir(paths: DevtaskPaths, id: string): string {
   const dir = workItemDir(paths, id);
+  const localDir = workItemLocalDir(paths, id);
   const filePath = workItemJsonPath(paths, id);
   if (fs.existsSync(filePath)) {
     throw new DevtaskError(`Work item ${id} already exists`);
   }
   fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(localDir, { recursive: true });
   return dir;
 }
 

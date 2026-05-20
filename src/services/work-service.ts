@@ -3,7 +3,16 @@ import path from "node:path";
 import type { DevtaskConfig } from "../infra/config.js";
 import { readConfig } from "../infra/config.js";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { resolvePaths, taskMetaPath, workItemDir, workItemResultsDir, workItemSpecPath } from "../infra/paths.js";
+import {
+  resolvePaths,
+  taskMetaPath,
+  workItemDir,
+  workItemRepoPlanPath,
+  workItemResultsDir,
+  workItemReviewDir,
+  workItemSpecPath,
+  workItemSpecRunsDir
+} from "../infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
@@ -249,6 +258,7 @@ export async function repoPlanWork(
       onStdout: options.onStdout,
       onStderr: options.onStderr
     });
+    persistSharedRepoPlan(paths, workId, task.repoId, record.planPath);
     repoPlans.push({
       repoId: task.repoId,
       taskId: task.taskId,
@@ -572,6 +582,16 @@ function writeWorkResult(paths: DevtaskPaths, workId: string, name: string, valu
   fs.writeFileSync(`${dir}/${name}.json`, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function persistSharedRepoPlan(paths: DevtaskPaths, workId: string, repoId: string, sourcePlanPath: string): void {
+  const plan = readTextIfExists(sourcePlanPath).trim();
+  if (!plan) {
+    return;
+  }
+  const target = workItemRepoPlanPath(paths, workId, repoId);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, `${plan}\n`);
+}
+
 function readWorkResultSummary(paths: DevtaskPaths, workId: string, name: string): string | null {
   try {
     const value = JSON.parse(fs.readFileSync(`${workItemResultsDir(paths, workId)}/${name}.json`, "utf8")) as {
@@ -627,7 +647,7 @@ async function runSpecAgent(
   }
 ): Promise<WorkSpecResult> {
   const specPath = workItemSpecPath(paths, item.id);
-  const runsDir = `${workItemDir(paths, item.id)}/spec-runs`;
+  const runsDir = workItemSpecRunsDir(paths, item.id);
   fs.mkdirSync(runsDir, { recursive: true });
   const runId = Date.now().toString();
   const promptPath = `${runsDir}/${runId}.prompt.md`;
@@ -684,7 +704,7 @@ async function runReviewAgent(
   const commits = await countBranchCommits(task.worktreePath).catch(() => 0);
   const changedFiles = await readGitStatusShort(task.worktreePath);
   const diffStat = await readGitDiffStat(task.worktreePath);
-  const reviewDir = `${workItemDir(paths, workId)}/reviews`;
+  const reviewDir = workItemReviewDir(paths, workId);
   fs.mkdirSync(reviewDir, { recursive: true });
   const reviewPath = `${reviewDir}/${task.repoId}.md`;
   const resultPath = `${reviewDir}/${task.repoId}.json`;
