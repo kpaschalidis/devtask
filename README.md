@@ -1,30 +1,31 @@
 # devtask
 
-`devtask` is a local CLI for turning one ticket or task into isolated, persistent agent work that can span one repository or many repositories.
+`devtask` is a local control plane for managing multiple AI-assisted work items across multiple repositories.
 
-The public workflow is `work` first:
+It is workspace-first and work-first:
 
-- ingest or create a work item
-- build and approve a full spec across affected targets
-- execute repo-local agents in isolated worktrees
-- check, review, and fix until implementation is ready
-- approve execution, publish PRs, and inspect CI
+- register repos once per workspace
+- create or import work
+- build a work spec across affected repos
+- materialize repo-local worktrees and sessions
+- run check, review, verify, PR, and CI capabilities independently
+- inspect everything from one board
 
-Repo-local task commands still exist under `devtask task ...`, but they are advanced primitives. Most day-to-day usage should go through `devtask work ...`.
+`devtask` wraps repo-local agent work. It does not try to replace the agent.
 
 ## Requirements
 
 - Git with worktree support
-- Node.js 22.x and npm from the same Node installation
+- Node.js 22.x and npm from the same installation
 - Codex CLI installed and authenticated
-- tmux recommended for attachable agent sessions
-- provider auth for publishing:
+- tmux recommended for attachable sessions
+- provider auth for PR/CI operations:
   - GitHub: `gh`
   - Bitbucket Cloud: `BITBUCKET_EMAIL` and `BITBUCKET_API_TOKEN`
   - GitLab: `glab`
-- tracker auth when creating work from a tracker source
+- Jira auth if you import work from Jira
 
-See [Auth And Environment](docs/auth-and-environment.md) for setup details.
+See [Auth And Environment](docs/auth-and-environment.md).
 
 ## Install
 
@@ -35,11 +36,12 @@ npm link
 devtask --help
 ```
 
-## Single-Repo Workflow
+## Quick Start
+
+Single repo:
 
 ```bash
 cd /path/to/repo
-
 devtask init
 
 devtask work create fix-login \
@@ -47,52 +49,60 @@ devtask work create fix-login \
   --body "Fix the redirect loop and add regression coverage."
 
 devtask work spec fix-login
-devtask work approve-spec fix-login
-devtask work exec fix-login --auto
-devtask work approve-exec fix-login
+devtask work board fix-login
 ```
 
-## Polyrepo Workflow
+Multi repo:
 
 ```bash
 cd /path/to/product-workspace
-
 devtask init
-devtask workspace target add backend ./backend --kind backend
-devtask workspace target add web ./web --kind frontend
+devtask repo add backend ./backend --kind backend
+devtask repo add web ./web --kind frontend
 
-devtask work create APP-123 --from-jira
+devtask work import jira APP-123
 devtask work spec APP-123
-devtask work approve-spec APP-123
-devtask work exec APP-123 --auto
 devtask work board APP-123
 ```
 
-`spec` runs the workspace planner, materializes the proposed graph, and runs repo-specialist planners. `approve-spec` is the human gate before implementation. `exec --auto` runs implementation through checks and review, then stops before publishing. `approve-exec` approves the implementation and continues to PR creation and CI inspection.
-
-## Useful Commands
+Typical work flow:
 
 ```bash
-devtask work show <work-id>
-devtask work board <work-id>
-devtask work next <work-id>
-devtask attach <work-id> --target <target-id>
-devtask work logs <work-id> --target <target-id> --stage run
-devtask work attach <work-id> --target <target-id>
-devtask work steer <work-id> --target <target-id> "Please keep this scoped."
-devtask work fix <work-id> --target <target-id> --from check
-devtask work cleanup <work-id> --dry-run
-devtask recent
-devtask where <work-id>
+devtask work spec APP-123
+devtask work implement APP-123
+devtask work check APP-123
+devtask work review APP-123
+devtask work verify APP-123
+devtask work pr APP-123 --ready
+devtask work ci APP-123
 ```
 
-Advanced repo-local primitives:
+These are capabilities, not hard gates. `devtask` records results and suggests next actions, but the developer stays in control.
+
+## Main Commands
 
 ```bash
-devtask task --help
-devtask task status <task-id>
-devtask task logs -f <task-id>
-devtask task attach <task-id>
+devtask workspace list
+devtask repo list
+devtask work list
+devtask board
+devtask board work <work-id>
+devtask session list <work-id>
+devtask worktree list <work-id>
+```
+
+Per-work capabilities:
+
+```bash
+devtask work plan <work-id>
+devtask work spec <work-id>
+devtask work implement <work-id>
+devtask work check <work-id>
+devtask work review <work-id>
+devtask work verify <work-id>
+devtask work pr <work-id> --ready
+devtask work ci <work-id>
+devtask work cleanup <work-id> --dry-run
 ```
 
 ## Documentation
@@ -100,12 +110,11 @@ devtask task attach <task-id>
 - [Getting Started](docs/getting-started.md)
 - [Auth And Environment](docs/auth-and-environment.md)
 - [Storage Model](docs/storage-model.md)
-- [UI Direction](docs/ui-direction.md)
-- [Workspace And Work Contracts](docs/work-contracts.md)
-- [Lifecycle Contracts](docs/lifecycle-contracts.md)
-- [Task Commands](docs/task-commands.md)
-- [Target Architecture](docs/target-architecture.md)
+- [Config Contract](docs/config-contract.md)
+- [Artifact Contract](docs/artifact-contract.md)
+- [CLI Redesign](docs/cli-redesign.md)
+- [Control Plane Phases](docs/control-plane-phases.md)
 
-## Current Scope
+## Scope
 
-`devtask` is intentionally local-first. It does not host a service, merge PRs, or hide human approval gates. V1 leaves final PR review and merge to the developer or provider UI.
+`devtask` is intentionally local-first. It manages workspaces, repos, work items, worktrees, sessions, and durable artifacts. Final merge judgment stays with the developer and the provider UI.
