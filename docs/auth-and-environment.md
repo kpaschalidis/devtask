@@ -1,14 +1,12 @@
 # Auth And Environment
 
-Use this as the onboarding checklist for local `devtask` usage. Core orchestration is local, but agent execution, attachable terminals, publishing, and source ingestion depend on external tools.
+Use this as the practical setup checklist for the current `devtask` control-plane workflow.
 
 ## Core Requirements
 
-Required for normal work:
-
 - Git with worktree support
 - Git user configured with `user.name` and `user.email`
-- push access to the target repository remotes
+- push access to the repo remotes you plan to publish from
 - Node.js 22.x
 - npm from the same Node installation
 - Codex CLI installed and authenticated
@@ -26,25 +24,24 @@ codex --version
 
 ## tmux
 
-tmux is recommended. When configured, agent stages start in detached but attachable sessions:
+tmux is recommended for attachable repo-local sessions:
 
 ```bash
 tmux -V
 devtask config runtime attachable
-devtask work attach <work-id> --target <target-id>
-devtask work steer <work-id> --target <target-id> "message"
+devtask session list <work-id>
+devtask session attach <work-id> <repo-id>
+devtask session send <work-id> <repo-id> "message"
 ```
 
-Without tmux, `devtask` can still run in plain background mode, but live attach and steer are unavailable.
+Without tmux, `devtask` can still manage work, but live attach/send behavior is limited.
 
 ## GitHub
 
 Used by:
 
-- `devtask work pr <work>`
-- `devtask work ci <work>`
-- `devtask task pr <task>`
-- `devtask task ci <task>`
+- `devtask work pr <work-id>`
+- `devtask work ci <work-id>`
 
 Required:
 
@@ -52,7 +49,7 @@ Required:
 - authenticated `gh` session
 - remote push access
 
-Quick checks:
+Checks:
 
 ```bash
 gh --version
@@ -64,10 +61,8 @@ git remote get-url origin
 
 Used by:
 
-- `devtask work pr <work>`
-- `devtask work ci <work>`
-- `devtask task pr <task>`
-- `devtask task ci <task>`
+- `devtask work pr <work-id>`
+- `devtask work ci <work-id>`
 
 Required environment:
 
@@ -76,42 +71,25 @@ export BITBUCKET_EMAIL="<atlassian-account-email>"
 export BITBUCKET_API_TOKEN="<api-token-with-scopes>"
 ```
 
-These are account-level environment variables. Set them in the shell that runs `devtask`; they apply to every Bitbucket repository your account can access.
-
-Required token scopes depend on the operation:
+Scopes:
 
 - PR creation: repository read/write and pull request read/write
 - CI checks: pipeline read
 
-Bitbucket API tokens are sent as HTTP Basic auth using:
-
-```text
-BITBUCKET_EMAIL:BITBUCKET_API_TOKEN
-```
-
-Persistent zsh setup:
-
-```bash
-echo 'export BITBUCKET_EMAIL="<atlassian-account-email>"' >> ~/.zshrc
-echo 'export BITBUCKET_API_TOKEN="<api-token-with-scopes>"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-Validate credentials against one target repository:
+Validation:
 
 ```bash
 curl --user "$BITBUCKET_EMAIL:$BITBUCKET_API_TOKEN" \
   https://api.bitbucket.org/2.0/repositories/<workspace>/<repo_slug>
 ```
 
-Bitbucket Cloud does not support draft pull requests in devtask. Use `--ready`.
+Bitbucket draft PRs are not supported; use `--ready`.
 
 ## GitLab
 
 Used by:
 
-- `devtask work pr <work>`
-- `devtask task pr <task>`
+- `devtask work pr <work-id>`
 
 Required:
 
@@ -119,7 +97,7 @@ Required:
 - authenticated `glab` session
 - remote push access
 
-Quick checks:
+Checks:
 
 ```bash
 glab --version
@@ -127,14 +105,11 @@ glab auth status
 git remote get-url origin
 ```
 
-Draft GitLab merge requests are not supported yet. Use `--ready`.
-
 ## Jira
 
 Used by:
 
-- `devtask jira fetch <issue>`
-- `devtask work create <issue> --from-jira`
+- `devtask work import jira <issue-key>`
 
 Required config:
 
@@ -145,50 +120,22 @@ devtask config jira \
   --cloud-id <cloudId>
 ```
 
-Get `cloudId` once per Jira site:
-
-```bash
-curl https://company.atlassian.net/_edge/tenant_info
-```
-
 Required environment:
 
 ```bash
 export JIRA_API_TOKEN="<jira-api-token>"
 ```
 
-The Jira token is account-level. When `cloudId` is configured, `devtask` calls Atlassian's gateway URL:
+## Verify Commands
 
-```text
-https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/...
+`work check` and `work verify` use the repo-local `verify` command list from `.devtask/config.json`.
+
+Example:
+
+```json
+{
+  "verify": ["npm test", "npm run typecheck"]
+}
 ```
 
-Gateway mode uses:
-
-```text
-Authorization: Bearer JIRA_API_TOKEN
-```
-
-If Bearer auth is rejected, devtask retries read requests with account-token Basic auth. Without `cloudId`, devtask calls the site URL directly and uses:
-
-```text
-Basic auth with email:JIRA_API_TOKEN
-```
-
-Quick checks:
-
-```bash
-test -n "$JIRA_API_TOKEN"
-devtask jira doctor
-devtask jira doctor --issue <issue-key>
-```
-
-## Recommended Doctor Flow
-
-```bash
-devtask doctor
-devtask jira doctor
-devtask work board <work-id>
-```
-
-`doctor` checks local runtime setup. Provider-specific failures should be fixed before publishing or CI inspection.
+Use repo-specific commands per repository.

@@ -137,14 +137,13 @@ Split into:
 Repo-local state is intentionally minimal:
 - worktrees only
 
-See [docs/storage-model.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/storage-model.md) and [docs/plan-workspace-team-onboarding.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/plan-workspace-team-onboarding.md).
+See [docs/architecture/storage-model.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/storage-model.md) and [docs/architecture/workspace-team-onboarding.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/workspace-team-onboarding.md).
 
 ## Documentation
 
-- [docs/getting-started.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/getting-started.md)
-- [docs/cli-reference.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/cli-reference.md)
+- [CLI.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/CLI.md)
 - [docs/auth-and-environment.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/auth-and-environment.md)
-- [docs/storage-model.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/storage-model.md)
-- [docs/config-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/config-contract.md)
-- [docs/artifact-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/artifact-contract.md)
-- [docs/plan-workspace-team-onboarding.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/plan-workspace-team-onboarding.md)
+- [docs/architecture/storage-model.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/storage-model.md)
+- [docs/architecture/config-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/config-contract.md)
+- [docs/architecture/artifact-contract.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/artifact-contract.md)
+- [docs/architecture/workspace-team-onboarding.md](/Users/konstantinospaschalides/Workspace/kpaschal/projects/devtask-orchestration-v1/docs/architecture/workspace-team-onboarding.md)
