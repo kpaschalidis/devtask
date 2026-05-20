@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { DevtaskPaths } from "./paths.js";
-import { planMarkdownPath, resolvePaths } from "./paths.js";
+import { planMarkdownPath, resolvePaths, workItemResultsDir } from "./paths.js";
 import { hasTaskPlan } from "./planner.js";
 import { readWorkMaterialization } from "./work-materializer.js";
 import { getTask } from "./task-store.js";
@@ -26,23 +26,32 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
     return [buildUnmaterializedWorkRow(paths, item)];
   }
 
+  const checkResults = readWorkResultIndex(paths, item.id, "check");
+  const reviewResults = readWorkResultIndex(paths, item.id, "review");
+  const verifyResults = readWorkResultIndex(paths, item.id, "verify");
+  const ciResults = readWorkResultIndex(paths, item.id, "ci");
+
   return materialization.tasks.map((task) => {
     const repoPaths = resolvePaths(task.repoPath);
     const meta = getTask(repoPaths, task.taskId);
     const hasRepoPlan = hasTaskPlan(repoPaths, task.taskId);
-    const stage = hasRepoPlan ? deriveTaskStage(meta.status) : "planning";
+    const check = checkResults.get(task.repoId) ?? "-";
+    const review = reviewResults.get(task.repoId) ?? "-";
+    const verify = verifyResults.get(task.repoId) ?? "-";
+    const ci = ciResults.get(task.repoId) ?? "-";
+    const stage = hasRepoPlan ? deriveTaskStage(meta.status, meta.prUrl !== null, ci) : "planning";
     return {
       repo: task.repoId,
       task: task.taskId,
       stage,
-      status: simplifyStatus(meta.status, hasRepoPlan),
+      status: simplifyStatus(meta.status, hasRepoPlan, meta.prUrl !== null, ci),
       last: meta.status,
       blocked: meta.runtime?.reason ?? "-",
-      check: "-",
-      review: "-",
+      check: mergeSignals(check, verify),
+      review,
       pr: meta.prUrl ? "open" : "-",
       updated: meta.updatedAt,
-      next: nextCommand(item.id, task.repoId, hasRepoPlan, meta.status, meta.tmuxSession !== null)
+      next: nextCommand(item.id, task.repoId, hasRepoPlan, meta.status, meta.tmuxSession !== null, meta.prUrl !== null, check, review, ci)
     };
   });
 }
@@ -64,7 +73,7 @@ function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem): WorkBo
   };
 }
 
-function deriveTaskStage(status: string): string {
+function deriveTaskStage(status: string, hasPr: boolean, ci: string): string {
   switch (status) {
     case "created":
     case "planned":
@@ -72,15 +81,6 @@ function deriveTaskStage(status: string): string {
     case "running":
     case "paused":
       return "implementing";
-    case "review":
-      return "review";
-    case "approved":
-    case "pr-open":
-      return "pr";
-    case "ci-running":
-    case "ci-failed":
-    case "ci-passed":
-      return "ci";
     case "done":
       return "done";
     case "blocked":
@@ -88,11 +88,17 @@ function deriveTaskStage(status: string): string {
     case "cancelled":
       return "blocked";
     default:
+      if (ci !== "-" && ci !== "skipped") {
+        return "ci";
+      }
+      if (hasPr) {
+        return "pr";
+      }
       return "implementing";
   }
 }
 
-function simplifyStatus(status: string, hasRepoPlan: boolean): string {
+function simplifyStatus(status: string, hasRepoPlan: boolean, hasPr: boolean, ci: string): string {
   if (!hasRepoPlan) {
     return "pending";
   }
@@ -104,18 +110,6 @@ function simplifyStatus(status: string, hasRepoPlan: boolean): string {
       return "running";
     case "paused":
       return "paused";
-    case "review":
-      return "reviewing";
-    case "approved":
-      return "ready-for-pr";
-    case "pr-open":
-      return "pr-open";
-    case "ci-running":
-      return "ci-running";
-    case "ci-failed":
-      return "ci-failed";
-    case "ci-passed":
-      return "done";
     case "done":
       return "done";
     case "blocked":
@@ -125,24 +119,81 @@ function simplifyStatus(status: string, hasRepoPlan: boolean): string {
     case "cancelled":
       return "cancelled";
     default:
+      if (ci === "passed") {
+        return "done";
+      }
+      if (ci !== "-" && ci !== "skipped") {
+        return `ci-${ci}`;
+      }
+      if (hasPr) {
+        return "pr-open";
+      }
       return status;
   }
 }
 
-function nextCommand(workId: string, repoId: string, hasRepoPlan: boolean, status: string, hasSession: boolean): string {
+function nextCommand(
+  workId: string,
+  repoId: string,
+  hasRepoPlan: boolean,
+  status: string,
+  hasSession: boolean,
+  hasPr: boolean,
+  check: string,
+  review: string,
+  ci: string
+): string {
   if (!hasRepoPlan) {
     return `devtask work plan ${shellQuote(workId)}`;
   }
   if (hasSession && (status === "running" || status === "paused")) {
     return `devtask session attach ${shellQuote(workId)} ${shellQuote(repoId)}`;
   }
-  if (status === "approved") {
+  if (check === "-") {
+    return `devtask work check ${shellQuote(workId)}`;
+  }
+  if (review === "-") {
+    return `devtask work review ${shellQuote(workId)}`;
+  }
+  if (!hasPr) {
     return `devtask work pr ${shellQuote(workId)}`;
   }
-  if (status === "pr-open") {
+  if (ci === "-" || ci === "skipped") {
     return `devtask work ci ${shellQuote(workId)}`;
   }
   return `devtask work board ${shellQuote(workId)}`;
+}
+
+function readWorkResultIndex(paths: DevtaskPaths, workId: string, name: string): Map<string, string> {
+  try {
+    const filePath = `${workItemResultsDir(paths, workId)}/${name}.json`;
+    if (!fs.existsSync(filePath)) {
+      return new Map();
+    }
+    const value = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+      tasks?: Array<{ repoId?: unknown; status?: unknown }>;
+    };
+    if (!Array.isArray(value.tasks)) {
+      return new Map();
+    }
+    const entries = value.tasks
+      .map((task) => {
+        const repoId = typeof task.repoId === "string" ? task.repoId : null;
+        const status = typeof task.status === "string" ? task.status : null;
+        return repoId && status ? ([repoId, status] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, string] => Boolean(entry));
+    return new Map(entries);
+  } catch {
+    return new Map();
+  }
+}
+
+function mergeSignals(primary: string, secondary: string): string {
+  if (primary !== "-" && secondary !== "-") {
+    return `${primary}/${secondary}`;
+  }
+  return primary !== "-" ? primary : secondary;
 }
 
 function shellQuote(value: string): string {

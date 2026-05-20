@@ -109,6 +109,7 @@ export interface WorkSpecResult {
 export interface ReviewTaskResult {
   repoId: string;
   taskId: string;
+  status: "captured";
   branch: string;
   worktreePath: string;
   clean: boolean;
@@ -299,6 +300,7 @@ export async function reviewWork(paths: DevtaskPaths, workId: string): Promise<R
     tasks.push({
       repoId: task.repoId,
       taskId: task.taskId,
+      status: "captured",
       branch: task.branch,
       worktreePath: task.worktreePath,
       clean,
@@ -456,7 +458,6 @@ export async function createWorkPullRequests(
       });
       writeTaskMeta(metaPath, {
         ...meta,
-        status: "pr-open",
         prUrl,
         updatedAt: new Date().toISOString()
       });
@@ -517,7 +518,6 @@ export async function checkWorkCi(paths: DevtaskPaths, workId: string): Promise<
       const result = await checkProviderCi(task.worktreePath, meta.prUrl, task.branch);
       writeTaskMeta(metaPath, {
         ...meta,
-        status: ciStatusToTaskStatus(result.status),
         updatedAt: new Date().toISOString()
       });
       tasks.push({
@@ -594,18 +594,6 @@ function buildPullRequestBody(item: WorkItem, repoId: string): string {
     "",
     "Created by devtask."
   ].join("\n");
-}
-
-function ciStatusToTaskStatus(status: CiCheckResult["status"]): TaskMeta["status"] {
-  switch (status) {
-    case "passed":
-      return "ci-passed";
-    case "running":
-      return "ci-running";
-    case "failed":
-    case "unknown":
-      return "ci-failed";
-  }
 }
 
 async function readGitStatusShort(worktreePath: string): Promise<string[]> {
