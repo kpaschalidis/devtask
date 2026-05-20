@@ -25,7 +25,7 @@ export async function buildWorkspaceBoard(paths: DevtaskPaths): Promise<Workspac
   return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem): Promise<WorkspaceBoardRow> {
+export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem): Promise<WorkspaceBoardRow> {
   const materialization = readWorkMaterialization(paths, item.id);
   const sessions = await listSessions(paths, item.id);
   const planRecord = readWorkPlanRecord(paths, item.id);

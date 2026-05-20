@@ -34,7 +34,7 @@ describe("work planner", () => {
       workGraphPath(paths, item.id)
     );
 
-    expect(prompt).toContain("You are in the devtask work planning stage.");
+    expect(prompt).toContain("You are in the devtask work planning activity.");
     expect(prompt).toContain("Read the work source artifact before planning.");
     expect(prompt).toContain("Improve onboarding");
     expect(prompt).toContain(item.source.artifact);

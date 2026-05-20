@@ -248,7 +248,7 @@ describe("work materializer", () => {
     await expect(materializeWorkPlan(paths, item)).rejects.toThrow("Workspace repo backend does not exist");
   });
 
-  it("rejects approval when the human-readable plan artifact is missing", async () => {
+  it("rejects materialization when the human-readable plan artifact is missing", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-plan-"));
     const repo = await makeTempRepo({ withCommit: true });
     const paths = resolveWorkspacePathsForInit(workspace);

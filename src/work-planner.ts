@@ -168,7 +168,7 @@ function buildWorkPlanPrompt(
   return [
     `Plan work item ${workItem.id}.`,
     "",
-    "You are in the devtask work planning stage.",
+    "You are in the devtask work planning activity.",
     "",
     "Role:",
     "- Read the work source and workspace repo inventory.",
@@ -228,7 +228,7 @@ function buildWorkPlanPrompt(
     '      "dependencies": [',
     "        {",
     '          "task": "other-task-id",',
-    '          "type": "run|review|approval|publish|validation",',
+    '          "type": "run|review|validation",',
     '          "reason": "why this dependency exists"',
     "        }",
     "      ]",
@@ -246,9 +246,8 @@ function buildWorkPlanPrompt(
     "- Dependencies must reference proposed task ids.",
     "- Use dependency type `run` only when the dependent task cannot safely start before the dependency is done.",
     "- Use `validation` when tasks can implement in parallel but final integration validation depends on both.",
-    "- Use `approval` or `publish` when implementation/review may proceed but later gates should wait.",
     "- Prefer parallel execution unless there is a concrete dependency blocker.",
-    "- Keep the graph proposed only; a later approval step will materialize tasks.",
+    "- Keep the graph proposed only; a later materialization step will create repo-local tasks and worktrees.",
     "- The graph file must contain JSON only, with no Markdown fences.",
     "",
     `Workspace root: ${paths.root}`

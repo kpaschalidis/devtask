@@ -48,7 +48,7 @@ describe("global index", () => {
     expect(recent).toMatchObject({
       workId: "APP-123",
       title: "Add billing export",
-      stage: "plan",
+      status: "created",
       workspacePath: fs.realpathSync(workspace)
     });
     expect(readGlobalIndex().recentWork.map((work) => work.workId)).toEqual(["APP-123"]);

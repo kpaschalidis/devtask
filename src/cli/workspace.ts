@@ -96,8 +96,8 @@ export function registerWorkspaceCommands(program: Command): void {
           return;
         }
         printTable(
-          ["WORK", "TITLE", "WORKSPACE", "STAGE", "UPDATED"],
-          items.map((item) => [item.workId, item.title, item.workspaceId, item.stage, item.updatedAt])
+          ["WORK", "TITLE", "WORKSPACE", "STATUS", "UPDATED"],
+          items.map((item) => [item.workId, item.title, item.workspaceId, item.status, item.updatedAt])
         );
       } catch (error) {
         printError(error);

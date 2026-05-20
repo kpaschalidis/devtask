@@ -16,7 +16,7 @@ import { getWorkspaceRepo, type WorkspaceRepo } from "./workspace-repos.js";
 import type { WorkItem } from "./work-store.js";
 import { workGraphPath, workPlanPath } from "./work-planner.js";
 
-export const WORK_DEPENDENCY_TYPES = ["run", "review", "approval", "publish", "validation"] as const;
+export const WORK_DEPENDENCY_TYPES = ["run", "review", "validation"] as const;
 export type WorkDependencyType = (typeof WORK_DEPENDENCY_TYPES)[number];
 
 export interface WorkGraphDependency {

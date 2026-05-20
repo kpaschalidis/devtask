@@ -4,9 +4,8 @@ import path from "node:path";
 import { DevtaskError } from "./errors.js";
 import type { DevtaskPaths } from "./paths.js";
 import { workGraphPath, workPlanPath } from "./work-planner.js";
-import { readWorkMaterialization } from "./work-materializer.js";
 import { getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
-import { buildWorkBoardRows } from "./work-board.js";
+import { buildWorkspaceBoardRow } from "./board/workspace-board.js";
 
 export interface GlobalWorkspaceEntry {
   id: string;
@@ -21,7 +20,6 @@ export interface GlobalRecentWorkEntry {
   workspacePath: string;
   title: string;
   sourceType: string;
-  stage: string;
   status: string;
   updatedAt: string;
   planPath: string;
@@ -186,43 +184,18 @@ async function buildRecentWorkEntry(
   workspace: GlobalWorkspaceEntry,
   item: WorkItem
 ): Promise<GlobalRecentWorkEntry> {
-  const rows = await readWorkBoardRowsIfAvailable(paths, item);
-  const stage = summarizeStage(rows);
+  const boardRow = await buildWorkspaceBoardRow(paths, item);
   return {
     workId: item.id,
     workspaceId: workspace.id,
     workspacePath: workspace.path,
     title: item.source.title,
     sourceType: item.source.type,
-    stage,
-    status: stage,
-    updatedAt: newestUpdatedAt(item.updatedAt, rows.map((row) => row.updated)),
+    status: boardRow.status,
+    updatedAt: boardRow.updatedAt,
     planPath: workPlanPath(paths, item.id),
     graphPath: workGraphPath(paths, item.id)
   };
-}
-
-async function readWorkBoardRowsIfAvailable(paths: DevtaskPaths, item: WorkItem): Promise<Array<{ stage: string; status: string; updated: string }>> {
-  if (!readWorkMaterialization(paths, item.id)) {
-    return [];
-  }
-  try {
-    return await buildWorkBoardRows(paths, item);
-  } catch {
-    return [];
-  }
-}
-
-function summarizeStage(rows: Array<{ stage: string; status: string }>): string {
-  if (rows.length === 0) {
-    return "plan";
-  }
-  const active = rows.find((row) => row.status === "running" || row.status === "ready" || row.status === "failed");
-  return active?.stage || rows[0]?.stage || "-";
-}
-
-function newestUpdatedAt(fallback: string, values: string[]): string {
-  return [fallback, ...values.filter((value) => value && value !== "-")].sort().at(-1) ?? fallback;
 }
 
 function defaultWorkspaceId(root: string): string {
@@ -275,7 +248,6 @@ function parseRecentWorkEntry(value: unknown): GlobalRecentWorkEntry {
     workspacePath: requireString(value, "workspacePath"),
     title: requireString(value, "title"),
     sourceType: requireString(value, "sourceType"),
-    stage: requireString(value, "stage"),
     status: requireString(value, "status"),
     updatedAt: requireString(value, "updatedAt"),
     planPath: requireString(value, "planPath"),
