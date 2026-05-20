@@ -19,22 +19,17 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export type TaskRuntimeState = "unknown" | "alive" | "missing" | "completed";
 
-export interface TaskRuntimeLifecycle {
+export interface TaskRuntimeInfo {
   state: TaskRuntimeState;
   reason: string;
   lastObservedAt: string | null;
-}
-
-export interface TaskLifecycle {
-  version: 1;
-  runtime: TaskRuntimeLifecycle;
 }
 
 export interface TaskMeta {
   schemaVersion: 1;
   id: string;
   status: TaskStatus;
-  lifecycle: TaskLifecycle | null;
+  runtime: TaskRuntimeInfo | null;
   branch: string;
   worktreePath: string;
   taskPath: string;

@@ -31,7 +31,7 @@ export async function listSessions(paths: DevtaskPaths, workId?: string): Promis
       const meta = getTask(repoPaths, task.taskId);
       summaries.push({
         workId: id,
-        repoId: task.target,
+        repoId: task.repoId,
         taskId: task.taskId,
         sessionName: meta.tmuxSession,
         worktreePath: meta.worktreePath,

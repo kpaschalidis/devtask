@@ -12,7 +12,7 @@ import {
 import { assertValidTaskId } from "./task-id.js";
 import { createTask, initializeStore } from "./task-store.js";
 import type { TaskMeta } from "./types.js";
-import { getWorkspaceTarget, type WorkspaceTarget } from "./workspace-targets.js";
+import { getWorkspaceRepo, type WorkspaceRepo } from "./workspace-repos.js";
 import type { WorkItem } from "./work-store.js";
 import { workGraphPath, workPlanPath } from "./work-planner.js";
 
@@ -27,7 +27,7 @@ export interface WorkGraphDependency {
 
 export interface WorkGraphTask {
   id: string;
-  target: string;
+  repoId: string;
   goal: string;
   owns: string[];
   dependencies: WorkGraphDependency[];
@@ -43,7 +43,7 @@ export interface WorkGraph {
 
 export interface MaterializedWorkTask {
   graphTaskId: string;
-  target: string;
+  repoId: string;
   repoPath: string;
   scope: string | null;
   taskId: string;
@@ -68,24 +68,24 @@ export async function approveWorkPlan(paths: DevtaskPaths, workItem: WorkItem): 
 
   assertPlanArtifactExists(paths, workItem.id);
   const graph = readAndValidateWorkGraph(paths, workItem.id);
-  const targets = resolveGraphTargets(paths, graph);
-  preflightMaterialization(targets, graph);
+  const repos = resolveGraphRepos(paths, graph);
+  preflightMaterialization(repos, graph);
 
   fs.writeFileSync(approvedGraphPath, `${JSON.stringify(graph, null, 2)}\n`);
 
   const tasks: MaterializedWorkTask[] = [];
   for (const graphTask of graph.tasks) {
-    const target = targets.get(graphTask.target);
-    if (!target) {
-      throw new DevtaskError(`Workspace target ${graphTask.target} does not exist`);
+    const repo = repos.get(graphTask.repoId);
+    if (!repo) {
+      throw new DevtaskError(`Workspace repo ${graphTask.repoId} does not exist`);
     }
-    const repoPaths = resolveRepoPaths(target);
+    const repoPaths = resolveRepoPaths(repo);
     initializeStore(repoPaths);
     const meta = await createTask(repoPaths, graphTask.id, {
-      goal: buildRepoTaskGoal(paths, workItem, graph, graphTask, target),
+      goal: buildRepoTaskGoal(paths, workItem, graph, graphTask, repo),
       command: buildMaterializedTaskCommand(paths, repoPaths, workItem)
     });
-    tasks.push(toMaterializedTask(graphTask, target, meta));
+    tasks.push(toMaterializedTask(graphTask, repo, meta));
   }
 
   const materialization: WorkMaterialization = {
@@ -163,7 +163,7 @@ function parseMaterializedWorkTask(value: unknown): MaterializedWorkTask {
 
   return {
     graphTaskId: requireString(value, "graphTaskId", "work materialization"),
-    target: requireString(value, "target", "work materialization"),
+    repoId: requireString(value, "repoId", "work materialization"),
     repoPath: requireString(value, "repoPath", "work materialization"),
     scope: parseNullableString(value.scope, "scope"),
     taskId: requireString(value, "taskId", "work materialization"),
@@ -202,7 +202,7 @@ function parseWorkGraphTask(value: unknown): WorkGraphTask {
   assertValidTaskId(id);
   return {
     id,
-    target: requireString(value, "target", "work graph"),
+    repoId: requireString(value, "repoId", "work graph"),
     goal: requireString(value, "goal", "work graph"),
     owns: parseStringArray(value.owns, "owns"),
     dependencies: parseWorkGraphDependencies(value.dependencies)
@@ -226,38 +226,38 @@ function validateGraphReferences(graph: WorkGraph): void {
   }
 }
 
-function resolveGraphTargets(paths: DevtaskPaths, graph: WorkGraph): Map<string, WorkspaceTarget> {
-  const targets = new Map<string, WorkspaceTarget>();
+function resolveGraphRepos(paths: DevtaskPaths, graph: WorkGraph): Map<string, WorkspaceRepo> {
+  const repos = new Map<string, WorkspaceRepo>();
   for (const task of graph.tasks) {
-    if (!targets.has(task.target)) {
-      targets.set(task.target, getWorkspaceTarget(paths, task.target));
+    if (!repos.has(task.repoId)) {
+      repos.set(task.repoId, getWorkspaceRepo(paths, task.repoId));
     }
   }
-  return targets;
+  return repos;
 }
 
-function preflightMaterialization(targets: Map<string, WorkspaceTarget>, graph: WorkGraph): void {
+function preflightMaterialization(repos: Map<string, WorkspaceRepo>, graph: WorkGraph): void {
   for (const task of graph.tasks) {
-    const target = targets.get(task.target);
-    if (!target) {
-      throw new DevtaskError(`Workspace target ${task.target} does not exist`);
+    const repo = repos.get(task.repoId);
+    if (!repo) {
+      throw new DevtaskError(`Workspace repo ${task.repoId} does not exist`);
     }
-    const repoPaths = resolveRepoPaths(target);
+    const repoPaths = resolveRepoPaths(repo);
     if (fs.existsSync(taskMetaPath(repoPaths, task.id))) {
       throw new DevtaskError(`Task ${task.id} already exists in repo ${repoPaths.root}`);
     }
   }
 }
 
-function resolveRepoPaths(target: WorkspaceTarget): DevtaskPaths {
-  // Workspace targets are validated and canonicalized when read.
+function resolveRepoPaths(repo: WorkspaceRepo): DevtaskPaths {
+  // Workspace repos are validated and canonicalized when read.
   return {
-    root: target.repoPath,
-    baseDir: path.join(target.repoPath, ".devtask"),
-    configPath: path.join(target.repoPath, ".devtask", "config.json"),
-    tasksDir: path.join(target.repoPath, ".devtask", "tasks"),
-    worktreesDir: path.join(target.repoPath, ".devtask", "worktrees"),
-    workDir: path.join(target.repoPath, ".devtask", "work")
+    root: repo.repoPath,
+    baseDir: path.join(repo.repoPath, ".devtask"),
+    configPath: path.join(repo.repoPath, ".devtask", "config.json"),
+    tasksDir: path.join(repo.repoPath, ".devtask", "tasks"),
+    worktreesDir: path.join(repo.repoPath, ".devtask", "worktrees"),
+    workDir: path.join(repo.repoPath, ".devtask", "work")
   };
 }
 
@@ -266,7 +266,7 @@ function buildRepoTaskGoal(
   workItem: WorkItem,
   graph: WorkGraph,
   task: WorkGraphTask,
-  target: WorkspaceTarget
+  repo: WorkspaceRepo
 ): string {
   return [
     `Implement work item ${workItem.id}: ${workItem.source.title}`,
@@ -275,9 +275,9 @@ function buildRepoTaskGoal(
     `Work plan artifact: ${workPlanPath(paths, workItem.id)}`,
     `Work graph artifact: ${workGraphPath(paths, workItem.id)}`,
     `Graph task: ${task.id}`,
-    `Target: ${task.target}`,
-    `Target repo: ${target.repoPath}`,
-    `Target scope: ${target.scope ?? "."}`,
+    `Repo: ${task.repoId}`,
+    `Repo path: ${repo.repoPath}`,
+    `Repo scope: ${repo.scope ?? "."}`,
     "",
     "## Goal",
     task.goal,
@@ -313,12 +313,12 @@ function buildMaterializedTaskCommand(paths: DevtaskPaths, repoPaths: DevtaskPat
   });
 }
 
-function toMaterializedTask(task: WorkGraphTask, target: WorkspaceTarget, meta: TaskMeta): MaterializedWorkTask {
+function toMaterializedTask(task: WorkGraphTask, repo: WorkspaceRepo, meta: TaskMeta): MaterializedWorkTask {
   return {
     graphTaskId: task.id,
-    target: task.target,
-    repoPath: target.repoPath,
-    scope: target.scope,
+    repoId: task.repoId,
+    repoPath: repo.repoPath,
+    scope: repo.scope,
     taskId: meta.id,
     branch: meta.branch,
     worktreePath: meta.worktreePath

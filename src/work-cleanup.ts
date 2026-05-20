@@ -11,7 +11,7 @@ export interface WorkCleanupOptions {
 }
 
 export interface WorkCleanupResult {
-  taskPlans: Array<{ target: string; plan: CleanupPlan }>;
+  taskPlans: Array<{ repoId: string; plan: CleanupPlan }>;
   actions: string[];
   blockers: string[];
 }
@@ -30,8 +30,8 @@ export async function cleanupWorkItem(
     for (const task of materialization.tasks) {
       const repoPaths = resolvePaths(task.repoPath);
       const plan = await planTaskCleanup(repoPaths, task.taskId, { keepMetadata: true });
-      taskPlans.push({ target: task.target, plan });
-      blockers.push(...plan.blockers.map((blocker) => `${task.target}/${task.taskId}: ${blocker}`));
+      taskPlans.push({ repoId: task.repoId, plan });
+      blockers.push(...plan.blockers.map((blocker) => `${task.repoId}/${task.taskId}: ${blocker}`));
     }
   }
 

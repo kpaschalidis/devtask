@@ -36,7 +36,7 @@ export function registerBoardCommands(program: Command): void {
         }
         printTable(
           ["REPO", "TASK", "STAGE", "STATUS", "BLOCKED", "UPDATED", "NEXT"],
-          rows.map((row) => [row.target, row.task, row.stage, row.status, row.blocked, row.updated, row.next])
+          rows.map((row) => [row.repo, row.task, row.stage, row.status, row.blocked, row.updated, row.next])
         );
       } catch (error) {
         printError(error);

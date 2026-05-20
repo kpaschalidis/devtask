@@ -121,8 +121,8 @@ export function workspaceJsonPath(paths: DevtaskPaths): string {
   return path.join(paths.baseDir, "workspace.json");
 }
 
-export function workspaceTargetsPath(paths: DevtaskPaths): string {
-  return path.join(paths.baseDir, "targets.json");
+export function workspaceReposPath(paths: DevtaskPaths): string {
+  return path.join(paths.baseDir, "repos.json");
 }
 
 export function workItemDir(paths: DevtaskPaths, id: string): string {

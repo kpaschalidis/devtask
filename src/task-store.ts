@@ -8,7 +8,7 @@ import {
   taskDir,
   taskMarkdownPath,
   taskMetaPath,
-  workspaceTargetsPath,
+  workspaceReposPath,
   workspaceJsonPath,
   worktreePath
 } from "./paths.js";
@@ -59,9 +59,9 @@ export function initializeWorkspace(paths: DevtaskPaths): void {
       )
     );
   }
-  const targetsPath = workspaceTargetsPath(paths);
-  if (!fs.existsSync(targetsPath)) {
-    fs.writeFileSync(targetsPath, `${JSON.stringify({ schemaVersion: 1, targets: [] }, null, 2)}\n`);
+  const reposPath = workspaceReposPath(paths);
+  if (!fs.existsSync(reposPath)) {
+    fs.writeFileSync(reposPath, `${JSON.stringify({ schemaVersion: 1, repos: [] }, null, 2)}\n`);
   }
 }
 
@@ -111,7 +111,7 @@ export async function createTask(
     schemaVersion: 1,
     id,
     status: "created",
-    lifecycle: null,
+    runtime: null,
     branch,
     worktreePath: targetWorktreePath,
     taskPath,

@@ -6,7 +6,7 @@ import type { DevtaskPaths } from "./paths.js";
 import { workItemDir } from "./paths.js";
 import { runCommand } from "./process-runner.js";
 import { newRunId } from "./run-record.js";
-import { listWorkspaceTargets, type WorkspaceTarget } from "./workspace-targets.js";
+import { listWorkspaceRepos, type WorkspaceRepo } from "./workspace-repos.js";
 import type { WorkItem } from "./work-store.js";
 
 export interface WorkPlanRecord {
@@ -67,8 +67,8 @@ export async function runWorkPlanner(
   const outputPath = path.join(runsDir, `${planId}.md`);
   const planPath = workPlanPath(paths, workItem.id);
   const graphPath = workGraphPath(paths, workItem.id);
-  const targets = listWorkspaceTargets(paths);
-  const prompt = buildWorkPlanPrompt(paths, workItem, targets, planPath, graphPath);
+  const repos = listWorkspaceRepos(paths);
+  const prompt = buildWorkPlanPrompt(paths, workItem, repos, planPath, graphPath);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const previousPlan = artifactSnapshot(planPath);
@@ -77,7 +77,7 @@ export async function runWorkPlanner(
     model: config.codex.model,
     fullAuto: config.codex.fullAuto,
     skipGitRepoCheck: true,
-    addDirs: workPlanAddDirs(workItem, targets)
+    addDirs: workPlanAddDirs(workItem, repos)
   });
   options.onStart?.({ command, promptPath, outputPath, planPath, graphPath });
   const startedAt = new Date().toISOString();
@@ -147,21 +147,21 @@ export function readLatestWorkPlanRecord(paths: DevtaskPaths, id: string): WorkP
 export function buildWorkPlanPromptForTest(
   paths: DevtaskPaths,
   workItem: WorkItem,
-  targets: WorkspaceTarget[],
+  repos: WorkspaceRepo[],
   planPath: string,
   graphPath: string
 ): string {
-  return buildWorkPlanPrompt(paths, workItem, targets, planPath, graphPath);
+  return buildWorkPlanPrompt(paths, workItem, repos, planPath, graphPath);
 }
 
-export function workPlanAddDirsForTest(workItem: WorkItem, targets: WorkspaceTarget[]): string[] {
-  return workPlanAddDirs(workItem, targets);
+export function workPlanAddDirsForTest(workItem: WorkItem, repos: WorkspaceRepo[]): string[] {
+  return workPlanAddDirs(workItem, repos);
 }
 
 function buildWorkPlanPrompt(
   paths: DevtaskPaths,
   workItem: WorkItem,
-  targets: WorkspaceTarget[],
+  repos: WorkspaceRepo[],
   planPath: string,
   graphPath: string
 ): string {
@@ -171,8 +171,8 @@ function buildWorkPlanPrompt(
     "You are in the devtask work planning stage.",
     "",
     "Role:",
-    "- Read the work source and workspace target inventory.",
-    "- Decide which targets are likely affected.",
+    "- Read the work source and workspace repo inventory.",
+    "- Decide which repos are likely affected.",
     "- Produce a proposed execution graph only.",
     "- Do not create repo tasks.",
     "- Do not implement code.",
@@ -188,15 +188,15 @@ function buildWorkPlanPrompt(
     `- artifact: ${workItem.source.artifact}`,
     ...("url" in workItem.source ? [`- url: ${workItem.source.url}`] : []),
     "",
-    "Workspace targets:",
+    "Workspace repos:",
     "",
-    ...(targets.length
-      ? targets.map((target) =>
+    ...(repos.length
+      ? repos.map((repo) =>
           [
-            `- ${target.id}`,
-            `  - kind: ${target.kind ?? "-"}`,
-            `  - repo: ${target.repoPath}`,
-            `  - scope: ${target.scope ?? "."}`
+            `- ${repo.id}`,
+            `  - kind: ${repo.kind ?? "-"}`,
+            `  - path: ${repo.repoPath}`,
+            `  - scope: ${repo.scope ?? "."}`
           ].join("\n")
         )
       : ["- (none configured)"]),
@@ -206,7 +206,7 @@ function buildWorkPlanPrompt(
     "Markdown plan sections:",
     "1. Summary",
     "2. Source Inputs",
-    "3. Affected Targets",
+    "3. Affected Repos",
     "4. Proposed Execution Graph",
     "5. Ownership Boundaries",
     "6. Dependencies",
@@ -222,14 +222,14 @@ function buildWorkPlanPrompt(
     '  "tasks": [',
     "    {",
     '      "id": "short-task-id",',
-    '      "target": "workspace-target-id",',
+    '      "repoId": "workspace-repo-id",',
     '      "goal": "repo/scope-local goal",',
     '      "owns": ["path/or/scope/**"],',
     '      "dependencies": [',
     "        {",
     '          "task": "other-task-id",',
     '          "type": "run|review|approval|publish|validation",',
-    '          "reason": "why this dependency affects that lifecycle stage"',
+    '          "reason": "why this dependency exists"',
     "        }",
     "      ]",
     "    }",
@@ -240,14 +240,14 @@ function buildWorkPlanPrompt(
     "```",
     "",
     "Rules:",
-    "- Use only configured workspace targets; do not invent target IDs.",
-    "- If no configured target clearly applies, output an empty tasks array and explain the open question.",
+    "- Use only configured workspace repos; do not invent repo IDs.",
+    "- If no configured repo clearly applies, output an empty tasks array and explain the open question.",
     "- Prefer explicit ownership boundaries over broad repository ownership.",
     "- Dependencies must reference proposed task ids.",
     "- Use dependency type `run` only when the dependent task cannot safely start before the dependency is done.",
     "- Use `validation` when tasks can implement in parallel but final integration validation depends on both.",
     "- Use `approval` or `publish` when implementation/review may proceed but later gates should wait.",
-    "- Prefer parallel execution unless there is a concrete lifecycle blocker.",
+    "- Prefer parallel execution unless there is a concrete dependency blocker.",
     "- Keep the graph proposed only; a later approval step will materialize tasks.",
     "- The graph file must contain JSON only, with no Markdown fences.",
     "",
@@ -255,10 +255,10 @@ function buildWorkPlanPrompt(
   ].join("\n");
 }
 
-function workPlanAddDirs(workItem: WorkItem, targets: WorkspaceTarget[]): string[] {
+function workPlanAddDirs(workItem: WorkItem, repos: WorkspaceRepo[]): string[] {
   const dirs = new Set<string>([path.dirname(workItem.source.artifact)]);
-  for (const target of targets) {
-    dirs.add(target.scope ? path.join(target.repoPath, target.scope) : target.repoPath);
+  for (const repo of repos) {
+    dirs.add(repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath);
   }
   return [...dirs];
 }

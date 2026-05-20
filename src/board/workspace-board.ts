@@ -34,7 +34,7 @@ async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem): Prom
     title: item.source.title,
     source: item.source.type,
     status: summarizeStatus(item, planRecord?.status ?? null, materialization !== null, sessions.some((session) => session.status === "active")),
-    repos: materialization ? materialization.tasks.map((task) => task.target).join(", ") : "-",
+    repos: materialization ? materialization.tasks.map((task) => task.repoId).join(", ") : "-",
     updatedAt: newestUpdatedAt(item.updatedAt, [
       planRecord?.finishedAt ?? null,
       materialization?.materializedAt ?? null,

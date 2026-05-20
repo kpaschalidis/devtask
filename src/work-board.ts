@@ -7,7 +7,7 @@ import { getTask } from "./task-store.js";
 import type { WorkItem } from "./work-store.js";
 
 export interface WorkBoardRow {
-  target: string;
+  repo: string;
   task: string;
   stage: string;
   status: string;
@@ -32,17 +32,17 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
     const hasRepoPlan = hasTaskPlan(repoPaths, task.taskId);
     const stage = hasRepoPlan ? deriveTaskStage(meta.status) : "planning";
     return {
-      target: task.target,
+      repo: task.repoId,
       task: task.taskId,
       stage,
       status: simplifyStatus(meta.status, hasRepoPlan),
       last: meta.status,
-      blocked: meta.lifecycle?.runtime.reason ?? "-",
+      blocked: meta.runtime?.reason ?? "-",
       check: "-",
       review: "-",
       pr: meta.prUrl ? "open" : "-",
       updated: meta.updatedAt,
-      next: nextCommand(item.id, task.target, hasRepoPlan, meta.status, meta.tmuxSession !== null)
+      next: nextCommand(item.id, task.repoId, hasRepoPlan, meta.status, meta.tmuxSession !== null)
     };
   });
 }
@@ -50,7 +50,7 @@ export async function buildWorkBoardRows(paths: DevtaskPaths, item: WorkItem): P
 function buildUnmaterializedWorkRow(paths: DevtaskPaths, item: WorkItem): WorkBoardRow {
   const hasPlan = fs.existsSync(planMarkdownPath(paths, item.id));
   return {
-    target: "-",
+    repo: "-",
     task: item.id,
     stage: hasPlan ? "implement" : "planning",
     status: hasPlan ? "ready" : "pending",
@@ -129,12 +129,12 @@ function simplifyStatus(status: string, hasRepoPlan: boolean): string {
   }
 }
 
-function nextCommand(workId: string, target: string, hasRepoPlan: boolean, status: string, hasSession: boolean): string {
+function nextCommand(workId: string, repoId: string, hasRepoPlan: boolean, status: string, hasSession: boolean): string {
   if (!hasRepoPlan) {
     return `devtask work plan ${shellQuote(workId)}`;
   }
   if (hasSession && (status === "running" || status === "paused")) {
-    return `devtask session attach ${shellQuote(workId)} ${shellQuote(target)}`;
+    return `devtask session attach ${shellQuote(workId)} ${shellQuote(repoId)}`;
   }
   if (status === "approved") {
     return `devtask work pr ${shellQuote(workId)}`;

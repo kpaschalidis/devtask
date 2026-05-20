@@ -95,7 +95,7 @@ export function registerWorkCommands(program: Command): void {
         }
         printTable(
           ["REPO", "TASK", "STAGE", "STATUS", "BLOCKED", "UPDATED", "NEXT"],
-          rows.map((row) => [row.target, row.task, row.stage, row.status, row.blocked, row.updated, row.next])
+          rows.map((row) => [row.repo, row.task, row.stage, row.status, row.blocked, row.updated, row.next])
         );
       } catch (error) {
         printError(error);
@@ -153,7 +153,7 @@ export function registerWorkCommands(program: Command): void {
         console.log(`Materialized ${materialization.tasks.length} repo task(s)`);
         printTable(
           ["REPO", "TASK", "BRANCH", "WORKTREE"],
-          materialization.tasks.map((task) => [task.target, task.taskId, task.branch, task.worktreePath])
+          materialization.tasks.map((task) => [task.repoId, task.taskId, task.branch, task.worktreePath])
         );
       } catch (error) {
         printError(error);
@@ -172,7 +172,7 @@ export function registerWorkCommands(program: Command): void {
           printTable(
             ["REPO", "ACTIONS", "BLOCKERS"],
             result.taskPlans.map((entry) => [
-              entry.target,
+              entry.repoId,
               String(entry.plan.actions.length),
               entry.plan.blockers.join("; ") || "-"
             ])

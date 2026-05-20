@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { DevtaskError } from "./errors.js";
 import { atomicWriteFileSync } from "./atomic-write.js";
-import { TASK_STATUSES, type TaskLifecycle, type TaskMeta, type TaskStatus } from "./types.js";
+import { TASK_STATUSES, type TaskMeta, type TaskRuntimeInfo, type TaskStatus } from "./types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -36,20 +36,14 @@ function requireNonNegativeInteger(record: Record<string, unknown>, field: strin
   return value;
 }
 
-function parseLifecycle(value: unknown): TaskLifecycle | null {
+function parseRuntime(value: unknown): TaskRuntimeInfo | null {
   if (!isRecord(value)) return null;
-  if (value.version !== 1) return null;
-  if (!isRecord(value.runtime)) return null;
-  const rt = value.runtime;
   const validStates = ["unknown", "alive", "missing", "completed"] as const;
-  if (typeof rt.state !== "string" || !validStates.includes(rt.state as (typeof validStates)[number])) return null;
+  if (typeof value.state !== "string" || !validStates.includes(value.state as (typeof validStates)[number])) return null;
   return {
-    version: 1,
-    runtime: {
-      state: rt.state as TaskLifecycle["runtime"]["state"],
-      reason: typeof rt.reason === "string" ? rt.reason : "",
-      lastObservedAt: typeof rt.lastObservedAt === "string" ? rt.lastObservedAt : null
-    }
+    state: value.state as TaskRuntimeInfo["state"],
+    reason: typeof value.reason === "string" ? value.reason : "",
+    lastObservedAt: typeof value.lastObservedAt === "string" ? value.lastObservedAt : null
   };
 }
 
@@ -70,7 +64,7 @@ export function parseTaskMeta(value: unknown): TaskMeta {
     schemaVersion: 1,
     id: requireString(value, "id"),
     status: value.status,
-    lifecycle: parseLifecycle(value.lifecycle),
+    runtime: parseRuntime(value.runtime),
     branch: requireString(value, "branch"),
     worktreePath: requireString(value, "worktreePath"),
     taskPath: requireString(value, "taskPath"),

@@ -12,7 +12,7 @@ import {
   type GlobalWorkspaceEntry
 } from "../global-index.js";
 import { initializeStore, initializeWorkspace } from "../task-store.js";
-import { addWorkspaceTarget, listWorkspaceTargets } from "../workspace-targets.js";
+import { addWorkspaceRepo, listWorkspaceRepos } from "../workspace-repos.js";
 
 export interface InitWorkspaceOptions {
   register?: boolean;
@@ -26,8 +26,8 @@ export function initializeCurrentWorkspace(start = process.cwd(), options: InitW
   initializeWorkspace(paths);
   if (fs.existsSync(path.join(paths.root, ".git"))) {
     initializeStore(paths);
-    if (listWorkspaceTargets(paths).length === 0) {
-      addWorkspaceTarget(paths, { id: "app", repoPath: ".", kind: "repo" });
+    if (listWorkspaceRepos(paths).length === 0) {
+      addWorkspaceRepo(paths, { id: "app", repoPath: ".", kind: "repo" });
     }
   }
 

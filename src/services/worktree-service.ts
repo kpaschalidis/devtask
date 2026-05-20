@@ -18,7 +18,7 @@ export function listWorktrees(paths: DevtaskPaths, workId: string): WorktreeSumm
 
   return materialization.tasks.map((task) => ({
     workId,
-    repoId: task.target,
+    repoId: task.repoId,
     taskId: task.taskId,
     branch: task.branch,
     path: task.worktreePath
