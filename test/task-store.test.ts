@@ -19,6 +19,12 @@ describe("task store", () => {
     expect(fs.existsSync(paths.worktreesDir)).toBe(true);
     expect(readConfig(paths)).toEqual({
       schemaVersion: 1,
+      tracker: {
+        provider: null
+      },
+      scm: {
+        provider: null
+      },
       codex: {
         model: null,
         fullAuto: true
@@ -77,6 +83,12 @@ describe("task store", () => {
     initializeStore(paths);
     writeConfig(paths, {
       schemaVersion: 1,
+      tracker: {
+        provider: null
+      },
+      scm: {
+        provider: null
+      },
       codex: {
         model: "gpt-5.2",
         fullAuto: true

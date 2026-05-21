@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import type { DevtaskConfig } from "../../infra/config.js";
 import { DevtaskError } from "../../infra/errors.js";
 import { runCommand, runCommandOrThrow } from "../../infra/process-runner.js";
 
@@ -72,10 +73,21 @@ export function parseRemoteUrl(remoteUrl: string): RemoteInfo {
 
 export async function preflightScmForPullRequest(
   worktreePath: string,
-  options: { draft: boolean }
+  options: { draft: boolean },
+  config?: DevtaskConfig
 ): Promise<ScmPreflight> {
   try {
     const remote = await detectRemoteInfo(worktreePath);
+    if (config?.scm.provider && config.scm.provider !== remote.provider) {
+      return {
+        provider: remote.provider,
+        access: "failed",
+        accessDetail: `workspace SCM provider is configured as ${config.scm.provider}, but the repo remote resolves to ${remote.provider}`,
+        clean: false,
+        commits: 0,
+        draftSupported: remote.provider === "github"
+      };
+    }
     const clean = !(await hasUncommittedChanges(worktreePath));
     const commits = await countBranchCommits(worktreePath);
     const draftSupported = remote.provider === "github";

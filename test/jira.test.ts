@@ -118,6 +118,8 @@ describe("jira source integration", () => {
     await fetchJiraIssue(
       {
         schemaVersion: 1,
+        tracker: { provider: "jira" },
+        scm: { provider: null },
         codex: { model: null, fullAuto: true },
         runtime: { mode: "plain", backend: null },
         runtimeConfigured: false,
@@ -161,6 +163,8 @@ describe("jira source integration", () => {
     const issue = await fetchJiraIssue(
       {
         schemaVersion: 1,
+        tracker: { provider: "jira" },
+        scm: { provider: null },
         codex: { model: null, fullAuto: true },
         runtime: { mode: "plain", backend: null },
         runtimeConfigured: false,
@@ -192,6 +196,8 @@ describe("jira source integration", () => {
     await expect(
       checkJiraAuth({
         schemaVersion: 1,
+        tracker: { provider: "jira" },
+        scm: { provider: null },
         codex: { model: null, fullAuto: true },
         runtime: { mode: "plain", backend: null },
         runtimeConfigured: false,

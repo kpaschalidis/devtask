@@ -23,6 +23,12 @@ The active config schema is:
 ```json
 {
   "schemaVersion": 1,
+  "tracker": {
+    "provider": null
+  },
+  "scm": {
+    "provider": null
+  },
   "codex": {
     "model": null,
     "fullAuto": true
@@ -42,6 +48,20 @@ The active config schema is:
 ```
 
 ## Meaning Of Current Fields
+
+### `tracker`
+
+- `provider`
+  - currently `jira` or `null`
+
+This controls tracker identity at the workspace level.
+
+### `scm`
+
+- `provider`
+  - currently `github`, `bitbucket`, `gitlab`, or `null`
+
+This controls expected SCM identity at the workspace level.
 
 ### `codex`
 
@@ -63,7 +83,7 @@ Tracks whether the runtime choice was explicitly configured by the user.
 
 ### `jira`
 
-Workspace-level Jira defaults:
+Workspace-level Jira settings:
 - `baseUrl`
 - `email`
 - `cloudId`
@@ -78,6 +98,8 @@ Current config commands:
 
 ```bash
 devtask config show
+devtask config tracker [provider]
+devtask config scm [provider]
 devtask config model [model]
 devtask config jira [--base-url <url>] [--email <email>] [--cloud-id <cloudId>]
 ```

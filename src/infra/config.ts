@@ -3,6 +3,12 @@ import type { DevtaskPaths } from "./paths.js";
 
 export interface DevtaskConfig {
   schemaVersion: 1;
+  tracker: {
+    provider: "jira" | null;
+  };
+  scm: {
+    provider: "github" | "bitbucket" | "gitlab" | null;
+  };
   codex: {
     model: string | null;
     fullAuto: boolean;
@@ -22,6 +28,12 @@ export interface DevtaskConfig {
 
 export const DEFAULT_CONFIG: DevtaskConfig = {
   schemaVersion: 1,
+  tracker: {
+    provider: null
+  },
+  scm: {
+    provider: null
+  },
   codex: {
     model: null,
     fullAuto: true
@@ -45,15 +57,18 @@ export function readConfig(paths: DevtaskPaths): DevtaskConfig {
   }
 
   const value = JSON.parse(fs.readFileSync(paths.configPath, "utf8")) as Partial<DevtaskConfig>;
+  const jira = parseJiraConfig(value.jira);
   return {
     schemaVersion: 1,
+    tracker: parseTrackerConfig(value.tracker, jira),
+    scm: parseScmConfig(value.scm),
     codex: {
       model: typeof value.codex?.model === "string" ? value.codex.model : null,
       fullAuto: typeof value.codex?.fullAuto === "boolean" ? value.codex.fullAuto : true
     },
     runtime: parseRuntimeConfig(value.runtime),
     runtimeConfigured: value.runtimeConfigured === true,
-    jira: parseJiraConfig(value.jira),
+    jira,
     verify: Array.isArray(value.verify) ? value.verify.filter((item): item is string => typeof item === "string") : []
   };
 }
@@ -102,6 +117,33 @@ function parseRuntimeConfig(value: unknown): DevtaskConfig["runtime"] {
   return {
     mode: "plain",
     backend: null
+  };
+}
+
+function parseTrackerConfig(value: unknown, jira: DevtaskConfig["jira"]): DevtaskConfig["tracker"] {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const record = value as { provider?: unknown };
+    return {
+      provider: record.provider === "jira" ? "jira" : null
+    };
+  }
+
+  return {
+    provider: jira.baseUrl || jira.email || jira.cloudId ? "jira" : null
+  };
+}
+
+function parseScmConfig(value: unknown): DevtaskConfig["scm"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_CONFIG.scm;
+  }
+
+  const record = value as { provider?: unknown };
+  return {
+    provider:
+      record.provider === "github" || record.provider === "bitbucket" || record.provider === "gitlab"
+        ? record.provider
+        : null
   };
 }
 

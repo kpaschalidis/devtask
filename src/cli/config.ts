@@ -18,6 +18,62 @@ export function registerConfigCommands(program: Command): void {
     });
 
   config
+    .command("tracker")
+    .description("Show or set the workspace tracker provider.")
+    .argument("[provider]")
+    .action((provider?: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const current = readConfig(paths);
+        if (!provider) {
+          console.log(current.tracker.provider ?? "-");
+          return;
+        }
+        const normalized = provider === "none" ? null : provider;
+        if (normalized !== "jira" && normalized !== null) {
+          throw new Error("Tracker provider must be jira or none");
+        }
+        writeConfig(paths, {
+          ...current,
+          tracker: {
+            provider: normalized
+          }
+        });
+        console.log(`Tracker: ${normalized ?? "none"}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  config
+    .command("scm")
+    .description("Show or set the default workspace SCM provider.")
+    .argument("[provider]")
+    .action((provider?: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const current = readConfig(paths);
+        if (!provider) {
+          console.log(current.scm.provider ?? "-");
+          return;
+        }
+        const normalized = provider === "none" ? null : provider;
+        if (normalized !== "github" && normalized !== "bitbucket" && normalized !== "gitlab" && normalized !== null) {
+          throw new Error("SCM provider must be github, bitbucket, gitlab, or none");
+        }
+        writeConfig(paths, {
+          ...current,
+          scm: {
+            provider: normalized
+          }
+        });
+        console.log(`SCM: ${normalized ?? "none"}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  config
     .command("model")
     .description("Show or set the default agent model.")
     .argument("[model]")
@@ -58,6 +114,9 @@ export function registerConfigCommands(program: Command): void {
         }
         writeConfig(paths, {
           ...current,
+          tracker: {
+            provider: "jira"
+          },
           jira: {
             baseUrl: options.baseUrl ?? current.jira.baseUrl,
             email: options.email ?? current.jira.email,

@@ -63,6 +63,8 @@ export async function runPlanAgent(
   const beforeStatus = await readGitStatus(meta.worktreePath);
   const runner = createDefaultAgentRunner({
     schemaVersion: 1,
+    tracker: { provider: null },
+    scm: { provider: null },
     codex: { model: options.model ?? null, fullAuto: options.fullAuto !== false },
     runtime: { mode: "attachable", backend: "tmux" },
     runtimeConfigured: false,

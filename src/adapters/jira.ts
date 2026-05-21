@@ -47,6 +47,9 @@ export interface JiraAuth {
 
 export function assertJiraConfigured(config: DevtaskConfig): JiraAuth {
   const token = process.env.JIRA_API_TOKEN;
+  if (config.tracker.provider && config.tracker.provider !== "jira") {
+    throw new DevtaskError(`Workspace tracker is configured as ${config.tracker.provider}, not jira.`);
+  }
   if (!config.jira.baseUrl || !config.jira.email) {
     throw new DevtaskError("Jira is not configured. Run devtask config jira --base-url <url> --email <email>.");
   }

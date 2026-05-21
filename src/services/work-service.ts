@@ -396,6 +396,7 @@ export async function createWorkPullRequests(
   options: { draft?: boolean } = {}
 ): Promise<PullRequestWorkResult> {
   const item = getWorkItem(paths, workId);
+  const workspaceConfig = readConfig(paths);
   const materialization = requireMaterialization(paths, workId);
   const multiRepo = materialization.tasks.length > 1;
   const tasks: PullRequestTaskResult[] = [];
@@ -404,7 +405,7 @@ export async function createWorkPullRequests(
     const repoPaths = resolvePaths(task.repoPath);
     const metaPath = taskMetaPath(repoPaths, task.taskId);
     const meta = readTaskMeta(metaPath);
-    const preflight = await preflightScmForPullRequest(task.worktreePath, { draft: options.draft === true });
+    const preflight = await preflightScmForPullRequest(task.worktreePath, { draft: options.draft === true }, workspaceConfig);
 
     if (meta.prUrl) {
       tasks.push({
@@ -459,12 +460,16 @@ export async function createWorkPullRequests(
     }
 
     try {
-      const prUrl = await createProviderPullRequest(task.worktreePath, {
-        title: buildPullRequestTitle(item, task.repoId, multiRepo),
-        body: buildPullRequestBody(item, task.repoId),
-        draft: options.draft === true,
-        branch: task.branch
-      });
+      const prUrl = await createProviderPullRequest(
+        task.worktreePath,
+        {
+          title: buildPullRequestTitle(item, task.repoId, multiRepo),
+          body: buildPullRequestBody(item, task.repoId),
+          draft: options.draft === true,
+          branch: task.branch
+        },
+        workspaceConfig
+      );
       writeTaskMeta(metaPath, {
         ...meta,
         prUrl,
@@ -502,6 +507,7 @@ export async function createWorkPullRequests(
 }
 
 export async function checkWorkCi(paths: DevtaskPaths, workId: string): Promise<CiWorkResult> {
+  const workspaceConfig = readConfig(paths);
   const materialization = requireMaterialization(paths, workId);
   const tasks: CiTaskResult[] = [];
 
@@ -524,7 +530,7 @@ export async function checkWorkCi(paths: DevtaskPaths, workId: string): Promise<
     }
 
     try {
-      const result = await checkProviderCi(task.worktreePath, meta.prUrl, task.branch);
+      const result = await checkProviderCi(task.worktreePath, meta.prUrl, task.branch, workspaceConfig);
       writeTaskMeta(metaPath, {
         ...meta,
         updatedAt: new Date().toISOString()

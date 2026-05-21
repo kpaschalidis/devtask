@@ -52,6 +52,7 @@ Required:
 Checks:
 
 ```bash
+devtask config scm github
 gh --version
 gh auth status
 git remote get-url origin
@@ -63,6 +64,12 @@ Used by:
 
 - `devtask work pr <work-id>`
 - `devtask work ci <work-id>`
+
+Workspace config:
+
+```bash
+devtask config scm bitbucket
+```
 
 Required environment:
 
@@ -91,6 +98,12 @@ Used by:
 
 - `devtask work pr <work-id>`
 
+Workspace config:
+
+```bash
+devtask config scm gitlab
+```
+
 Required:
 
 - GitLab CLI `glab`
@@ -111,9 +124,10 @@ Used by:
 
 - `devtask work import jira <issue-key>`
 
-Required config:
+Workspace config:
 
 ```bash
+devtask config tracker jira
 devtask config jira \
   --base-url https://company.atlassian.net \
   --email you@company.com \
@@ -125,6 +139,10 @@ Required environment:
 ```bash
 export JIRA_API_TOKEN="<jira-api-token>"
 ```
+
+Summary:
+- workspace config chooses tracker and SCM identity
+- environment variables provide secrets
 
 ## Verify Commands
 

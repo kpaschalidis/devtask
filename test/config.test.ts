@@ -15,6 +15,8 @@ describe("config", () => {
       JSON.stringify(
         {
           schemaVersion: 1,
+          tracker: { provider: null },
+          scm: { provider: null },
           codex: {
             model: null,
             fullAuto: true
@@ -38,6 +40,8 @@ describe("config", () => {
     const paths = resolvePaths(repo);
     writeConfig(paths, {
       schemaVersion: 1,
+      tracker: { provider: null },
+      scm: { provider: null },
       codex: {
         model: null,
         fullAuto: true
@@ -63,6 +67,8 @@ describe("config", () => {
     const paths = resolvePaths(repo);
     writeConfig(paths, {
       schemaVersion: 1,
+      tracker: { provider: null },
+      scm: { provider: null },
       codex: {
         model: null,
         fullAuto: true
@@ -91,6 +97,12 @@ describe("config", () => {
       paths.configPath,
       JSON.stringify({
         schemaVersion: 1,
+        tracker: {
+          provider: "jira"
+        },
+        scm: {
+          provider: null
+        },
         jira: {
           baseUrl: "https://example.atlassian.net/",
           email: "dev@example.com",
@@ -99,6 +111,9 @@ describe("config", () => {
       })
     );
 
+    expect(readConfig(paths).tracker).toEqual({
+      provider: "jira"
+    });
     expect(readConfig(paths).jira).toEqual({
       baseUrl: "https://example.atlassian.net",
       email: "dev@example.com",
