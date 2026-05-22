@@ -60,6 +60,13 @@ If you want Cursor Agent instead of the default Codex runner:
 devtask config agent cursor
 ```
 
+To smoke-test the configured agent integration:
+
+```bash
+devtask agent test
+devtask agent test "Reply with the current agent provider only."
+```
+
 Create or import work:
 
 ```bash

@@ -153,3 +153,12 @@ devtask config jira [--base-url <url>] [--email <email>] [--cloud-id <cloudId>]
 ```
 
 See [docs/architecture/config-contract.md](docs/architecture/config-contract.md) for the current config model.
+
+## Agent
+
+Test the configured agent integration:
+
+```bash
+devtask agent test
+devtask agent test "Reply with exactly OK"
+```
