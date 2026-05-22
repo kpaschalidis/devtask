@@ -36,8 +36,12 @@ interface CodexJsonlPayload {
   cwd?: string;
   model?: string;
   threadId?: string;
-  content?: string;
+  timestamp?: string;
   type?: string;
+  role?: string;
+  content_items?: Array<{ type?: string; text?: string }>;
+  contentParts?: Array<{ type?: string; text?: string }>;
+  content?: string | Array<{ type?: string; text?: string }>;
 }
 
 interface CodexJsonlLine {
@@ -51,6 +55,7 @@ interface SessionState {
   workspacePath: string;
   jsonlPath: string | null;
   jsonlOffset: number;
+  startedAtMs: number;
 }
 
 // ─── tmux helpers (adapted from ao packages/plugins/runtime-tmux/src/index.ts) ─
@@ -189,7 +194,7 @@ function buildCodexLaunchCommand(binary: string, options: AgentStartOptions, fal
   }
   const model = options.model ?? fallbackModel ?? null;
   if (model) parts.push('--model', shellEscape(model));
-  return parts.join(' ');
+  return `${buildAgentEnvResetCommand()}\n${parts.join(' ')}`;
 }
 
 // ─── JSONL scanning (from ao packages/plugins/agent-codex) ───────────────────
@@ -262,57 +267,129 @@ function getPayload(entry: CodexJsonlLine): CodexJsonlPayload {
   return entry.payload ?? (entry as unknown as CodexJsonlPayload);
 }
 
+function extractAssistantText(entry: CodexJsonlLine, payload: CodexJsonlPayload): string | null {
+  if ((entry.type === 'response_item' || entry.payload?.type === 'message') && payload.role === 'assistant') {
+    const contentItems = Array.isArray(payload.content)
+      ? payload.content
+      : Array.isArray(payload.content_items)
+        ? payload.content_items
+        : Array.isArray(payload.contentParts)
+          ? payload.contentParts
+          : [];
+
+    const text = contentItems
+      .filter((item) => item?.type === 'output_text' && typeof item.text === 'string' && item.text)
+      .map((item) => item.text!)
+      .join('');
+
+    if (text) return text;
+  }
+
+  if (typeof payload.content === 'string' && payload.content) {
+    return payload.content;
+  }
+
+  return null;
+}
+
 /**
  * Check if the first few JSONL records of a session file contain a session_meta
  * entry matching the given workspace path. Reads only the first N lines to avoid
  * loading potentially huge rollout files (100 MB+).
  */
-async function sessionFileMatchesCwd(filePath: string, workspacePath: string): Promise<boolean> {
+interface CodexSessionMeta {
+  cwd: string | null;
+  timestampMs: number | null;
+}
+
+async function readSessionMeta(filePath: string): Promise<CodexSessionMeta | null> {
   try {
     const lines = await readJsonlPrefixLines(filePath, SESSION_MATCH_SCAN_LINE_LIMIT);
     for (const line of lines) {
       try {
         const entry = JSON.parse(line) as CodexJsonlLine;
         const payload = getPayload(entry);
-        if (entry.type === 'session_meta' && payload.cwd === workspacePath) return true;
+        if (entry.type === 'session_meta') {
+          const timestampValue = typeof payload.timestamp === 'string' ? Date.parse(payload.timestamp) : Number.NaN;
+          return {
+            cwd: typeof payload.cwd === 'string' ? payload.cwd : null,
+            timestampMs: Number.isFinite(timestampValue) ? timestampValue : null
+          };
+        }
       } catch { /* skip malformed lines */ }
     }
   } catch { /* unreadable file */ }
-  return false;
+  return null;
 }
 
 /**
  * Find the most recently modified Codex session JSONL file whose session_meta
  * cwd matches the given workspace path. Scans ~/.codex/sessions/ recursively.
  */
-async function findCodexSessionFile(workspacePath: string): Promise<string | null> {
+async function findCodexSessionFile(workspacePath: string, startedAtMs?: number): Promise<string | null> {
   const files = await collectJsonlFiles(CODEX_SESSIONS_DIR);
-  let best: { path: string; mtime: number } | null = null;
+  let best: { path: string; score: number; mtime: number } | null = null;
 
   for (const f of files) {
-    if (await sessionFileMatchesCwd(f, workspacePath)) {
+    const meta = await readSessionMeta(f);
+    if (!meta || meta.cwd !== workspacePath) {
+      continue;
+    }
+
+    try {
+      const s = await stat(f);
+      const timestampMs = meta.timestampMs;
+      const score =
+        startedAtMs !== undefined && timestampMs !== null
+          ? Math.abs(timestampMs - startedAtMs)
+          : Number.MAX_SAFE_INTEGER - s.mtimeMs;
+
+      if (
+        !best ||
+        score < best.score ||
+        (score === best.score && s.mtimeMs > best.mtime)
+      ) {
+        best = { path: f, score, mtime: s.mtimeMs };
+      }
+    } catch { /* skip if stat fails */ }
+  }
+
+  if (startedAtMs !== undefined && best && best.score > 60_000) {
+    let fallbackByMtime: { path: string; mtime: number } | null = null;
+    for (const f of files) {
+      const meta = await readSessionMeta(f);
+      if (!meta || meta.cwd !== workspacePath) continue;
       try {
         const s = await stat(f);
-        if (!best || s.mtimeMs > best.mtime) best = { path: f, mtime: s.mtimeMs };
+        if (!fallbackByMtime || s.mtimeMs > fallbackByMtime.mtime) {
+          fallbackByMtime = { path: f, mtime: s.mtimeMs };
+        }
       } catch { /* skip if stat fails */ }
     }
+    return fallbackByMtime?.path ?? best.path;
   }
+
   return best?.path ?? null;
 }
 
 /** 30s TTL cache to avoid double scans within the same refresh cycle */
 const sessionFileCache = new Map<string, { path: string | null; expiry: number }>();
 
-async function findSessionFileCached(workspacePath: string): Promise<string | null> {
-  const cached = sessionFileCache.get(workspacePath);
+function buildSessionCacheKey(workspacePath: string, startedAtMs?: number): string {
+  return `${workspacePath}::${startedAtMs ?? "none"}`;
+}
+
+async function findSessionFileCached(workspacePath: string, startedAtMs?: number): Promise<string | null> {
+  const cacheKey = buildSessionCacheKey(workspacePath, startedAtMs);
+  const cached = sessionFileCache.get(cacheKey);
   if (cached && Date.now() < cached.expiry) return cached.path;
-  const result = await findCodexSessionFile(workspacePath);
-  sessionFileCache.set(workspacePath, { path: result, expiry: Date.now() + SESSION_FILE_CACHE_TTL_MS });
+  const result = await findCodexSessionFile(workspacePath, startedAtMs);
+  sessionFileCache.set(cacheKey, { path: result, expiry: Date.now() + SESSION_FILE_CACHE_TTL_MS });
   return result;
 }
 
-function invalidateSessionFileCache(workspacePath: string): void {
-  sessionFileCache.delete(workspacePath);
+function invalidateSessionFileCache(workspacePath: string, startedAtMs?: number): void {
+  sessionFileCache.delete(buildSessionCacheKey(workspacePath, startedAtMs));
 }
 
 /**
@@ -389,6 +466,10 @@ async function readJsonlSince(
   }
 }
 
+function buildAgentEnvResetCommand(): string {
+  return 'unset CODEX_THREAD_ID CODEX_INTERNAL_ORIGINATOR_OVERRIDE CODEX_CI CODEX_SHELL';
+}
+
 // ─── CodexAgentRunner ─────────────────────────────────────────────────────────
 
 export interface CodexAgentRunnerConfig {
@@ -423,7 +504,12 @@ export class CodexAgentRunner implements AgentRunner {
     const launchCommand = buildCodexLaunchCommand(binary, options, this.config.model);
     await tmuxSendLaunchCommand(sessionName, launchCommand);
 
-    this.sessionStates.set(sessionName, { workspacePath: options.workspacePath, jsonlPath: null, jsonlOffset: 0 });
+    this.sessionStates.set(sessionName, {
+      workspacePath: options.workspacePath,
+      jsonlPath: null,
+      jsonlOffset: 0,
+      startedAtMs: Date.now()
+    });
 
     return { id: sessionName, threadId: '' };
   }
@@ -451,11 +537,11 @@ export class CodexAgentRunner implements AgentRunner {
     // session_meta (cwd, threadId). Invalidate cache so we don't return a stale
     // path from a previous run in the same workspace.
     if (!state.jsonlPath) {
-      invalidateSessionFileCache(state.workspacePath);
+      invalidateSessionFileCache(state.workspacePath, state.startedAtMs);
       const waitStart = Date.now();
       while (!state.jsonlPath && Date.now() - waitStart < JSONL_WAIT_MAX_MS) {
         await sleep(JSONL_WAIT_POLL_MS);
-        state.jsonlPath = await findSessionFileCached(state.workspacePath);
+        state.jsonlPath = await findSessionFileCached(state.workspacePath, state.startedAtMs);
       }
     }
 
@@ -528,6 +614,14 @@ export class CodexAgentRunner implements AgentRunner {
               }
               break;
 
+            case 'message': {
+              const text = extractAssistantText(entry, payload);
+              if (text) {
+                yield { kind: 'output', text };
+              }
+              break;
+            }
+
             case 'turn_complete':
             case 'turn_aborted':
               yield { kind: 'turn_complete' };
@@ -564,7 +658,7 @@ export class CodexAgentRunner implements AgentRunner {
 
     if (!(await tmuxIsAlive(session.id))) return 'unknown';
 
-    const sessionFile = state.jsonlPath ?? await findSessionFileCached(state.workspacePath);
+    const sessionFile = state.jsonlPath ?? await findSessionFileCached(state.workspacePath, state.startedAtMs);
     if (!sessionFile) return 'unknown';
 
     try {

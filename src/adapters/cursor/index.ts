@@ -58,7 +58,7 @@ export class CursorAgentRunner implements AgentRunner {
       .join("\n");
 
     const launchCommand = buildCursorLaunchCommand(options, this.config.model);
-    const scriptPath = writeLaunchScript(`${envLines}\n${launchCommand}`);
+    const scriptPath = writeLaunchScript(`${buildAgentEnvResetCommand()}\n${envLines}\n${launchCommand}`);
     sendLaunchCommand(sessionName, `bash ${shellEscape(scriptPath)}`);
 
     const ready = await waitForCursorReady(sessionName);
@@ -206,6 +206,10 @@ function buildCursorLaunchCommand(options: AgentStartOptions, fallbackModel?: st
     parts.push("--model", shellEscape(model));
   }
   return parts.join(" ");
+}
+
+function buildAgentEnvResetCommand(): string {
+  return "unset CODEX_THREAD_ID CODEX_INTERNAL_ORIGINATOR_OVERRIDE CODEX_CI CODEX_SHELL";
 }
 
 async function waitForCursorReady(sessionName: string): Promise<boolean> {

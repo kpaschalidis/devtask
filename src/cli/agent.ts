@@ -11,24 +11,16 @@ export function registerAgentCommands(program: Command): void {
     .description("Start the configured agent and optionally send a test prompt.")
     .argument("[message...]")
     .option("--model <model>", "Override the configured agent model")
-    .option("--stall-ms <ms>", "Fail if the agent goes idle for this long", parseIntegerOption)
     .option("--max-turn-ms <ms>", "Fail if the turn exceeds this duration", parseIntegerOption)
-    .action(async (messageParts: string[] | undefined, options: { model?: string; stallMs?: number; maxTurnMs?: number }) => {
+    .action(async (messageParts: string[] | undefined, options: { model?: string; maxTurnMs?: number }) => {
       try {
         const message = messageParts && messageParts.length > 0 ? messageParts.join(" ") : null;
         const result = await testAgentIntegration(resolveWorkspacePaths(), {
           message,
           model: options.model ?? null,
-          stallMs: options.stallMs,
           maxTurnMs: options.maxTurnMs,
           onOutput: (chunk) => process.stdout.write(chunk)
         });
-
-        if (result.response.trim().length === 0) {
-          console.log("");
-          console.log("Agent test completed with no visible response.");
-          return;
-        }
 
         console.log("");
         console.log("Agent test completed.");
