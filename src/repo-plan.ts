@@ -65,6 +65,7 @@ export async function runPlanAgent(
     schemaVersion: 1,
     tracker: { provider: null },
     scm: { provider: null },
+    agent: { provider: "codex" },
     codex: { model: options.model ?? null, fullAuto: options.fullAuto !== false },
     runtime: { mode: "attachable", backend: "tmux" },
     runtimeConfigured: false,

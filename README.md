@@ -20,7 +20,7 @@ It is built for setups with:
 
 - Node.js 22.x
 - Git with worktree support
-- Codex CLI installed and authenticated
+- Codex CLI or Cursor Agent CLI installed and authenticated
 - provider auth for PR/CI operations:
   - GitHub: `gh`
   - Bitbucket Cloud: `BITBUCKET_EMAIL` and `BITBUCKET_API_TOKEN`
@@ -52,6 +52,12 @@ Add repos to that workspace:
 ```bash
 devtask repo add backend ./backend --kind service
 devtask repo add web ./web --kind frontend
+```
+
+If you want Cursor Agent instead of the default Codex runner:
+
+```bash
+devtask config agent cursor
 ```
 
 Create or import work:

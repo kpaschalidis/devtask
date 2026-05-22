@@ -25,6 +25,9 @@ describe("task store", () => {
       scm: {
         provider: null
       },
+      agent: {
+        provider: "codex"
+      },
       codex: {
         model: null,
         fullAuto: true
@@ -88,6 +91,9 @@ describe("task store", () => {
       },
       scm: {
         provider: null
+      },
+      agent: {
+        provider: "codex"
       },
       codex: {
         model: "gpt-5.2",

@@ -28,6 +28,8 @@ The active config schema is:
   },
   "scm": {
     "provider": null
+  "agent": {
+    "provider": "codex"
   },
   "codex": {
     "model": null,
@@ -63,12 +65,18 @@ This controls tracker identity at the workspace level.
 
 This controls expected SCM identity at the workspace level.
 
+### `agent`
+
+- `provider`
+  - selects the default agent runner
+  - supported values: `codex`, `cursor`
+
 ### `codex`
 
 - `model`
-  - default model for Codex-backed agent execution
+  - default model for agent execution
 - `fullAuto`
-  - whether Codex bootstrap commands should use the full-auto mode
+  - whether agent bootstrap commands should use auto-approval mode when supported by the selected provider
 
 ### `runtime`
 
@@ -100,6 +108,7 @@ Current config commands:
 devtask config show
 devtask config tracker [provider]
 devtask config scm [provider]
+devtask config agent [codex|cursor]
 devtask config model [model]
 devtask config jira [--base-url <url>] [--email <email>] [--cloud-id <cloudId>]
 ```

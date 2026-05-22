@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildCodexCommand } from "../src/adapters/codex/command.js";
+import { buildCursorCommand } from "../src/adapters/cursor/command.js";
 import { hasRuntimeConfig, readConfig, writeConfig } from "../src/infra/config.js";
 import { resolvePaths } from "../src/infra/paths.js";
 import { makeTempRepo } from "./helpers.js";
@@ -17,6 +18,9 @@ describe("config", () => {
           schemaVersion: 1,
           tracker: { provider: null },
           scm: { provider: null },
+          agent: {
+            provider: "codex"
+          },
           codex: {
             model: null,
             fullAuto: true
@@ -42,6 +46,9 @@ describe("config", () => {
       schemaVersion: 1,
       tracker: { provider: null },
       scm: { provider: null },
+      agent: {
+        provider: "codex"
+      },
       codex: {
         model: null,
         fullAuto: true
@@ -69,6 +76,9 @@ describe("config", () => {
       schemaVersion: 1,
       tracker: { provider: null },
       scm: { provider: null },
+      agent: {
+        provider: "codex"
+      },
       codex: {
         model: null,
         fullAuto: true
@@ -103,6 +113,9 @@ describe("config", () => {
         scm: {
           provider: null
         },
+        agent: {
+          provider: "codex"
+        },
         jira: {
           baseUrl: "https://example.atlassian.net/",
           email: "dev@example.com",
@@ -114,10 +127,33 @@ describe("config", () => {
     expect(readConfig(paths).tracker).toEqual({
       provider: "jira"
     });
+    expect(readConfig(paths).agent).toEqual({
+      provider: "codex"
+    });
     expect(readConfig(paths).jira).toEqual({
       baseUrl: "https://example.atlassian.net",
       email: "dev@example.com",
       cloudId: "cloud-123"
+    });
+  });
+
+  it("defaults missing agent config to codex", async () => {
+    const repo = await makeTempRepo();
+    const paths = resolvePaths(repo);
+    fs.mkdirSync(paths.baseDir, { recursive: true });
+    fs.writeFileSync(
+      paths.configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        codex: {
+          model: null,
+          fullAuto: true
+        }
+      })
+    );
+
+    expect(readConfig(paths).agent).toEqual({
+      provider: "codex"
     });
   });
 
@@ -130,5 +166,11 @@ describe("config", () => {
 
     expect(command).toContain("--add-dir \"$DEVTASK_TASK_DIR\"");
     expect(command).toContain("--add-dir '/tmp/repo task/.devtask/tasks/example'");
+  });
+
+  it("can build Cursor commands with prompt substitution", () => {
+    expect(buildCursorCommand({ model: "gpt-5.2" })).toBe(
+      'agent --force --sandbox disabled --approve-mcps --model gpt-5.2 -- "$(cat "$DEVTASK_TASK_PATH")"'
+    );
   });
 });

@@ -9,7 +9,7 @@ Use this as the practical setup checklist for the current `devtask` control-plan
 - push access to the repo remotes you plan to publish from
 - Node.js 22.x
 - npm from the same Node installation
-- Codex CLI installed and authenticated
+- Codex CLI or Cursor Agent CLI installed and authenticated
 
 Quick checks:
 
@@ -20,6 +20,7 @@ git --version
 git config user.name
 git config user.email
 codex --version
+agent --help
 ```
 
 ## tmux

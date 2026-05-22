@@ -147,6 +147,7 @@ Current config commands are minimal:
 devtask config show
 devtask config tracker [provider]
 devtask config scm [provider]
+devtask config agent [codex|cursor]
 devtask config model [model]
 devtask config jira [--base-url <url>] [--email <email>] [--cloud-id <cloudId>]
 ```

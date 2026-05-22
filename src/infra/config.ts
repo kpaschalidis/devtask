@@ -9,6 +9,9 @@ export interface DevtaskConfig {
   scm: {
     provider: "github" | "bitbucket" | "gitlab" | null;
   };
+  agent: {
+    provider: "codex" | "cursor";
+  };
   codex: {
     model: string | null;
     fullAuto: boolean;
@@ -33,6 +36,9 @@ export const DEFAULT_CONFIG: DevtaskConfig = {
   },
   scm: {
     provider: null
+  },
+  agent: {
+    provider: "codex"
   },
   codex: {
     model: null,
@@ -62,6 +68,7 @@ export function readConfig(paths: DevtaskPaths): DevtaskConfig {
     schemaVersion: 1,
     tracker: parseTrackerConfig(value.tracker, jira),
     scm: parseScmConfig(value.scm),
+    agent: parseAgentConfig(value.agent),
     codex: {
       model: typeof value.codex?.model === "string" ? value.codex.model : null,
       fullAuto: typeof value.codex?.fullAuto === "boolean" ? value.codex.fullAuto : true
@@ -70,6 +77,17 @@ export function readConfig(paths: DevtaskPaths): DevtaskConfig {
     runtimeConfigured: value.runtimeConfigured === true,
     jira,
     verify: Array.isArray(value.verify) ? value.verify.filter((item): item is string => typeof item === "string") : []
+  };
+}
+
+function parseAgentConfig(value: unknown): DevtaskConfig["agent"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_CONFIG.agent;
+  }
+
+  const record = value as { provider?: unknown };
+  return {
+    provider: record.provider === "cursor" ? "cursor" : "codex"
   };
 }
 

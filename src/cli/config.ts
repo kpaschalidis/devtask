@@ -74,6 +74,33 @@ export function registerConfigCommands(program: Command): void {
     });
 
   config
+    .command("agent")
+    .description("Show or set the default agent provider.")
+    .argument("[provider]")
+    .action((provider?: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const current = readConfig(paths);
+        if (!provider) {
+          console.log(current.agent.provider);
+          return;
+        }
+        if (provider !== "codex" && provider !== "cursor") {
+          throw new Error(`Unsupported agent provider: ${provider}`);
+        }
+        writeConfig(paths, {
+          ...current,
+          agent: {
+            provider
+          }
+        });
+        console.log(`Agent: ${provider}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  config
     .command("model")
     .description("Show or set the default agent model.")
     .argument("[model]")

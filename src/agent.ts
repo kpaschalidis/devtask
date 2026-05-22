@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { CodexAgentRunner } from "./adapters/codex/index.js";
+import { CursorAgentRunner } from "./adapters/cursor/index.js";
 import type { DevtaskConfig } from "./infra/config.js";
 import { captureOutputAsync, getForegroundCommand, isSessionAliveAsync, sendKeyAsync } from "./infra/tmux.js";
 
@@ -38,6 +39,7 @@ export interface AgentRunner {
   sendInput?(session: SessionHandle, message: string): Promise<void>;
   isAlive?(session: SessionHandle): Promise<boolean>;
   getActivityState?(session: SessionHandle): Promise<ActivityState>;
+  getSessionInfo?(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean; agentSessionId: string | null } | null>;
   stop?(session: SessionHandle): Promise<void>;
   buildStartCommand?(options: AgentStartOptions): string;
 }
@@ -48,6 +50,12 @@ export interface AgentPromptResult {
 }
 
 export function createDefaultAgentRunner(config: DevtaskConfig): AgentRunner {
+  if (config.agent.provider === "cursor") {
+    return new CursorAgentRunner({
+      model: config.codex.model ?? undefined
+    });
+  }
+
   return new CodexAgentRunner({
     model: config.codex.model ?? undefined
   });
@@ -114,10 +122,12 @@ export async function runAgentPrompt(
 }
 
 export const CODEX_PROCESS_NAME = "codex";
+export const CURSOR_PROCESS_NAME = "cursor";
 export const CLAUDE_PROCESS_NAME = "claude";
 
 const FOREGROUND_ALIASES: Record<string, string[]> = {
   codex: ["codex", "node"],
+  cursor: ["agent", "node"],
   claude: ["claude", "node"]
 };
 
