@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { CodexAgentRunner } from "./adapters/codex/index.js";
+import { buildCodexCommand } from "./adapters/codex/command.js";
 import { CursorAgentRunner } from "./adapters/cursor/index.js";
 import type { DevtaskConfig } from "./infra/config.js";
 import { captureOutputAsync, getForegroundCommand, isSessionAliveAsync, sendKeyAsync } from "./infra/tmux.js";
@@ -7,6 +8,8 @@ import { captureOutputAsync, getForegroundCommand, isSessionAliveAsync, sendKeyA
 export interface SessionHandle {
   id: string;
   threadId?: string | null;
+  homePath?: string | null;
+  sessionFilePath?: string | null;
 }
 
 export type ActivityState = "idle" | "active" | "waiting_input" | "errored" | "unknown";
@@ -53,6 +56,8 @@ export interface AgentPromptResult {
     agentSessionId: string | null;
     summary: string | null;
     summaryIsFallback: boolean | null;
+    homePath: string | null;
+    sessionFilePath: string | null;
   };
 }
 
@@ -69,6 +74,14 @@ export function createDefaultAgentRunner(config: DevtaskConfig): AgentRunner {
 }
 
 export function buildAgentBootstrapCommand(config: DevtaskConfig, options: AgentStartOptions): string {
+  if (config.agent.provider === "codex") {
+    return buildCodexCommand({
+      model: options.model ?? config.codex.model ?? null,
+      fullAuto: options.fullAuto,
+      skipGitRepoCheck: options.skipGitRepoCheck,
+      addDirs: options.addDirs
+    });
+  }
   const runner = createDefaultAgentRunner(config);
   return runner.buildStartCommand?.(options) ?? "agent-run";
 }
@@ -132,7 +145,9 @@ export async function runAgentPrompt(
         threadId: session.threadId ?? null,
         agentSessionId: sessionInfo?.agentSessionId ?? null,
         summary: sessionInfo?.summary ?? null,
-        summaryIsFallback: sessionInfo?.summaryIsFallback ?? null
+        summaryIsFallback: sessionInfo?.summaryIsFallback ?? null,
+        homePath: session.homePath ?? null,
+        sessionFilePath: session.sessionFilePath ?? null
       }
     };
   }

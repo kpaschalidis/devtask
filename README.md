@@ -97,6 +97,8 @@ devtask work compound APP-123
 
 `work materialize <work-id>` creates repo tasks and global workspace worktrees. `work execute <work-id>` launches or resumes the attachable coding sessions for those materialized tasks.
 
+Agent-backed phases such as `spec`, `plan`, `repo-plan`, and `review` run in dedicated persisted Codex session roots so they do not reuse the current interactive Codex thread. Their prompt, output, and session metadata can be inspected from stored phase-run records.
+
 Use the board to keep track of active work:
 
 ```bash

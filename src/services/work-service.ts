@@ -826,7 +826,9 @@ async function writeExecutePhaseRun(
       threadId: meta.agentThreadId,
       agentSessionId: meta.agentSessionId,
       summary: meta.resultSummary,
-      summaryIsFallback: true
+      summaryIsFallback: true,
+      homePath: null,
+      sessionFilePath: null
     },
     artifacts: {
       taskPath: meta.taskPath,
@@ -1097,8 +1099,10 @@ async function runWorkspaceRepoPlan(
   const runId = newRunId();
   const promptPath = path.join(phaseRunsDir, `${runId}.prompt.md`);
   const outputPath = path.join(phaseRunsDir, `${runId}.md`);
-  const runtimePlanPath = path.join(phaseRunsDir, `${runId}.plan.md`);
-  const resultPath = path.join(phaseRunsDir, `${runId}.result.json`);
+  const runtimeArtifactPrefix = path.join(repoPaths.root, `.devtask_repo_plan_${runId}`);
+  const runtimePlanPath = `${runtimeArtifactPrefix}.md`;
+  const runtimeStatePath = `${runtimeArtifactPrefix}.state.md`;
+  const resultPath = `${runtimeArtifactPrefix}.result.json`;
   const finalPlanPath = workItemRepoPlanPath(paths, item.id, repo.id);
   const taskDocument = buildWorkspaceRepoPlanTask(item, graphTask, repo);
   const stateDocument = `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${item.id}\n`;
@@ -1123,7 +1127,7 @@ async function runWorkspaceRepoPlan(
       DEVTASK_TASK_DIR: workItemDir(paths, item.id),
       DEVTASK_TASK_PATH: promptPath,
       DEVTASK_PLAN_PATH: runtimePlanPath,
-      DEVTASK_STATE_PATH: path.join(phaseRunsDir, `${runId}.state.md`),
+      DEVTASK_STATE_PATH: runtimeStatePath,
       DEVTASK_RESULT_PATH: resultPath
     }
   } as const;
@@ -1138,6 +1142,9 @@ async function runWorkspaceRepoPlan(
   const finishedAt = new Date().toISOString();
   persistSharedRepoPlan(paths, item.id, repo.id, runtimePlanPath);
   const blocked = readTaskResult(resultPath).status === "blocked";
+  removeIfExists(runtimePlanPath);
+  removeIfExists(runtimeStatePath);
+  removeIfExists(resultPath);
   const status: RepoPlanTaskResult["status"] =
     result.status === "completed" && readTextIfExists(finalPlanPath).trim()
       ? blocked ? "blocked" : "planned"
@@ -1446,6 +1453,16 @@ function readTextIfExists(filePath: string): string {
     return fs.readFileSync(filePath, "utf8");
   } catch {
     return "";
+  }
+}
+
+function removeIfExists(filePath: string): void {
+  try {
+    fs.unlinkSync(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
 }
 

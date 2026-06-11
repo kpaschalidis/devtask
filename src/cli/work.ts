@@ -219,7 +219,7 @@ export function registerWorkCommands(program: Command): void {
         if (inspection.latestPhaseRuns.length > 0) {
           console.log("");
           printTable(
-            ["PHASE", "REPO", "TASK", "STATUS", "SESSION", "THREAD", "PROMPT", "ARTIFACTS", "RUN_FILE"],
+            ["PHASE", "REPO", "TASK", "STATUS", "SESSION", "THREAD", "SESSION_FILE", "PROMPT", "ARTIFACTS", "RUN_FILE"],
             inspection.latestPhaseRuns.map((run) => [
               run.phase,
               run.repoId ?? "-",
@@ -227,6 +227,7 @@ export function registerWorkCommands(program: Command): void {
               run.status,
               run.transportSessionId ?? "-",
               run.threadId ?? "-",
+              run.sessionFilePath ?? "-",
               run.promptPath,
               Object.entries(run.artifacts).map(([name, artifactPath]) => `${name}=${artifactPath}`).join(", ") || "-",
               run.filePath

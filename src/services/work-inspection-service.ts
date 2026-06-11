@@ -33,6 +33,8 @@ export interface WorkInspection {
     threadId: string | null;
     agentSessionId: string | null;
     summary: string | null;
+    homePath: string | null;
+    sessionFilePath: string | null;
     artifacts: Record<string, string>;
   }>;
   problemTasks: Array<{
@@ -74,6 +76,8 @@ export function inspectWork(paths: DevtaskPaths, workId: string): WorkInspection
     threadId: run.session.threadId,
     agentSessionId: run.session.agentSessionId,
     summary: run.session.summary,
+    homePath: run.session.homePath ?? null,
+    sessionFilePath: run.session.sessionFilePath ?? null,
     artifacts: run.artifacts
   }));
 

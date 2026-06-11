@@ -9,6 +9,8 @@ export interface PhaseRunSessionMetadata {
   agentSessionId: string | null;
   summary: string | null;
   summaryIsFallback: boolean | null;
+  homePath: string | null;
+  sessionFilePath: string | null;
 }
 
 export interface PhaseRunRecord {
@@ -34,7 +36,9 @@ export function emptyPhaseRunSessionMetadata(): PhaseRunSessionMetadata {
     threadId: null,
     agentSessionId: null,
     summary: null,
-    summaryIsFallback: null
+    summaryIsFallback: null,
+    homePath: null,
+    sessionFilePath: null
   };
 }
 

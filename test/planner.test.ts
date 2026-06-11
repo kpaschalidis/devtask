@@ -59,7 +59,8 @@ describe("planner artifacts", () => {
     expect(prompt).toContain("You are in the devtask planning stage.");
     expect(prompt).toContain("The only file you may write is this worktree-local devtask plan artifact");
     expect(prompt).toContain(writablePlanPath);
-    expect(prompt).toContain(finalPlanPath);
+    expect(prompt).not.toContain(finalPlanPath);
+    expect(prompt).toContain("Devtask will persist that plan after the run.");
     expect(prompt).toContain("Do not update task state during planning");
     expect(prompt).toContain("Before writing the plan:");
     expect(prompt).toContain("Relevant Existing Files");

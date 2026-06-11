@@ -104,6 +104,7 @@ describe("work inspection service", () => {
       transportSessionId: "devtask-backend",
       threadId: "thread-123",
       agentSessionId: "agent-123",
+      sessionFilePath: null,
       artifacts: {
         resultPath: "/tmp/result.json"
       }

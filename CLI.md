@@ -98,6 +98,7 @@ Notes:
 - `plan` builds the global work plan
 - `repo-plan` is triggered manually and builds per-repo implementation plans for all affected repos in the work item
 - current `repo-plan` execution is sequential, not parallel
+- agent-backed phases use isolated persisted Codex session roots rather than the current interactive Codex thread
 - `materialize` creates repo task records and global workspace worktrees for all repos in the work item
 - `execute` launches or resumes the attachable execution sessions for those repo tasks
 - `check` and `verify` are deterministic
@@ -140,7 +141,7 @@ Current diagnostic workflow is:
 - `work board` for a compact repo-task status table
 - `work diagnose` for why the work or repo task is waiting and which artifact is missing
 - `work inspect` for stored artifact paths, latest phase runs, and blocked/failed/paused repo tasks
-- `work runs` and `work runs show` for persisted prompt/output/artifact/session traceability by phase
+- `work runs` and `work runs show` for persisted prompt/output/artifact/session traceability by phase, including isolated Codex session metadata
 
 ## Session
 

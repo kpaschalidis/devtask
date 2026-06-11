@@ -3,7 +3,7 @@ import type { TaskMeta } from "../types.js";
 export function buildRepoPlanPrompt(
   meta: Pick<TaskMeta, "id">,
   writablePlanPath: string,
-  finalPlanPath: string,
+  _finalPlanPath: string,
   task: string,
   state: string,
   memory = ""
@@ -24,7 +24,7 @@ export function buildRepoPlanPrompt(
     "Goal:",
     "Create an implementation plan only. Do not modify source code, tests, docs, config, package files, generated files, git state, or any other repository file.",
     `The only file you may write is this worktree-local devtask plan artifact: ${writablePlanPath}.`,
-    `Devtask will persist that plan to: ${finalPlanPath}.`,
+    "Devtask will persist that plan after the run. Do not write any other plan artifact path.",
     "Do not update task state during planning, even if the task instructions mention state updates.",
     "",
     "Before writing the plan:",
