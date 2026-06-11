@@ -94,7 +94,7 @@ Notes:
 - `plan` builds the global work plan
 - `repo-plan` is triggered manually and builds per-repo implementation plans for all affected repos in the work item
 - current `repo-plan` execution is sequential, not parallel
-- `materialize` creates repo tasks and worktrees for all repos in the work item
+- `materialize` creates repo task records and global workspace worktrees for all repos in the work item
 - `execute` launches or resumes the attachable execution sessions for those repo tasks
 - `check` and `verify` are deterministic
 - `review` is agent-backed
@@ -136,7 +136,7 @@ Current CLI support is narrower than the target direction:
 
 ## Worktree
 
-Repo-local worktrees:
+Worktrees:
 
 ```bash
 devtask worktree list <work-id>

@@ -13,7 +13,7 @@ It is built for setups with:
 - repo bindings
 - work items
 - shared specs and plans
-- repo-local worktrees
+- global worktrees
 - agent sessions
 
 ## Requirements
@@ -95,7 +95,7 @@ devtask work pr APP-123 --ready
 devtask work compound APP-123
 ```
 
-`work materialize <work-id>` creates repo tasks and worktrees. `work execute <work-id>` launches or resumes the attachable coding sessions for those materialized tasks.
+`work materialize <work-id>` creates repo tasks and global workspace worktrees. `work execute <work-id>` launches or resumes the attachable coding sessions for those materialized tasks.
 
 Use the board to keep track of active work:
 
@@ -139,7 +139,7 @@ Notes:
 - `spec` refines the ticket into a shared spec artifact
 - `plan` builds the global multi-repo plan
 - `repo-plan` builds per-repo implementation plans for all affected repos
-- `materialize` creates repo-local tasks and worktrees from the approved graph
+- `materialize` creates repo-local task records and global workspace worktrees from the approved graph
 - `execute` launches or resumes the repo-task coding sessions
 - `check` and `verify` are deterministic
 - `review` is agent-backed
@@ -159,7 +159,7 @@ Split into:
 - `local/` for local bindings, runtime state, results, reviews
 
 Repo-local state is intentionally minimal:
-- worktrees only
+- no required devtask runtime state for workspace flows
 
 See [docs/architecture/storage-model.md](docs/architecture/storage-model.md) and [docs/architecture/workspace-team-onboarding.md](docs/architecture/workspace-team-onboarding.md).
 

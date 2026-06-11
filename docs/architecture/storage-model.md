@@ -8,7 +8,7 @@ This document describes the current storage model implemented by `devtask`.
 - durable workspace artifacts live under `~/.devtask/workspaces/<workspaceId>/`
 - shared artifacts and local operational state are split
 - repo-local state stays minimal
-- worktrees remain repo-local execution surfaces
+- worktrees live under workspace-local global storage as execution surfaces
 
 ## Scope Model
 

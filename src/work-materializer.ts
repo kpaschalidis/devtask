@@ -91,7 +91,7 @@ export async function materializeWorkPlan(paths: DevtaskPaths, workItem: WorkIte
       goal: buildRepoTaskGoal(paths, workItem, graph, graphTask, repo),
       command: buildMaterializedTaskCommand(paths, repoPaths, workItem),
       repoRoot: repoPaths.root,
-      worktreePath: path.join(repoPaths.worktreesDir, graphTask.id)
+      worktreePath: path.join(paths.worktreesDir, graphTask.repoId, graphTask.id)
     });
     const hydratedMeta = hydrateMaterializedTaskPlan(paths, workItem.id, graphTask.repoId, storagePaths, meta);
     tasks.push(toMaterializedTask(graphTask, repo, hydratedMeta));

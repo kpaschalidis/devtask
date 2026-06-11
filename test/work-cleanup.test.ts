@@ -23,7 +23,7 @@ describe("work cleanup", () => {
     const repoPaths = resolvePaths(repo);
     const task = await createTask(workspacePaths, "cleanup-task", {
       repoRoot: repoPaths.root,
-      worktreePath: path.join(repoPaths.worktreesDir, "cleanup-task")
+      worktreePath: path.join(workspacePaths.worktreesDir, "app", "cleanup-task")
     });
     fs.writeFileSync(
       workItemMaterializationPath(workspacePaths, item.id),

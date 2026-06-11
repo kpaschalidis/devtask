@@ -45,7 +45,7 @@ describe("board status", () => {
     });
     const task = await createTask(paths, "work-123-backend", {
       repoRoot: repo,
-      worktreePath: path.join(repo, ".devtask", "worktrees", "work-123-backend")
+      worktreePath: path.join(paths.worktreesDir, "backend", "work-123-backend")
     });
     writeTaskMeta(path.join(paths.tasksDir, task.id, "meta.json"), {
       ...task,

@@ -33,6 +33,7 @@ devtask config runtime attachable
 devtask session list <work-id>
 devtask session attach <work-id> <repo-id>
 devtask session send <work-id> <repo-id> "message"
+devtask work execute <work-id>
 ```
 
 Without tmux, `devtask` can still manage work, but live attach/send behavior is limited.

@@ -17,7 +17,7 @@ import { readTaskMeta } from "../src/storage/meta.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("work materializer", () => {
-  it("approves a graph and creates repo-local task worktrees", async () => {
+  it("approves a graph and creates workspace-local task metadata with global worktrees", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-"));
     const repo = await makeTempRepo({ withCommit: true });
     const paths = resolveWorkspacePathsForInit(workspace);
@@ -68,7 +68,7 @@ describe("work materializer", () => {
     expect(fs.existsSync(workItemGraphSnapshotPath(paths, item.id))).toBe(true);
     expect(fs.existsSync(workItemMaterializationPath(paths, item.id))).toBe(true);
     expect(fs.existsSync(path.join(paths.tasksDir, "work-123-backend", "meta.json"))).toBe(true);
-    expect(fs.existsSync(path.join(repo, ".devtask", "worktrees", "work-123-backend"))).toBe(true);
+    expect(fs.existsSync(path.join(paths.worktreesDir, "backend", "work-123-backend"))).toBe(true);
     const meta = readTaskMeta(taskMetaPath(paths, "work-123-backend"));
 
     expect(meta.command).toContain(`--add-dir ${path.join(paths.workDir, item.id)}`);
