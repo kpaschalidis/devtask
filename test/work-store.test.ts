@@ -100,4 +100,21 @@ describe("work store", () => {
 
     expect(listWorkItems(paths).map((item) => item.id)).toEqual(["a-work", "z-work"]);
   });
+
+  it("parses expanded workflow statuses for persisted work items", () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-store-status-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    createManualWorkItem(paths, {
+      id: "manual-1",
+      title: "Improve onboarding"
+    });
+
+    const filePath = workItemJsonPath(paths, "manual-1");
+    const current = JSON.parse(fs.readFileSync(filePath, "utf8")) as { status: string };
+    current.status = "review-ready";
+    fs.writeFileSync(filePath, `${JSON.stringify(current, null, 2)}\n`);
+
+    expect(getWorkItem(paths, "manual-1").status).toBe("review-ready");
+  });
 });

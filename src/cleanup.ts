@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { DevtaskError } from "./infra/errors.js";
-import { taskDir, taskMetaPath, type DevtaskPaths } from "./infra/paths.js";
+import { resolvePaths, taskDir, taskMetaPath, type DevtaskPaths } from "./infra/paths.js";
 import { readTaskMeta } from "./storage/meta.js";
 import { runCommand, runCommandOrThrow } from "./infra/process-runner.js";
 
@@ -64,7 +64,7 @@ export async function cleanupTask(paths: DevtaskPaths, id: string, options: Clea
   }
 
   if (!options.keepWorktree && fs.existsSync(plan.worktreePath)) {
-    await removeWorktree(paths.root, plan.worktreePath, options.force === true);
+    await removeWorktree(resolvePaths(plan.worktreePath).root, plan.worktreePath, options.force === true);
   }
 
   if (!options.keepMetadata && fs.existsSync(plan.metadataPath)) {

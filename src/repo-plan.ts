@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { planMarkdownPath, taskDir, taskMetaPath } from "./infra/paths.js";
+import { planMarkdownPath, taskDir, taskMetaPath, workItemRepoPhaseRunsDir } from "./infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "./agent.js";
+import { writePhaseRunRecord, type PhaseRunSessionMetadata } from "./infra/phase-run.js";
+import { collectPhaseMemory } from "./improvement-memory.js";
 import { newRunId } from "./infra/run-record.js";
 import { runCommand } from "./infra/process-runner.js";
 import { readTaskMeta, writeTaskMeta } from "./storage/meta.js";
@@ -11,6 +13,7 @@ import { buildRepoPlanPrompt } from "./prompts/repo-plan.js";
 
 export interface PlanRecord {
   schemaVersion: 1;
+  phase: "repo-plan";
   planId: string;
   taskId: string;
   status: "planned" | "blocked" | "failed";
@@ -22,6 +25,7 @@ export interface PlanRecord {
   finishedAt: string;
   exitCode: number | null;
   worktreeChanged: boolean;
+  session: PhaseRunSessionMetadata;
 }
 
 export interface PlanAgentStart {
@@ -34,6 +38,11 @@ export interface PlanAgentStart {
 export async function runPlanAgent(
   paths: DevtaskPaths,
   meta: TaskMeta,
+  context: {
+    workspacePaths: DevtaskPaths;
+    workId: string;
+    repoId: string;
+  },
   options: {
     model?: string | null;
     fullAuto?: boolean;
@@ -57,7 +66,15 @@ export async function runPlanAgent(
   removeIfExists(runtimeResultPath);
   const task = readTextIfExists(meta.taskPath).trim();
   const state = readTextIfExists(meta.statePath).trim();
-  const prompt = buildRepoPlanPrompt(meta, runtimePlanPath, planPath, task || "(task file is empty)", state || "(state file is empty)");
+  const memory = collectPhaseMemory(context.workspacePaths, "planning", { repoId: context.repoId });
+  const prompt = buildRepoPlanPrompt(
+    meta,
+    runtimePlanPath,
+    planPath,
+    task || "(task file is empty)",
+    state || "(state file is empty)",
+    memory
+  );
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const beforeStatus = await readGitStatus(meta.worktreePath);
@@ -113,6 +130,7 @@ export async function runPlanAgent(
 
   const record: PlanRecord = {
     schemaVersion: 1,
+    phase: "repo-plan",
     planId,
     taskId: meta.id,
     status,
@@ -123,10 +141,29 @@ export async function runPlanAgent(
     startedAt,
     finishedAt,
     exitCode: result.status === "completed" ? 0 : null,
-    worktreeChanged
+    worktreeChanged,
+    session: result.session
   };
 
   fs.writeFileSync(path.join(plansDir, `${planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
+  writePhaseRunRecord(workItemRepoPhaseRunsDir(context.workspacePaths, context.workId, "repo-plan", context.repoId), {
+    schemaVersion: 1,
+    phase: "repo-plan",
+    runId: planId,
+    workId: context.workId,
+    repoId: context.repoId,
+    taskId: meta.id,
+    status,
+    promptPath,
+    outputPath,
+    startedAt,
+    finishedAt,
+    session: result.session,
+    artifacts: {
+      planPath
+    },
+    exitCode: result.status === "completed" ? 0 : null
+  });
   writeTaskMeta(taskMetaPath(paths, meta.id), {
     ...readTaskMeta(taskMetaPath(paths, meta.id)),
     status,

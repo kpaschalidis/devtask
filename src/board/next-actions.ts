@@ -2,7 +2,7 @@ import type { WorkItem } from "../storage/work-store.js";
 
 export function recommendWorkNextAction(
   item: WorkItem,
-  options: { hasSpec: boolean; hasPlan: boolean; isMaterialized: boolean; hasActiveSession: boolean }
+  options: { hasSpec: boolean; hasPlan: boolean; hasRepoPlans: boolean; isMaterialized: boolean; hasActiveSession: boolean }
 ): string {
   if (!options.hasSpec) {
     return `devtask work spec ${shellQuote(item.id)}`;
@@ -11,12 +11,15 @@ export function recommendWorkNextAction(
     return `devtask work plan ${shellQuote(item.id)}`;
   }
   if (!options.isMaterialized) {
+    if (options.hasRepoPlans) {
+      return `devtask work materialize ${shellQuote(item.id)}`;
+    }
     return `devtask work repo-plan ${shellQuote(item.id)}`;
   }
   if (options.hasActiveSession) {
     return `devtask work board ${shellQuote(item.id)}`;
   }
-  return `devtask session list ${shellQuote(item.id)}`;
+  return `devtask work execute ${shellQuote(item.id)}`;
 }
 
 function shellQuote(value: string): string {

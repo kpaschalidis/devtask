@@ -67,9 +67,9 @@ describe("work materializer", () => {
     });
     expect(fs.existsSync(workItemGraphSnapshotPath(paths, item.id))).toBe(true);
     expect(fs.existsSync(workItemMaterializationPath(paths, item.id))).toBe(true);
-    expect(fs.existsSync(path.join(repo, ".devtask", "tasks", "work-123-backend", "meta.json"))).toBe(true);
+    expect(fs.existsSync(path.join(paths.tasksDir, "work-123-backend", "meta.json"))).toBe(true);
     expect(fs.existsSync(path.join(repo, ".devtask", "worktrees", "work-123-backend"))).toBe(true);
-    const meta = readTaskMeta(taskMetaPath(resolvePaths(repo), "work-123-backend"));
+    const meta = readTaskMeta(taskMetaPath(paths, "work-123-backend"));
 
     expect(meta.command).toContain(`--add-dir ${path.join(paths.workDir, item.id)}`);
     expect(meta.command).toContain(`--add-dir ${path.dirname(item.source.artifact)}`);

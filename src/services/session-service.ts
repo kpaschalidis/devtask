@@ -1,5 +1,5 @@
 import type { DevtaskPaths } from "../infra/paths.js";
-import { resolvePaths } from "../infra/paths.js";
+import { taskStoragePaths } from "../infra/paths.js";
 import { DevtaskError } from "../infra/errors.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { attachTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionExists } from "../infra/tmux.js";
@@ -27,8 +27,8 @@ export async function listSessions(paths: DevtaskPaths, workId?: string): Promis
       continue;
     }
     for (const task of materialization.tasks) {
-      const repoPaths = resolvePaths(task.repoPath);
-      const meta = getTask(repoPaths, task.taskId);
+      const storagePaths = taskStoragePaths(paths, task.repoPath);
+      const meta = getTask(storagePaths, task.taskId);
       summaries.push({
         workId: id,
         repoId: task.repoId,

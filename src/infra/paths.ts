@@ -136,6 +136,13 @@ export function resolveWorkspacePathsForInit(start = process.cwd()): DevtaskPath
   return buildWorkspacePaths(root, deriveWorkspaceId(root));
 }
 
+export function taskStoragePaths(paths: DevtaskPaths, repoRoot?: string): DevtaskPaths {
+  if (paths.workspaceId) {
+    return paths;
+  }
+  return repoRoot ? resolvePaths(repoRoot) : paths;
+}
+
 export function taskDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.tasksDir, id);
 }
@@ -246,6 +253,14 @@ export function workItemSpecRunsDir(paths: DevtaskPaths, id: string): string {
 
 export function workItemPlanRunsDir(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "plans");
+}
+
+export function workItemPhaseRunsDir(paths: DevtaskPaths, id: string, phase: string): string {
+  return path.join(workItemLocalDir(paths, id), "phase-runs", phase);
+}
+
+export function workItemRepoPhaseRunsDir(paths: DevtaskPaths, id: string, phase: string, repoId: string): string {
+  return path.join(workItemPhaseRunsDir(paths, id, phase), repoId);
 }
 
 export function readWorkspaceMarker(root: string): WorkspaceMarker {

@@ -1,6 +1,13 @@
 import type { TaskMeta } from "../types.js";
 
-export function buildRepoPlanPrompt(meta: TaskMeta, writablePlanPath: string, finalPlanPath: string, task: string, state: string): string {
+export function buildRepoPlanPrompt(
+  meta: Pick<TaskMeta, "id">,
+  writablePlanPath: string,
+  finalPlanPath: string,
+  task: string,
+  state: string,
+  memory = ""
+): string {
   return [
     `Plan task ${meta.id}.`,
     "",
@@ -46,6 +53,7 @@ export function buildRepoPlanPrompt(meta: TaskMeta, writablePlanPath: string, fi
     "- Do not include code patches unless a small interface sketch is necessary to remove ambiguity.",
     "- Make the plan precise enough that another agent can implement it without re-discovering the whole task.",
     "",
+    ...(memory ? [memory, ""] : []),
     "If the task is blocked, write a short blocked plan and set $DEVTASK_RESULT_PATH to {\"status\":\"blocked\",\"reason\":\"...\"}.",
     "Otherwise, leave $DEVTASK_RESULT_PATH unchanged and ensure the plan file is complete."
   ].join("\n");

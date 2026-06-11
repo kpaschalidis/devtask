@@ -47,6 +47,13 @@ export interface AgentRunner {
 export interface AgentPromptResult {
   status: "completed" | "failed" | "input_required" | "stalled";
   error: string | null;
+  session: {
+    transportSessionId: string | null;
+    threadId: string | null;
+    agentSessionId: string | null;
+    summary: string | null;
+    summaryIsFallback: boolean | null;
+  };
 }
 
 export function createDefaultAgentRunner(config: DevtaskConfig): AgentRunner {
@@ -112,13 +119,23 @@ export async function runAgentPrompt(
       }
     }
   } finally {
+    const sessionInfo = await runner.getSessionInfo?.(session);
     await closeStream(output);
     if (runner.stop) {
       await runner.stop(session);
     }
+    return {
+      status,
+      error,
+      session: {
+        transportSessionId: session.id ?? null,
+        threadId: session.threadId ?? null,
+        agentSessionId: sessionInfo?.agentSessionId ?? null,
+        summary: sessionInfo?.summary ?? null,
+        summaryIsFallback: sessionInfo?.summaryIsFallback ?? null
+      }
+    };
   }
-
-  return { status, error };
 }
 
 export const CODEX_PROCESS_NAME = "codex";

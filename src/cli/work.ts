@@ -6,12 +6,14 @@ import {
   checkWork,
   checkWorkCi,
   cleanupWork,
+  compoundWork,
   createWorkPullRequests,
   createManualWork,
   getWork,
   importJiraWork,
   listWork,
   materializeWork,
+  executeWork,
   planWork,
   readWorkPlanRecord,
   repoPlanWork,
@@ -127,7 +129,15 @@ export function registerWorkCommands(program: Command): void {
           console.log(`Next: devtask work plan ${workId}`);
           return;
         }
-        console.log(record.status === "planned" ? `Next: devtask work repo-plan ${workId}` : `Next: devtask work plan ${workId}`);
+        const repoPlansDir = `${paths.workDir}/${workId}/repo-plans`;
+        const hasRepoPlans = fs.existsSync(repoPlansDir) && fs.readdirSync(repoPlansDir).some((entry) => entry.endsWith(".md"));
+        console.log(
+          record.status === "planned"
+            ? hasRepoPlans
+              ? `Next: devtask work materialize ${workId}`
+              : `Next: devtask work repo-plan ${workId}`
+            : `Next: devtask work plan ${workId}`
+        );
       } catch (error) {
         printError(error);
       }
@@ -203,6 +213,47 @@ export function registerWorkCommands(program: Command): void {
     });
 
   work
+    .command("execute")
+    .description("Launch or resume repo-task execution sessions for a work item.")
+    .argument("<work-id>")
+    .action(async (workId: string) => {
+      try {
+        const result = await executeWork(resolveWorkspacePaths(), workId);
+        printTable(
+          ["REPO", "TASK", "STATUS", "ACTION", "SESSION", "SUMMARY"],
+          result.tasks.map((task) => [
+            task.repoId,
+            task.taskId,
+            task.status,
+            task.action,
+            task.sessionName ?? "-",
+            task.summary ?? "-"
+          ])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("compound")
+    .description("Capture reusable learnings and workspace guidance from a completed work item.")
+    .argument("<work-id>")
+    .action(async (workId: string) => {
+      try {
+        const result = await compoundWork(resolveWorkspacePaths(), workId);
+        console.log(`Compound status: ${result.status}`);
+        console.log(`Planning guidance: ${result.sharedPlanningPath}`);
+        console.log(`Implementation guidance: ${result.sharedImplementationPath}`);
+        console.log(`Review guidance: ${result.sharedReviewPath}`);
+        console.log(`Patterns: ${result.sharedPatternsPath}`);
+        console.log(`Local notes: ${result.localNotesPath}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("review")
     .description("Run an agent-backed review for each repo task.")
     .argument("<work-id>")
@@ -269,7 +320,7 @@ export function registerWorkCommands(program: Command): void {
     });
 
   work
-    .command("implement")
+    .command("materialize")
     .description("Materialize repo-local tasks and worktrees for a work item.")
     .argument("<work-id>")
     .action(async (workId: string) => {

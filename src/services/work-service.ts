@@ -6,16 +6,23 @@ import type { DevtaskPaths } from "../infra/paths.js";
 import {
   resolvePaths,
   taskMetaPath,
+  taskStoragePaths,
   workItemDir,
   workItemRepoPlanPath,
   workItemResultsDir,
   workItemReviewDir,
+  workItemPhaseRunsDir,
+  workItemRepoPhaseRunsDir,
   workItemSpecPath,
   workItemSpecRunsDir
 } from "../infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
+import { writePhaseRunRecord } from "../infra/phase-run.js";
+import { newRunId } from "../infra/run-record.js";
+import { collectPhaseMemory } from "../improvement-memory.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
+import { readWorkGraph } from "../work-materializer.js";
 import { readLatestPlan, runPlanAgent, type PlanAgentStart, type PlanRecord } from "../repo-plan.js";
 import {
   readLatestWorkPlanRecord,
@@ -28,14 +35,27 @@ import {
   createManualWorkItem,
   getWorkItem,
   listWorkItems,
+  updateWorkItemStatus,
   type WorkItem
 } from "../storage/work-store.js";
+import { getWorkspaceRepo } from "../storage/workspace-repos.js";
 import { fetchJiraIssue, writeJiraSourceArtifacts } from "../adapters/jira.js";
 import { updateRecentWork } from "../storage/global-index.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { runCommand } from "../infra/process-runner.js";
+import {
+  createBareSession,
+  sendLaunchCommand,
+  tmuxSessionExists,
+  tmuxSessionName,
+  waitForTmuxSession,
+  writeLaunchScript
+} from "../infra/tmux.js";
+import { DevtaskError } from "../infra/errors.js";
 import { buildReviewPrompt } from "../prompts/review.js";
 import { buildSpecPrompt } from "../prompts/spec-plan.js";
+import { buildCompoundPrompt } from "../prompts/compound.js";
+import { buildRepoPlanPrompt } from "../prompts/repo-plan.js";
 import {
   checkProviderCi,
   countBranchCommits,
@@ -110,6 +130,7 @@ export interface RepoPlanTaskResult {
 }
 
 export interface WorkSpecResult {
+  runId: string;
   workId: string;
   status: "spec-ready" | "failed";
   specPath: string;
@@ -117,6 +138,13 @@ export interface WorkSpecResult {
   outputPath: string;
   exitCode: number | null;
   generatedAt: string;
+  session: {
+    transportSessionId: string | null;
+    threadId: string | null;
+    agentSessionId: string | null;
+    summary: string | null;
+    summaryIsFallback: boolean | null;
+  };
 }
 
 export interface ReviewTaskResult {
@@ -145,6 +173,35 @@ export interface RepoPlanWorkResult {
   workId: string;
   repoPlans: RepoPlanTaskResult[];
   materialized: boolean;
+  generatedAt: string;
+}
+
+export interface ExecuteTaskResult {
+  repoId: string;
+  taskId: string;
+  status: "running" | "paused" | "blocked" | "done" | "failed";
+  action: "started" | "reattached" | "resumed" | "skipped";
+  sessionName: string | null;
+  summary: string | null;
+  worktreePath: string;
+}
+
+export interface ExecuteWorkResult {
+  workId: string;
+  tasks: ExecuteTaskResult[];
+  generatedAt: string;
+}
+
+export interface CompoundWorkResult {
+  workId: string;
+  status: "completed" | "failed";
+  promptPath: string;
+  outputPath: string;
+  sharedPlanningPath: string;
+  sharedImplementationPath: string;
+  sharedReviewPath: string;
+  sharedPatternsPath: string;
+  localNotesPath: string;
   generatedAt: string;
 }
 
@@ -193,6 +250,7 @@ export async function planWork(
   const item = getWorkItem(paths, workId);
   requireWorkSpec(paths, workId);
   const record = await runWorkPlanner(paths, item, config, options);
+  updateWorkItemStatus(paths, workId, record.status === "planned" ? "planned" : "failed");
   await updateRecentWork(paths, item);
   return record;
 }
@@ -210,6 +268,7 @@ export async function specWork(
   const item = getWorkItem(paths, workId);
   const result = await runSpecAgent(paths, item, config, options);
   writeWorkResult(paths, workId, "spec", result);
+  updateWorkItemStatus(paths, workId, result.status === "spec-ready" ? "spec-ready" : "failed");
   await updateRecentWork(paths, item);
   return result;
 }
@@ -230,52 +289,105 @@ export async function repoPlanWork(
     throw new Error(`Global work plan is not ready for ${workId}. Run devtask work plan ${workId} first.`);
   }
 
-  const existingMaterialization = readWorkMaterialization(paths, workId);
-  const materialization = existingMaterialization ?? (await materializeWorkPlan(paths, item));
   const repoPlans: RepoPlanTaskResult[] = [];
+  const graph = readWorkGraph(paths, workId);
 
-  for (const task of materialization.tasks) {
-    const repoPaths = resolvePaths(task.repoPath);
-    const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
-    const latestPlan = readLatestPlan(repoPaths, task.taskId);
+  if (paths.workspaceId === null) {
+    const existingMaterialization = readWorkMaterialization(paths, workId);
+    const materialization = existingMaterialization ?? (await materializeWorkPlan(paths, item));
 
-    if (latestPlan && !options.refresh) {
+    for (const task of materialization.tasks) {
+      const storagePaths = taskStoragePaths(paths, task.repoPath);
+      const meta = readTaskMeta(taskMetaPath(storagePaths, task.taskId));
+      const latestPlan = readLatestPlan(storagePaths, task.taskId);
+
+      if (latestPlan && !options.refresh) {
+        repoPlans.push({
+          repoId: task.repoId,
+          taskId: task.taskId,
+          status: latestPlan.status,
+          planPath: latestPlan.planPath,
+          outputPath: latestPlan.outputPath,
+          worktreeChanged: latestPlan.worktreeChanged
+        });
+        continue;
+      }
+
+      const record = await runPlanAgent(storagePaths, meta, {
+        workspacePaths: paths,
+        workId,
+        repoId: task.repoId
+      }, {
+        model: meta.model,
+        fullAuto: true,
+        onStart: (start) => options.onRepoPlanStart?.(task.repoId, start),
+        onStdout: options.onStdout,
+        onStderr: options.onStderr
+      });
+      persistSharedRepoPlan(paths, workId, task.repoId, record.planPath);
       repoPlans.push({
         repoId: task.repoId,
         taskId: task.taskId,
-        status: latestPlan.status,
-        planPath: latestPlan.planPath,
-        outputPath: latestPlan.outputPath,
-        worktreeChanged: latestPlan.worktreeChanged
+        status: record.status,
+        planPath: record.planPath,
+        outputPath: record.outputPath,
+        worktreeChanged: record.worktreeChanged
+      });
+    }
+
+    const repoPlanResult = {
+      workId,
+      repoPlans,
+      materialized: existingMaterialization !== null,
+      generatedAt: new Date().toISOString()
+    };
+    writeWorkResult(paths, workId, "repo-plan", repoPlanResult);
+    updateWorkItemStatus(paths, workId, repoPlans.every((task) => task.status !== "failed") ? "planned" : "failed");
+    await updateRecentWork(paths, item);
+    return repoPlanResult;
+  }
+
+  for (const graphTask of graph.tasks) {
+    const repo = getWorkspaceRepo(paths, graphTask.repoId);
+    const repoPlanPath = workItemRepoPlanPath(paths, workId, graphTask.repoId);
+    const phaseRunsDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", graphTask.repoId);
+    const latestRun = readLatestPhaseRunStatus(phaseRunsDir);
+
+    if (latestRun && fs.existsSync(repoPlanPath) && !options.refresh) {
+      repoPlans.push({
+        repoId: graphTask.repoId,
+        taskId: graphTask.id,
+        status: latestRun.status as RepoPlanTaskResult["status"],
+        planPath: repoPlanPath,
+        outputPath: latestRun.outputPath,
+        worktreeChanged: false
       });
       continue;
     }
 
-    const record = await runPlanAgent(repoPaths, meta, {
-      model: meta.model,
-      fullAuto: true,
-      onStart: (start) => options.onRepoPlanStart?.(task.repoId, start),
+    const record = await runWorkspaceRepoPlan(paths, item, graphTask, repo, {
+      onStart: (start) => options.onRepoPlanStart?.(graphTask.repoId, start),
       onStdout: options.onStdout,
       onStderr: options.onStderr
     });
-    persistSharedRepoPlan(paths, workId, task.repoId, record.planPath);
     repoPlans.push({
-      repoId: task.repoId,
-      taskId: task.taskId,
+      repoId: graphTask.repoId,
+      taskId: graphTask.id,
       status: record.status,
       planPath: record.planPath,
       outputPath: record.outputPath,
-      worktreeChanged: record.worktreeChanged
+      worktreeChanged: false
     });
   }
 
   const repoPlanResult = {
     workId,
     repoPlans,
-    materialized: existingMaterialization !== null,
+    materialized: false,
     generatedAt: new Date().toISOString()
   };
   writeWorkResult(paths, workId, "repo-plan", repoPlanResult);
+  updateWorkItemStatus(paths, workId, repoPlans.every((task) => task.status !== "failed") ? "planned" : "failed");
   await updateRecentWork(paths, item);
   return repoPlanResult;
 }
@@ -283,8 +395,126 @@ export async function repoPlanWork(
 export async function materializeWork(paths: DevtaskPaths, workId: string): Promise<WorkMaterialization> {
   const item = getWorkItem(paths, workId);
   const materialization = await materializeWorkPlan(paths, item);
+  updateWorkItemStatus(paths, workId, "materialized");
   await updateRecentWork(paths, item);
   return materialization;
+}
+
+export async function executeWork(paths: DevtaskPaths, workId: string): Promise<ExecuteWorkResult> {
+  const item = getWorkItem(paths, workId);
+  const materialization = requireMaterialization(paths, workId);
+  const tasks: ExecuteTaskResult[] = [];
+
+  for (const task of materialization.tasks) {
+    tasks.push(await executeMaterializedTask(paths, workId, task));
+  }
+
+  const result: ExecuteWorkResult = {
+    workId,
+    tasks,
+    generatedAt: new Date().toISOString()
+  };
+  writeWorkResult(paths, workId, "execute", result);
+  updateWorkItemStatus(paths, workId, summarizeExecuteWorkStatus(result.tasks));
+  await updateRecentWork(paths, item);
+  return result;
+}
+
+export async function compoundWork(paths: DevtaskPaths, workId: string): Promise<CompoundWorkResult> {
+  const config = readConfig(paths);
+  const item = getWorkItem(paths, workId);
+  const archiveDir = path.join(paths.sharedDir, "improvement", "archive", workId);
+  const localArchiveDir = path.join(paths.localDir, "improvement", "archive", workId);
+  fs.mkdirSync(archiveDir, { recursive: true });
+  fs.mkdirSync(localArchiveDir, { recursive: true });
+  const runsDir = workItemPhaseRunsDir(paths, workId, "compound");
+  fs.mkdirSync(runsDir, { recursive: true });
+  const runId = newRunId();
+  const promptPath = path.join(runsDir, `${runId}.prompt.md`);
+  const outputPath = path.join(runsDir, `${runId}.md`);
+  const sharedPlanningPath = path.join(archiveDir, "planning.md");
+  const sharedImplementationPath = path.join(archiveDir, "implementation.md");
+  const sharedReviewPath = path.join(archiveDir, "review.md");
+  const sharedPatternsPath = path.join(archiveDir, "patterns.md");
+  const localNotesPath = path.join(localArchiveDir, "notes.md");
+  const specPath = fs.existsSync(workItemSpecPath(paths, workId)) ? workItemSpecPath(paths, workId) : null;
+  const planPath = fs.existsSync(path.join(paths.workDir, workId, "plan.md")) ? path.join(paths.workDir, workId, "plan.md") : null;
+  const graphPath = fs.existsSync(path.join(paths.workDir, workId, "graph.json")) ? path.join(paths.workDir, workId, "graph.json") : null;
+  const prompt = buildCompoundPrompt({
+    workId,
+    sourcePath: item.source.artifact,
+    specPath,
+    planPath,
+    graphPath,
+    repoPlansDir: path.join(paths.workDir, workId, "repo-plans"),
+    resultsDir: workItemResultsDir(paths, workId),
+    reviewsDir: workItemReviewDir(paths, workId),
+    sharedPlanningPath,
+    sharedImplementationPath,
+    sharedReviewPath,
+    sharedPatternsPath,
+    localNotesPath
+  });
+  fs.writeFileSync(promptPath, `${prompt}\n`);
+
+  const runner = createDefaultAgentRunner(config);
+  const startOptions = {
+    workspacePath: paths.root,
+    model: config.codex.model,
+    fullAuto: config.codex.fullAuto,
+    skipGitRepoCheck: true,
+    addDirs: [workItemDir(paths, workId), archiveDir, localArchiveDir],
+    env: {
+      ...process.env,
+      DEVTASK_TASK_DIR: workItemDir(paths, workId),
+      DEVTASK_TASK_PATH: promptPath
+    }
+  } as const;
+  const startedAt = new Date().toISOString();
+  const result = await runAgentPrompt(runner, startOptions, prompt, { outputPath });
+  const finishedAt = new Date().toISOString();
+  const status: CompoundWorkResult["status"] = result.status === "completed" ? "completed" : "failed";
+  writePhaseRunRecord(workItemPhaseRunsDir(paths, workId, "compound"), {
+    schemaVersion: 1,
+    phase: "compound",
+    runId,
+    workId,
+    repoId: null,
+    taskId: null,
+    status,
+    promptPath,
+    outputPath,
+    startedAt,
+    finishedAt,
+    session: result.session,
+    artifacts: {
+      sharedPlanningPath,
+      sharedImplementationPath,
+      sharedReviewPath,
+      sharedPatternsPath,
+      localNotesPath
+    },
+    exitCode: result.status === "completed" ? 0 : null
+  });
+
+  const compoundResult: CompoundWorkResult = {
+    workId,
+    status,
+    promptPath,
+    outputPath,
+    sharedPlanningPath,
+    sharedImplementationPath,
+    sharedReviewPath,
+    sharedPatternsPath,
+    localNotesPath,
+    generatedAt: finishedAt
+  };
+  writeWorkResult(paths, workId, "compound", compoundResult);
+  if (compoundResult.status === "completed") {
+    updateWorkItemStatus(paths, workId, "completed");
+  }
+  await updateRecentWork(paths, item);
+  return compoundResult;
 }
 
 export function getWorkMaterializationState(paths: DevtaskPaths, workId: string): WorkMaterialization | null {
@@ -329,6 +559,7 @@ export async function reviewWork(paths: DevtaskPaths, workId: string): Promise<R
     generatedAt: new Date().toISOString()
   };
   writeWorkResult(paths, workId, "review", result);
+  updateWorkItemStatus(paths, workId, summarizeReviewWorkStatus(result.tasks));
   return result;
 }
 
@@ -390,6 +621,229 @@ async function runDeterministicChecks(paths: DevtaskPaths, workId: string): Prom
   return result;
 }
 
+async function executeMaterializedTask(
+  workspacePaths: DevtaskPaths,
+  workId: string,
+  task: WorkMaterialization["tasks"][number]
+): Promise<ExecuteTaskResult> {
+  const repoPaths = resolvePaths(task.repoPath);
+  const storagePaths = taskStoragePaths(workspacePaths, task.repoPath);
+  const metaPath = taskMetaPath(storagePaths, task.taskId);
+  let meta = readTaskMeta(metaPath);
+  const current = deriveExecutionStatus(meta);
+
+  if (current.terminal) {
+    meta = persistExecutionMeta(metaPath, {
+      ...meta,
+      status: current.status,
+      resultSummary: current.summary,
+      runtime: {
+        state: "completed",
+        reason: current.summary ?? `task ${current.status}`,
+        lastObservedAt: new Date().toISOString()
+      },
+      updatedAt: new Date().toISOString()
+    });
+    await writeExecutePhaseRun(workspacePaths, workId, task, meta, current.status);
+    return {
+      repoId: task.repoId,
+      taskId: task.taskId,
+      status: current.status,
+      action: "skipped",
+      sessionName: meta.tmuxSession,
+      summary: meta.resultSummary,
+      worktreePath: task.worktreePath
+    };
+  }
+
+  if (meta.tmuxSession && tmuxSessionExists(meta.tmuxSession)) {
+    meta = persistExecutionMeta(metaPath, {
+      ...meta,
+      status: "running",
+      runtime: {
+        state: "alive",
+        reason: "execution session is active",
+        lastObservedAt: new Date().toISOString()
+      }
+    });
+    await writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
+    return {
+      repoId: task.repoId,
+      taskId: task.taskId,
+      status: "running",
+      action: "reattached",
+      sessionName: meta.tmuxSession,
+      summary: meta.resultSummary,
+      worktreePath: task.worktreePath
+    };
+  }
+
+  const previousStatus = meta.status;
+  const sessionName = meta.tmuxSession ?? tmuxSessionName(repoPaths, task.taskId);
+  launchExecutionSession(workspacePaths, task.repoId, sessionName, meta);
+  if (!waitForTmuxSession(sessionName, { attempts: 5, intervalMs: 200 })) {
+    throw new DevtaskError(`Execution session ${sessionName} failed to start for ${task.taskId}`);
+  }
+
+  meta = persistExecutionMeta(metaPath, {
+    ...meta,
+    status: "running",
+    tmuxSession: sessionName,
+    agentSessionMode: "direct",
+    resultSummary: "execution session started",
+    runtime: {
+      state: "alive",
+      reason: "execution session is active",
+      lastObservedAt: new Date().toISOString()
+    },
+    updatedAt: new Date().toISOString()
+  });
+  await writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
+  return {
+    repoId: task.repoId,
+    taskId: task.taskId,
+    status: "running",
+    action: previousStatus === "paused" || previousStatus === "running" ? "resumed" : "started",
+    sessionName,
+    summary: meta.resultSummary,
+    worktreePath: task.worktreePath
+  };
+}
+
+function launchExecutionSession(workspacePaths: DevtaskPaths, repoId: string, sessionName: string, meta: TaskMeta): void {
+  const executionTaskPath = buildExecutionTaskPath(workspacePaths, repoId, meta);
+  createBareSession(sessionName, meta.worktreePath);
+  const scriptPath = writeLaunchScript([
+    `cd ${shellEscape(meta.worktreePath)}`,
+    `export DEVTASK_TASK_DIR=${shellEscape(path.dirname(meta.taskPath))}`,
+    `export DEVTASK_TASK_PATH=${shellEscape(executionTaskPath)}`,
+    `export DEVTASK_STATE_PATH=${shellEscape(meta.statePath)}`,
+    `export DEVTASK_RESULT_PATH=${shellEscape(meta.resultPath)}`,
+    `exec ${meta.command}`
+  ].join("\n"));
+  sendLaunchCommand(sessionName, `bash ${shellEscape(scriptPath)}`);
+}
+
+function buildExecutionTaskPath(workspacePaths: DevtaskPaths, repoId: string, meta: TaskMeta): string {
+  const memory = collectPhaseMemory(workspacePaths, "implementation", { repoId });
+  if (!memory) {
+    return meta.taskPath;
+  }
+  const executionTaskPath = path.join(path.dirname(meta.taskPath), "task.execute.md");
+  const original = readTextIfExists(meta.taskPath).trim();
+  fs.writeFileSync(executionTaskPath, [original, "", memory].join("\n"));
+  return executionTaskPath;
+}
+
+function deriveExecutionStatus(meta: TaskMeta): {
+  status: ExecuteTaskResult["status"];
+  terminal: boolean;
+  summary: string | null;
+} {
+  const result = readTaskResult(meta.resultPath);
+  if (result.status === "done") {
+    return { status: "done", terminal: true, summary: result.summary };
+  }
+  if (result.status === "blocked") {
+    return { status: "blocked", terminal: true, summary: result.summary };
+  }
+  if (result.status === "failed") {
+    return { status: "failed", terminal: true, summary: result.summary };
+  }
+  if (meta.tmuxSession && tmuxSessionExists(meta.tmuxSession)) {
+    return { status: "running", terminal: false, summary: meta.resultSummary };
+  }
+  if (meta.status === "paused") {
+    return { status: "paused", terminal: false, summary: meta.resultSummary };
+  }
+  return { status: "paused", terminal: false, summary: meta.resultSummary };
+}
+
+function readTaskResult(resultPath: string): { status: string; summary: string | null } {
+  try {
+    const value = JSON.parse(fs.readFileSync(resultPath, "utf8")) as { status?: unknown; reason?: unknown; summary?: unknown };
+    const status = typeof value.status === "string" ? value.status : "pending";
+    const summarySource = typeof value.reason === "string" ? value.reason : typeof value.summary === "string" ? value.summary : null;
+    return {
+      status,
+      summary: summarySource?.trim() || null
+    };
+  } catch {
+    return {
+      status: "pending",
+      summary: null
+    };
+  }
+}
+
+function summarizeExecuteWorkStatus(tasks: ExecuteTaskResult[]): import("../storage/work-store.js").WorkItemStatus {
+  if (tasks.some((task) => task.status === "failed")) {
+    return "failed";
+  }
+  if (tasks.some((task) => task.status === "blocked")) {
+    return "blocked";
+  }
+  if (tasks.every((task) => task.status === "done")) {
+    return "review-ready";
+  }
+  return "executing";
+}
+
+function summarizeReviewWorkStatus(tasks: ReviewTaskResult[]): import("../storage/work-store.js").WorkItemStatus {
+  if (tasks.some((task) => task.status === "failed" || task.status === "blocked")) {
+    return "blocked";
+  }
+  return "review-ready";
+}
+
+function persistExecutionMeta(metaPath: string, meta: TaskMeta): TaskMeta {
+  writeTaskMeta(metaPath, meta);
+  return readTaskMeta(metaPath);
+}
+
+async function writeExecutePhaseRun(
+  workspacePaths: DevtaskPaths,
+  workId: string,
+  task: WorkMaterialization["tasks"][number],
+  meta: TaskMeta,
+  status: string
+): Promise<void> {
+  const runId = newRunId();
+  writePhaseRunRecord(workItemRepoPhaseRunsDir(workspacePaths, workId, "execute", task.repoId), {
+    schemaVersion: 1,
+    phase: "execute",
+    runId,
+    workId,
+    repoId: task.repoId,
+    taskId: task.taskId,
+    status,
+    promptPath: meta.taskPath,
+    outputPath: meta.statePath,
+    startedAt: meta.updatedAt,
+    finishedAt: meta.updatedAt,
+    session: {
+      transportSessionId: meta.tmuxSession,
+      threadId: meta.agentThreadId,
+      agentSessionId: meta.agentSessionId,
+      summary: meta.resultSummary,
+      summaryIsFallback: true
+    },
+    artifacts: {
+      taskPath: meta.taskPath,
+      statePath: meta.statePath,
+      resultPath: meta.resultPath
+    },
+    exitCode: null
+  });
+}
+
+function shellEscape(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 export async function createWorkPullRequests(
   paths: DevtaskPaths,
   workId: string,
@@ -403,7 +857,8 @@ export async function createWorkPullRequests(
 
   for (const task of materialization.tasks) {
     const repoPaths = resolvePaths(task.repoPath);
-    const metaPath = taskMetaPath(repoPaths, task.taskId);
+    const storagePaths = taskStoragePaths(paths, task.repoPath);
+    const metaPath = taskMetaPath(storagePaths, task.taskId);
     const meta = readTaskMeta(metaPath);
     const preflight = await preflightScmForPullRequest(task.worktreePath, { draft: options.draft === true }, workspaceConfig);
 
@@ -503,6 +958,9 @@ export async function createWorkPullRequests(
     generatedAt: new Date().toISOString()
   };
   writeWorkResult(paths, workId, "pr", result);
+  if (tasks.some((task) => task.status === "created" || task.prUrl !== null)) {
+    updateWorkItemStatus(paths, workId, "pr-open");
+  }
   return result;
 }
 
@@ -512,8 +970,8 @@ export async function checkWorkCi(paths: DevtaskPaths, workId: string): Promise<
   const tasks: CiTaskResult[] = [];
 
   for (const task of materialization.tasks) {
-    const repoPaths = resolvePaths(task.repoPath);
-    const metaPath = taskMetaPath(repoPaths, task.taskId);
+    const storagePaths = taskStoragePaths(paths, task.repoPath);
+    const metaPath = taskMetaPath(storagePaths, task.taskId);
     const meta = readTaskMeta(metaPath);
 
     if (!meta.prUrl) {
@@ -563,13 +1021,16 @@ export async function checkWorkCi(paths: DevtaskPaths, workId: string): Promise<
     generatedAt: new Date().toISOString()
   };
   writeWorkResult(paths, workId, "ci", result);
+  if (tasks.length > 0 && tasks.every((task) => task.status === "passed" || task.status === "skipped")) {
+    updateWorkItemStatus(paths, workId, "completed");
+  }
   return result;
 }
 
 function requireMaterialization(paths: DevtaskPaths, workId: string): WorkMaterialization {
   const materialization = readWorkMaterialization(paths, workId);
   if (!materialization) {
-    throw new Error(`Work ${workId} is not materialized. Run devtask work implement ${workId} first.`);
+    throw new Error(`Work ${workId} is not materialized. Run devtask work materialize ${workId} first.`);
   }
   return materialization;
 }
@@ -588,6 +1049,22 @@ function writeWorkResult(paths: DevtaskPaths, workId: string, name: string, valu
   fs.writeFileSync(`${dir}/${name}.json`, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function readLatestPhaseRunStatus(dir: string): { status: string; outputPath: string } | null {
+  try {
+    const files = fs.readdirSync(dir).filter((file) => file.endsWith(".json")).sort();
+    const latest = files.at(-1);
+    if (!latest) {
+      return null;
+    }
+    const value = JSON.parse(fs.readFileSync(path.join(dir, latest), "utf8")) as { status?: unknown; outputPath?: unknown };
+    return typeof value.status === "string" && typeof value.outputPath === "string"
+      ? { status: value.status, outputPath: value.outputPath }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function persistSharedRepoPlan(paths: DevtaskPaths, workId: string, repoId: string, sourcePlanPath: string): void {
   const plan = readTextIfExists(sourcePlanPath).trim();
   if (!plan) {
@@ -596,6 +1073,128 @@ function persistSharedRepoPlan(paths: DevtaskPaths, workId: string, repoId: stri
   const target = workItemRepoPlanPath(paths, workId, repoId);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, `${plan}\n`);
+}
+
+async function runWorkspaceRepoPlan(
+  paths: DevtaskPaths,
+  item: WorkItem,
+  graphTask: import("../work-materializer.js").WorkGraphTask,
+  repo: import("../storage/workspace-repos.js").WorkspaceRepo,
+  options: {
+    onStart?: (start: PlanAgentStart) => void;
+    onStdout?: (chunk: string) => void;
+    onStderr?: (chunk: string) => void;
+  } = {}
+): Promise<{
+  status: RepoPlanTaskResult["status"];
+  planPath: string;
+  outputPath: string;
+}> {
+  const config = readConfig(paths);
+  const repoPaths = resolvePaths(repo.repoPath);
+  const phaseRunsDir = workItemRepoPhaseRunsDir(paths, item.id, "repo-plan", repo.id);
+  fs.mkdirSync(phaseRunsDir, { recursive: true });
+  const runId = newRunId();
+  const promptPath = path.join(phaseRunsDir, `${runId}.prompt.md`);
+  const outputPath = path.join(phaseRunsDir, `${runId}.md`);
+  const runtimePlanPath = path.join(phaseRunsDir, `${runId}.plan.md`);
+  const resultPath = path.join(phaseRunsDir, `${runId}.result.json`);
+  const finalPlanPath = workItemRepoPlanPath(paths, item.id, repo.id);
+  const taskDocument = buildWorkspaceRepoPlanTask(item, graphTask, repo);
+  const stateDocument = `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${item.id}\n`;
+  const prompt = buildRepoPlanPrompt(
+    { id: graphTask.id },
+    runtimePlanPath,
+    finalPlanPath,
+    taskDocument,
+    stateDocument,
+    collectPhaseMemory(paths, "planning", { repoId: repo.id })
+  );
+  fs.writeFileSync(promptPath, `${prompt}\n`);
+
+  const startOptions = {
+    workspacePath: repoPaths.root,
+    model: config.codex.model,
+    fullAuto: config.codex.fullAuto,
+    skipGitRepoCheck: true,
+    addDirs: [workItemDir(paths, item.id), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
+    env: {
+      ...process.env,
+      DEVTASK_TASK_DIR: workItemDir(paths, item.id),
+      DEVTASK_TASK_PATH: promptPath,
+      DEVTASK_PLAN_PATH: runtimePlanPath,
+      DEVTASK_STATE_PATH: path.join(phaseRunsDir, `${runId}.state.md`),
+      DEVTASK_RESULT_PATH: resultPath
+    }
+  } as const;
+  const runner = createDefaultAgentRunner(config);
+  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  options.onStart?.({ command, promptPath, outputPath, planPath: finalPlanPath });
+  const startedAt = new Date().toISOString();
+  const result = await runAgentPrompt(runner, startOptions, prompt, {
+    outputPath,
+    onOutput: options.onStdout
+  });
+  const finishedAt = new Date().toISOString();
+  persistSharedRepoPlan(paths, item.id, repo.id, runtimePlanPath);
+  const blocked = readTaskResult(resultPath).status === "blocked";
+  const status: RepoPlanTaskResult["status"] =
+    result.status === "completed" && readTextIfExists(finalPlanPath).trim()
+      ? blocked ? "blocked" : "planned"
+      : "failed";
+  writePhaseRunRecord(phaseRunsDir, {
+    schemaVersion: 1,
+    phase: "repo-plan",
+    runId,
+    workId: item.id,
+    repoId: repo.id,
+    taskId: graphTask.id,
+    status,
+    promptPath,
+    outputPath,
+    startedAt,
+    finishedAt,
+    session: result.session,
+    artifacts: {
+      planPath: finalPlanPath
+    },
+    exitCode: result.status === "completed" ? 0 : null
+  });
+
+  return {
+    status,
+    planPath: finalPlanPath,
+    outputPath
+  };
+}
+
+function buildWorkspaceRepoPlanTask(
+  item: WorkItem,
+  graphTask: import("../work-materializer.js").WorkGraphTask,
+  repo: import("../storage/workspace-repos.js").WorkspaceRepo
+): string {
+  return [
+    `# Task ${graphTask.id}`,
+    "",
+    "## Goal",
+    graphTask.goal,
+    "",
+    "## Work Item",
+    `- id: ${item.id}`,
+    `- title: ${item.source.title}`,
+    `- source artifact: ${item.source.artifact}`,
+    `- repo id: ${repo.id}`,
+    `- repo path: ${repo.repoPath}`,
+    `- repo scope: ${repo.scope ?? "."}`,
+    "",
+    "## Ownership",
+    ...(graphTask.owns.length > 0 ? graphTask.owns.map((entry) => `- ${entry}`) : ["- none"]),
+    "",
+    "## Dependencies",
+    ...(graphTask.dependencies.length > 0
+      ? graphTask.dependencies.map((dependency) => `- ${dependency.task} (${dependency.type})${dependency.reason ? `: ${dependency.reason}` : ""}`)
+      : ["- none"])
+  ].join("\n");
 }
 
 function readWorkResultSummary(paths: DevtaskPaths, workId: string, name: string): string | null {
@@ -677,23 +1276,45 @@ async function runSpecAgent(
   } as const;
   const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
   options.onStart?.({ command, promptPath, outputPath, specPath });
+  const startedAt = new Date().toISOString();
   const result = await runAgentPrompt(runner, startOptions, prompt, {
     outputPath,
     onOutput: (chunk) => {
       options.onStdout?.(chunk);
     }
   });
+  const finishedAt = new Date().toISOString();
   const currentSpec = readTextIfExists(specPath).trim();
   const status: WorkSpecResult["status"] =
     result.status === "completed" && currentSpec.length > 0 ? "spec-ready" : "failed";
+  writePhaseRunRecord(workItemPhaseRunsDir(paths, item.id, "spec"), {
+    schemaVersion: 1,
+    phase: "spec",
+    runId,
+    workId: item.id,
+    repoId: null,
+    taskId: null,
+    status,
+    promptPath,
+    outputPath,
+    startedAt,
+    finishedAt,
+    session: result.session,
+    artifacts: {
+      specPath
+    },
+    exitCode: result.status === "completed" ? 0 : null
+  });
   return {
+    runId,
     workId: item.id,
     status,
     specPath,
     promptPath,
     outputPath,
     exitCode: result.status === "completed" ? 0 : null,
-    generatedAt: new Date().toISOString()
+    generatedAt: finishedAt,
+    session: result.session
   };
 }
 
@@ -704,8 +1325,8 @@ async function runReviewAgent(
   config: DevtaskConfig,
   signals: { latestCheck: string | null; latestVerify: string | null; latestCi: string | null }
 ): Promise<ReviewTaskResult> {
-  const repoPaths = resolvePaths(task.repoPath);
-  const meta = readTaskMeta(taskMetaPath(repoPaths, task.taskId));
+  const storagePaths = taskStoragePaths(paths, task.repoPath);
+  const meta = readTaskMeta(taskMetaPath(storagePaths, task.taskId));
   const clean = !(await hasUncommittedChanges(task.worktreePath));
   const commits = await countBranchCommits(task.worktreePath).catch(() => 0);
   const changedFiles = await readGitStatusShort(task.worktreePath);
@@ -729,7 +1350,8 @@ async function runReviewAgent(
       latestCheck: signals.latestCheck,
       latestVerify: signals.latestVerify,
       latestCi: signals.latestCi
-    }
+    },
+    collectPhaseMemory(paths, "review", { repoId: task.repoId })
   );
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
@@ -748,6 +1370,7 @@ async function runReviewAgent(
       DEVTASK_REVIEW_RESULT_PATH: resultPath
     }
   } as const;
+  const startedAt = new Date().toISOString();
   const execResult = await runAgentPrompt(runner, startOptions, prompt, {
     outputPath
   });
@@ -755,6 +1378,27 @@ async function runReviewAgent(
   const parsed = readReviewResult(resultPath);
   const status: ReviewTaskResult["status"] =
     execResult.status !== "completed" ? "failed" : parsed?.status ?? "failed";
+  const runId = newRunId();
+  const finishedAt = new Date().toISOString();
+  writePhaseRunRecord(workItemRepoPhaseRunsDir(paths, workId, "review", task.repoId), {
+    schemaVersion: 1,
+    phase: "review",
+    runId,
+    workId,
+    repoId: task.repoId,
+    taskId: task.taskId,
+    status,
+    promptPath,
+    outputPath,
+    startedAt,
+    finishedAt,
+    session: execResult.session,
+    artifacts: {
+      reviewPath,
+      resultPath
+    },
+    exitCode: execResult.status === "completed" ? 0 : null
+  });
   return {
     repoId: task.repoId,
     taskId: task.taskId,

@@ -9,7 +9,8 @@ export function buildGlobalPlanPrompt(
   repos: WorkspaceRepo[],
   planPath: string,
   graphPath: string,
-  specPath: string
+  specPath: string,
+  memory = ""
 ): string {
   const hasSpec = fs.existsSync(specPath) && fs.readFileSync(specPath, "utf8").trim().length > 0;
   return [
@@ -103,6 +104,7 @@ export function buildGlobalPlanPrompt(
     "- Keep the graph proposed only; a later materialization step will create repo-local tasks and worktrees.",
     "- The graph file must contain JSON only, with no Markdown fences.",
     "",
+    ...(memory ? [memory, ""] : []),
     `Workspace root: ${paths.root}`
   ].join("\n");
 }

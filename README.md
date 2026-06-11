@@ -86,14 +86,16 @@ devtask work repo-plan APP-123
 Then execute and validate:
 
 ```bash
-devtask work implement APP-123
+devtask work materialize APP-123
+devtask work execute APP-123
 devtask work check APP-123
 devtask work verify APP-123
 devtask work review APP-123
 devtask work pr APP-123 --ready
+devtask work compound APP-123
 ```
 
-`work implement <work-id>` materializes repo tasks and worktrees for all repos in the work item.
+`work materialize <work-id>` creates repo tasks and worktrees. `work execute <work-id>` launches or resumes the attachable coding sessions for those materialized tasks.
 
 Use the board to keep track of active work:
 
@@ -130,15 +132,18 @@ Repo paths inside the bundle are only hints. Local bindings are per machine.
 The intended flow is:
 
 ```text
-spec -> plan -> repo-plan -> implement -> check/verify -> review -> pr
+spec -> plan -> repo-plan -> materialize -> execute -> check/verify -> review -> pr -> ci -> compound
 ```
 
 Notes:
 - `spec` refines the ticket into a shared spec artifact
 - `plan` builds the global multi-repo plan
 - `repo-plan` builds per-repo implementation plans for all affected repos
+- `materialize` creates repo-local tasks and worktrees from the approved graph
+- `execute` launches or resumes the repo-task coding sessions
 - `check` and `verify` are deterministic
 - `review` is agent-backed
+- `compound` captures reusable lessons into file-backed workspace/local memory artifacts
 - later commands are mostly guided, not hard-gated
 
 ## Storage Model
@@ -166,3 +171,4 @@ See [docs/architecture/storage-model.md](docs/architecture/storage-model.md) and
 - [docs/architecture/config-contract.md](docs/architecture/config-contract.md)
 - [docs/architecture/artifact-contract.md](docs/architecture/artifact-contract.md)
 - [docs/architecture/workspace-team-onboarding.md](docs/architecture/workspace-team-onboarding.md)
+- [docs/architecture/self-improvement.md](docs/architecture/self-improvement.md)

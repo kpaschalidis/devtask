@@ -50,6 +50,7 @@ export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem
     next: recommendWorkNextAction(item, {
       hasSpec: hasSpecArtifact(paths, item.id),
       hasPlan: planRecord?.status === "planned" || hasPlanArtifacts(paths, item.id),
+      hasRepoPlans: hasRepoPlanArtifacts(paths, item.id),
       isMaterialized: materialization !== null,
       hasActiveSession: sessions.some((session) => session.status === "active")
     })
@@ -64,10 +65,10 @@ function summarizeStatus(
   hasActiveSession: boolean
 ): string {
   if (hasActiveSession) {
-    return "implementing";
+    return "executing";
   }
   if (isMaterialized) {
-    return "ready";
+    return "materialized";
   }
   if (planStatus === "planned") {
     return "planned";
@@ -87,6 +88,11 @@ function hasPlanArtifacts(paths: DevtaskPaths, workId: string): boolean {
 
 function hasSpecArtifact(paths: DevtaskPaths, workId: string): boolean {
   return fs.existsSync(workItemSpecPath(paths, workId));
+}
+
+function hasRepoPlanArtifacts(paths: DevtaskPaths, workId: string): boolean {
+  const repoPlansDir = `${paths.workDir}/${workId}/repo-plans`;
+  return fs.existsSync(repoPlansDir) && fs.readdirSync(repoPlansDir).some((entry) => entry.endsWith(".md"));
 }
 
 function newestUpdatedAt(fallback: string, values: Array<string | null>): string {

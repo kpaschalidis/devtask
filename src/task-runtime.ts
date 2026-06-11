@@ -26,15 +26,17 @@ export function reconcileTaskRuntime(paths: DevtaskPaths, meta: TaskMeta): TaskM
   }
 
   const now = new Date().toISOString();
+  const reason = staleRuntimeReason(latest);
   const next: TaskMeta = {
     ...latest,
-    status: "failed",
+    status: "paused",
     supervisorPid: null,
     childPid: null,
     tmuxSession: null,
+    resultSummary: reason,
     runtime: {
       state: "missing",
-      reason: "runtime_lost",
+      reason,
       lastObservedAt: now
     },
     updatedAt: now

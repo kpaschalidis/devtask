@@ -29,6 +29,8 @@ export interface CreateTaskOptions {
   maxRetries?: number;
   command?: string;
   model?: string;
+  repoRoot?: string;
+  worktreePath?: string;
 }
 
 export function initializeStore(paths: DevtaskPaths): void {
@@ -109,7 +111,7 @@ export async function createTask(
   const taskPath = taskMarkdownPath(paths, id);
   const statePath = stateMarkdownPath(paths, id);
   const resultPath = resultJsonPath(paths, id);
-  const targetWorktreePath = worktreePath(paths, id);
+  const targetWorktreePath = options.worktreePath ?? worktreePath(paths, id);
   const now = new Date().toISOString();
   const config = readConfig(paths);
   const model = options.model ?? config.codex.model;
@@ -126,13 +128,15 @@ export async function createTask(
   fs.writeFileSync(statePath, `# State: ${id}\n\n## Progress\n- Created ${now}\n`);
   fs.writeFileSync(resultPath, "{\n  \"status\": \"pending\"\n}\n");
 
-  await createTaskWorktree(paths.root, branch, targetWorktreePath);
+  await createTaskWorktree(options.repoRoot ?? paths.root, branch, targetWorktreePath);
 
   const meta: TaskMeta = {
     schemaVersion: 1,
     id,
     status: "created",
     runtime: null,
+    agentThreadId: null,
+    agentSessionId: null,
     branch,
     worktreePath: targetWorktreePath,
     taskPath,
@@ -145,6 +149,7 @@ export async function createTask(
     tmuxSession: null,
     agentSessionMode: null,
     prUrl: null,
+    resultSummary: null,
     failCount: 0,
     maxRetries,
     createdAt: now,

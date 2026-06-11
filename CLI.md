@@ -78,12 +78,14 @@ Main flow:
 devtask work spec <work-id>
 devtask work plan <work-id>
 devtask work repo-plan <work-id> [--refresh]
-devtask work implement <work-id>
+devtask work materialize <work-id>
+devtask work execute <work-id>
 devtask work check <work-id>
 devtask work verify <work-id>
 devtask work review <work-id>
 devtask work pr <work-id> [--ready]
 devtask work ci <work-id>
+devtask work compound <work-id>
 devtask work cleanup <work-id> [--dry-run]
 ```
 
@@ -92,9 +94,11 @@ Notes:
 - `plan` builds the global work plan
 - `repo-plan` is triggered manually and builds per-repo implementation plans for all affected repos in the work item
 - current `repo-plan` execution is sequential, not parallel
-- `implement` materializes repo tasks and worktrees for all repos in the work item
+- `materialize` creates repo tasks and worktrees for all repos in the work item
+- `execute` launches or resumes the attachable execution sessions for those repo tasks
 - `check` and `verify` are deterministic
 - `review` is agent-backed
+- `compound` writes reusable guidance and local notes into file-backed improvement artifacts
 
 ## Board
 

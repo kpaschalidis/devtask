@@ -5,13 +5,16 @@ import { DevtaskError } from "./infra/errors.js";
 import { readConfig } from "./infra/config.js";
 import type { DevtaskPaths } from "./infra/paths.js";
 import {
+  planMarkdownPath,
   taskMetaPath,
+  taskStoragePaths,
   workItemDir,
   workItemGraphSnapshotPath,
   workItemMaterializationPath
 } from "./infra/paths.js";
 import { assertValidTaskId } from "./task-id.js";
 import { createTask, initializeStore } from "./storage/task-store.js";
+import { writeTaskMeta } from "./storage/meta.js";
 import type { TaskMeta } from "./types.js";
 import { getWorkspaceRepo, type WorkspaceRepo } from "./storage/workspace-repos.js";
 import type { WorkItem } from "./storage/work-store.js";
@@ -71,7 +74,7 @@ export async function materializeWorkPlan(paths: DevtaskPaths, workItem: WorkIte
   assertPlanArtifactExists(paths, workItem.id);
   const graph = readAndValidateWorkGraph(paths, workItem.id);
   const repos = resolveGraphRepos(paths, graph);
-  preflightMaterialization(repos, graph);
+  preflightMaterialization(paths, repos, graph);
 
   fs.writeFileSync(graphSnapshotPath, `${JSON.stringify(graph, null, 2)}\n`);
 
@@ -82,12 +85,16 @@ export async function materializeWorkPlan(paths: DevtaskPaths, workItem: WorkIte
       throw new DevtaskError(`Workspace repo ${graphTask.repoId} does not exist`);
     }
     const repoPaths = resolveRepoPaths(repo);
-    initializeStore(repoPaths);
-    const meta = await createTask(repoPaths, graphTask.id, {
+    const storagePaths = taskStoragePaths(paths, repo.repoPath);
+    initializeStore(storagePaths);
+    const meta = await createTask(storagePaths, graphTask.id, {
       goal: buildRepoTaskGoal(paths, workItem, graph, graphTask, repo),
-      command: buildMaterializedTaskCommand(paths, repoPaths, workItem)
+      command: buildMaterializedTaskCommand(paths, repoPaths, workItem),
+      repoRoot: repoPaths.root,
+      worktreePath: path.join(repoPaths.worktreesDir, graphTask.id)
     });
-    tasks.push(toMaterializedTask(graphTask, repo, meta));
+    const hydratedMeta = hydrateMaterializedTaskPlan(paths, workItem.id, graphTask.repoId, storagePaths, meta);
+    tasks.push(toMaterializedTask(graphTask, repo, hydratedMeta));
   }
 
   const materialization: WorkMaterialization = {
@@ -108,7 +115,7 @@ export function readWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
 export function readMaterializedWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
   const graphSnapshotPath = workItemGraphSnapshotPath(paths, workId);
   if (!fs.existsSync(graphSnapshotPath)) {
-    throw new DevtaskError(`Materialized work graph does not exist: ${graphSnapshotPath}. Run devtask work implement ${workId} first.`);
+    throw new DevtaskError(`Materialized work graph does not exist: ${graphSnapshotPath}. Run devtask work materialize ${workId} first.`);
   }
   return parseWorkGraph(JSON.parse(fs.readFileSync(graphSnapshotPath, "utf8")) as unknown, workId);
 }
@@ -238,15 +245,15 @@ function resolveGraphRepos(paths: DevtaskPaths, graph: WorkGraph): Map<string, W
   return repos;
 }
 
-function preflightMaterialization(repos: Map<string, WorkspaceRepo>, graph: WorkGraph): void {
+function preflightMaterialization(paths: DevtaskPaths, repos: Map<string, WorkspaceRepo>, graph: WorkGraph): void {
   for (const task of graph.tasks) {
     const repo = repos.get(task.repoId);
     if (!repo) {
       throw new DevtaskError(`Workspace repo ${task.repoId} does not exist`);
     }
-    const repoPaths = resolveRepoPaths(repo);
-    if (fs.existsSync(taskMetaPath(repoPaths, task.id))) {
-      throw new DevtaskError(`Task ${task.id} already exists in repo ${repoPaths.root}`);
+    const storagePaths = taskStoragePaths(paths, repo.repoPath);
+    if (fs.existsSync(taskMetaPath(storagePaths, task.id))) {
+      throw new DevtaskError(`Task ${task.id} already exists in task storage ${storagePaths.tasksDir}`);
     }
   }
 }
@@ -306,6 +313,33 @@ function buildMaterializedTaskCommand(paths: DevtaskPaths, repoPaths: DevtaskPat
     fullAuto: config.codex.fullAuto,
     addDirs: [workItemDir(paths, workItem.id), path.dirname(workItem.source.artifact)]
   });
+}
+
+function hydrateMaterializedTaskPlan(
+  paths: DevtaskPaths,
+  workId: string,
+  repoId: string,
+  storagePaths: DevtaskPaths,
+  meta: TaskMeta
+): TaskMeta {
+  const sharedRepoPlanPath = path.join(paths.workDir, workId, "repo-plans", `${repoId}.md`);
+  if (!fs.existsSync(sharedRepoPlanPath)) {
+    return meta;
+  }
+
+  const plan = fs.readFileSync(sharedRepoPlanPath, "utf8").trim();
+  if (!plan) {
+    return meta;
+  }
+
+  fs.writeFileSync(planMarkdownPath(storagePaths, meta.id), `${plan}\n`);
+  const next: TaskMeta = {
+    ...meta,
+    status: "ready",
+    updatedAt: new Date().toISOString()
+  };
+  writeTaskMeta(taskMetaPath(storagePaths, meta.id), next);
+  return next;
 }
 
 function toMaterializedTask(task: WorkGraphTask, repo: WorkspaceRepo, meta: TaskMeta): MaterializedWorkTask {

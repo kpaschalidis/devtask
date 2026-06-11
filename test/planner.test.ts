@@ -20,6 +20,7 @@ describe("planner artifacts", () => {
 
     const record = {
       schemaVersion: 1,
+      phase: "repo-plan",
       planId: "2026-01-01T00-00-00-000Z",
       taskId: meta.id,
       status: "planned",
@@ -30,7 +31,14 @@ describe("planner artifacts", () => {
       startedAt: "2026-01-01T00:00:00.000Z",
       finishedAt: "2026-01-01T00:00:01.000Z",
       exitCode: 0,
-      worktreeChanged: false
+      worktreeChanged: false,
+      session: {
+        transportSessionId: "session-1",
+        threadId: "thread-1",
+        agentSessionId: "agent-session-1",
+        summary: "planned successfully",
+        summaryIsFallback: false
+      }
     };
     fs.writeFileSync(path.join(plansDir, `${record.planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
 

@@ -14,7 +14,8 @@ export function buildReviewPrompt(
     latestCheck: string | null;
     latestVerify: string | null;
     latestCi: string | null;
-  }
+  },
+  memory = ""
 ): string {
   return [
     `Review repo task ${task.taskId} for work ${task.graphTaskId}.`,
@@ -51,6 +52,7 @@ export function buildReviewPrompt(
     "- If you find issues, mark the review as findings and list them clearly.",
     "- If there is not enough context to review safely, mark the review as blocked.",
     "",
+    ...(memory ? [memory, ""] : []),
     "JSON format:",
     '{"status":"approved|findings|blocked","summary":"short summary","findings":["finding 1","finding 2"]}'
   ].join("\n");

@@ -3,7 +3,9 @@ import path from "node:path";
 import type { DevtaskConfig } from "./infra/config.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "./agent.js";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { workItemDir, workItemPlanRunsDir, workItemSpecPath } from "./infra/paths.js";
+import { workItemDir, workItemPhaseRunsDir, workItemPlanRunsDir, workItemSpecPath } from "./infra/paths.js";
+import { emptyPhaseRunSessionMetadata, writePhaseRunRecord } from "./infra/phase-run.js";
+import { collectPhaseMemory } from "./improvement-memory.js";
 import { newRunId } from "./infra/run-record.js";
 import { listWorkspaceRepos, type WorkspaceRepo } from "./storage/workspace-repos.js";
 import type { WorkItem } from "./storage/work-store.js";
@@ -11,6 +13,7 @@ import { buildGlobalPlanPrompt } from "./prompts/global-plan.js";
 
 export interface WorkPlanRecord {
   schemaVersion: 1;
+  phase: "plan";
   planId: string;
   workId: string;
   status: "planned" | "failed";
@@ -22,6 +25,7 @@ export interface WorkPlanRecord {
   startedAt: string;
   finishedAt: string;
   exitCode: number | null;
+  session: ReturnType<typeof emptyPhaseRunSessionMetadata>;
 }
 
 export interface WorkPlanStart {
@@ -69,7 +73,8 @@ export async function runWorkPlanner(
   const graphPath = workGraphPath(paths, workItem.id);
   const specPath = workItemSpecPath(paths, workItem.id);
   const repos = listWorkspaceRepos(paths);
-  const prompt = buildGlobalPlanPrompt(paths, workItem, repos, planPath, graphPath, specPath);
+  const memory = collectPhaseMemory(paths, "planning");
+  const prompt = buildGlobalPlanPrompt(paths, workItem, repos, planPath, graphPath, specPath, memory);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const previousPlan = artifactSnapshot(planPath);
@@ -106,6 +111,7 @@ export async function runWorkPlanner(
 
   const record: WorkPlanRecord = {
     schemaVersion: 1,
+    phase: "plan",
     planId,
     workId: workItem.id,
     status,
@@ -116,9 +122,29 @@ export async function runWorkPlanner(
     graphPath,
     startedAt,
     finishedAt,
-    exitCode: result.status === "completed" ? 0 : null
+    exitCode: result.status === "completed" ? 0 : null,
+    session: result.session
   };
   fs.writeFileSync(path.join(runsDir, `${planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
+  writePhaseRunRecord(workItemPhaseRunsDir(paths, workItem.id, "plan"), {
+    schemaVersion: 1,
+    phase: "plan",
+    runId: planId,
+    workId: workItem.id,
+    repoId: null,
+    taskId: null,
+    status,
+    promptPath,
+    outputPath,
+    startedAt,
+    finishedAt,
+    session: result.session,
+    artifacts: {
+      planPath,
+      graphPath
+    },
+    exitCode: result.status === "completed" ? 0 : null
+  });
   return record;
 }
 

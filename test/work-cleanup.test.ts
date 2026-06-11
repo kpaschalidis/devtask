@@ -21,7 +21,10 @@ describe("work cleanup", () => {
     });
 
     const repoPaths = resolvePaths(repo);
-    const task = await createTask(repoPaths, "cleanup-task");
+    const task = await createTask(workspacePaths, "cleanup-task", {
+      repoRoot: repoPaths.root,
+      worktreePath: path.join(repoPaths.worktreesDir, "cleanup-task")
+    });
     fs.writeFileSync(
       workItemMaterializationPath(workspacePaths, item.id),
       `${JSON.stringify(
@@ -50,12 +53,12 @@ describe("work cleanup", () => {
     const dryRun = await cleanupWorkItem(workspacePaths, item, { dryRun: true });
     expect(dryRun.blockers).toEqual([]);
     expect(fs.existsSync(workItemDir(workspacePaths, item.id))).toBe(true);
-    expect(fs.existsSync(taskDir(repoPaths, task.id))).toBe(true);
+    expect(fs.existsSync(taskDir(workspacePaths, task.id))).toBe(true);
     expect(fs.existsSync(task.worktreePath)).toBe(true);
 
     await cleanupWorkItem(workspacePaths, item);
     expect(fs.existsSync(workItemDir(workspacePaths, item.id))).toBe(true);
-    expect(fs.existsSync(taskDir(repoPaths, task.id))).toBe(true);
+    expect(fs.existsSync(taskDir(workspacePaths, task.id))).toBe(true);
     expect(fs.existsSync(task.worktreePath)).toBe(false);
   });
 });
