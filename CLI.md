@@ -112,13 +112,21 @@ Workspace board:
 devtask board
 ```
 
+Static HTML board report:
+
+```bash
+devtask board html
+devtask board html --workspace <workspace-id>
+devtask board html --out <dir>
+```
+
 Single work board:
 
 ```bash
 devtask board work <work-id>
 ```
 
-Current board UX is terminal table output built from read models. It is not a TUI yet.
+Current board UX is terminal table output plus a static HTML export, both built from read models. It is not a TUI or live web app.
 
 Current diagnostic workflow is:
 - `work board` for a compact repo-task status table

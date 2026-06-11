@@ -1,6 +1,8 @@
+import path from "node:path";
 import { Command } from "commander";
 import { resolveWorkspacePaths } from "../infra/paths.js";
 import { getWorkBoard, getWorkspaceBoard } from "../services/board-service.js";
+import { generateBoardHtmlReports } from "../services/board-html-service.js";
 import { printError, printTable } from "./common.js";
 
 export function registerBoardCommands(program: Command): void {
@@ -18,6 +20,27 @@ export function registerBoardCommands(program: Command): void {
           ["WORK", "TITLE", "SOURCE", "STATUS", "REPOS", "UPDATED", "NEXT"],
           rows.map((row) => [row.workId, row.title, row.source, row.status, row.repos, row.updatedAt, row.next])
         );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  board
+    .command("html")
+    .description("Generate a static HTML board report for one or more workspaces.")
+    .option("--workspace <workspace-id>", "Generate for one registered workspace")
+    .option("--out <dir>", "Output directory", "devtask-board-html")
+    .action(async (options: { workspace?: string; out: string }) => {
+      try {
+        const reports = await generateBoardHtmlReports({
+          workspaceId: options.workspace,
+          outDir: options.out
+        });
+        console.log(`Generated ${reports.length} board report${reports.length === 1 ? "" : "s"}`);
+        console.log(`Index: ${path.resolve(options.out, "index.html")}`);
+        for (const report of reports) {
+          console.log(`${report.workspaceId}: ${report.outputPath}`);
+        }
       } catch (error) {
         printError(error);
       }

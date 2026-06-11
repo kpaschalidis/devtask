@@ -101,6 +101,7 @@ Use the board to keep track of active work:
 
 ```bash
 devtask board
+devtask board html --workspace platform
 devtask board work APP-123
 devtask work diagnose APP-123
 devtask work inspect APP-123
@@ -109,7 +110,7 @@ devtask work runs show APP-123 execute backend
 devtask session list APP-123
 ```
 
-Current observability UX is terminal output, not a TUI. It renders workspace and work read models and lets you inspect persisted runs, artifacts, task wait states, and session/runtime metadata from stored state.
+Current observability UX is mostly terminal output, plus an optional generated HTML board report. The HTML report is static and read-only, built from the same read models as the terminal board so it stays inspectable and deterministic.
 
 ## Team Onboarding
 
