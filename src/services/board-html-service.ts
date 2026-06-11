@@ -18,20 +18,28 @@ export interface BoardHtmlReport {
   workCount: number;
 }
 
-interface WorkspaceBoardPageData {
+export interface WorkspaceBoardPageRow {
+  workId: string;
+  title: string;
+  source: string;
+  status: string;
+  repos: string;
+  updatedAt: string;
+  next: string;
+  repoTasks: RepoTaskBoardRow[];
+}
+
+export interface WorkspaceBoardPageData {
   workspaceId: string;
   workspaceRoot: string;
   generatedAt: string;
-  rows: Array<{
-    workId: string;
-    title: string;
-    source: string;
-    status: string;
-    repos: string;
-    updatedAt: string;
-    next: string;
-    repoTasks: RepoTaskBoardRow[];
-  }>;
+  rows: WorkspaceBoardPageRow[];
+}
+
+export interface BoardIndexPageEntry {
+  workspaceId: string;
+  workspaceRoot: string;
+  workCount: number;
 }
 
 export async function generateBoardHtmlReports(options: GenerateBoardHtmlOptions = {}): Promise<BoardHtmlReport[]> {
@@ -45,7 +53,7 @@ export async function generateBoardHtmlReports(options: GenerateBoardHtmlOptions
   for (const workspace of workspaces) {
     const pageData = await loadWorkspaceBoardPage(resolveWorkspacePaths(workspace.path), generatedAt);
     const outputPath = path.join(outDir, "workspaces", `${workspace.id}.html`);
-    fs.writeFileSync(outputPath, renderWorkspaceBoardHtml(pageData));
+    fs.writeFileSync(outputPath, renderWorkspaceBoardHtml(pageData, { live: false }));
     reports.push({
       workspaceId: workspace.id,
       workspaceRoot: workspace.path,
@@ -54,11 +62,30 @@ export async function generateBoardHtmlReports(options: GenerateBoardHtmlOptions
     });
   }
 
-  fs.writeFileSync(path.join(outDir, "index.html"), renderIndexHtml(reports, generatedAt));
+  fs.writeFileSync(path.join(outDir, "index.html"), renderIndexHtml(toIndexEntries(reports), generatedAt, { live: false }));
   return reports.sort((a, b) => a.workspaceId.localeCompare(b.workspaceId));
 }
 
-async function loadWorkspaceBoardPage(paths: DevtaskPaths, generatedAt: string): Promise<WorkspaceBoardPageData> {
+export async function loadBoardIndexData(workspaceId?: string): Promise<{ generatedAt: string; entries: BoardIndexPageEntry[] }> {
+  const workspaces = resolveTargetWorkspaces(workspaceId);
+  const entries: BoardIndexPageEntry[] = [];
+
+  for (const workspace of workspaces) {
+    const pageData = await loadWorkspaceBoardPage(resolveWorkspacePaths(workspace.path), new Date().toISOString());
+    entries.push({
+      workspaceId: workspace.id,
+      workspaceRoot: workspace.path,
+      workCount: pageData.rows.length
+    });
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    entries: entries.sort((a, b) => a.workspaceId.localeCompare(b.workspaceId))
+  };
+}
+
+export async function loadWorkspaceBoardPage(paths: DevtaskPaths, generatedAt: string): Promise<WorkspaceBoardPageData> {
   const rows = await getWorkspaceBoard(paths);
   return {
     workspaceId: paths.workspaceId ?? path.basename(paths.root),
@@ -73,7 +100,7 @@ async function loadWorkspaceBoardPage(paths: DevtaskPaths, generatedAt: string):
   };
 }
 
-function resolveTargetWorkspaces(workspaceId?: string): Array<{ id: string; path: string }> {
+export function resolveTargetWorkspaces(workspaceId?: string): Array<{ id: string; path: string }> {
   if (workspaceId) {
     const workspace = getWorkspaceById(workspaceId);
     return [{ id: workspace.id, path: workspace.path }];
@@ -88,13 +115,17 @@ function resolveTargetWorkspaces(workspaceId?: string): Array<{ id: string; path
   return [{ id: current.workspaceId ?? path.basename(current.root), path: current.root }];
 }
 
-function renderIndexHtml(reports: BoardHtmlReport[], generatedAt: string): string {
+export function renderIndexHtml(
+  reports: BoardIndexPageEntry[],
+  generatedAt: string,
+  options: { live: boolean; workspaceId?: string } = { live: false }
+): string {
   const body = reports.length === 0
     ? `<p class="empty">No workspaces were available.</p>`
     : reports
       .map(
         (report) => `
-          <a class="workspace-card" href="./workspaces/${escapeHtml(report.workspaceId)}.html">
+          <a class="workspace-card" href="${escapeHtml(workspaceHref(report.workspaceId, options.live))}">
             <span class="workspace-id">${escapeHtml(report.workspaceId)}</span>
             <span class="workspace-meta">${escapeHtml(report.workCount.toString())} work items</span>
             <span class="workspace-path">${escapeHtml(report.workspaceRoot)}</span>
@@ -107,61 +138,71 @@ function renderIndexHtml(reports: BoardHtmlReport[], generatedAt: string): strin
       <div>
         <p class="eyebrow">Devtask Board</p>
         <h1>Workspace Reports</h1>
-        <p class="subtle">Generated ${escapeHtml(formatTimestamp(generatedAt))}</p>
+        <p class="subtle" data-generated-at>Generated ${escapeHtml(formatTimestamp(generatedAt))}</p>
       </div>
+      ${options.live ? `<button class="refresh-button" type="button" data-refresh-button>Refresh</button>` : ""}
     </header>
-    <section class="card-grid">
+    <section class="card-grid" data-index-grid>
       ${body}
     </section>
+    ${options.live ? renderLiveIndexScript(options.workspaceId) : ""}
   `);
 }
 
-function renderWorkspaceBoardHtml(data: WorkspaceBoardPageData): string {
+export function renderWorkspaceBoardHtml(
+  data: WorkspaceBoardPageData,
+  options: { live: boolean } = { live: false }
+): string {
   const summary = summarizeWorkspace(data.rows);
-  const workCards = data.rows.length === 0
-    ? `<p class="empty">No work items in this workspace.</p>`
-    : data.rows
-      .map(
-        (row) => `
-          <section class="work-card">
-            <div class="work-card-header">
-              <div>
-                <p class="eyebrow">${escapeHtml(row.workId)}</p>
-                <h2>${escapeHtml(row.title)}</h2>
-              </div>
-              <span class="status-chip status-${escapeClass(row.status)}">${escapeHtml(row.status)}</span>
-            </div>
-            <div class="meta-grid">
-              <div><span class="label">Source</span><span>${escapeHtml(row.source)}</span></div>
-              <div><span class="label">Repos</span><span>${escapeHtml(row.repos)}</span></div>
-              <div><span class="label">Updated</span><span>${escapeHtml(formatTimestamp(row.updatedAt))}</span></div>
-              <div><span class="label">Next</span><code>${escapeHtml(row.next)}</code></div>
-            </div>
-            ${renderRepoTaskTable(row.repoTasks)}
-          </section>`
-      )
-      .join("\n");
+  const workCards = renderWorkspaceRows(data.rows);
 
   return renderHtmlDocument(`Devtask Board · ${data.workspaceId}`, `
     <header class="page-header">
       <div>
         <p class="eyebrow">Devtask Board</p>
-        <h1>${escapeHtml(data.workspaceId)}</h1>
-        <p class="subtle">${escapeHtml(data.workspaceRoot)}</p>
+        <h1 data-workspace-title>${escapeHtml(data.workspaceId)}</h1>
+        <p class="subtle" data-workspace-root>${escapeHtml(data.workspaceRoot)}</p>
       </div>
-      <div class="summary-row">
-        <div class="summary-card"><span class="metric">${summary.total}</span><span class="label">Work Items</span></div>
-        <div class="summary-card"><span class="metric">${summary.executing}</span><span class="label">Executing</span></div>
-        <div class="summary-card"><span class="metric">${summary.blocked}</span><span class="label">Blocked</span></div>
-        <div class="summary-card"><span class="metric">${summary.materialized}</span><span class="label">Materialized</span></div>
+      ${options.live ? `<button class="refresh-button" type="button" data-refresh-button>Refresh</button>` : ""}
+      <div class="summary-row" data-summary-row>
+        ${renderSummaryCards(summary)}
       </div>
-      <p class="subtle">Generated ${escapeHtml(formatTimestamp(data.generatedAt))}</p>
-      <p><a class="back-link" href="../index.html">All workspaces</a></p>
+      <p class="subtle" data-generated-at>Generated ${escapeHtml(formatTimestamp(data.generatedAt))}</p>
+      <p><a class="back-link" href="${options.live ? "/" : "../index.html"}">All workspaces</a></p>
     </header>
-    <section class="work-list">
+    <section class="work-list" data-work-list>
       ${workCards}
     </section>
+    ${options.live ? renderLiveWorkspaceScript(data.workspaceId) : ""}
   `);
+}
+
+function renderWorkspaceRows(rows: WorkspaceBoardPageRow[]): string {
+  if (rows.length === 0) {
+    return `<p class="empty">No work items in this workspace.</p>`;
+  }
+
+  return rows
+    .map(
+      (row) => `
+        <section class="work-card">
+          <div class="work-card-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(row.workId)}</p>
+              <h2>${escapeHtml(row.title)}</h2>
+            </div>
+            <span class="status-chip status-${escapeClass(row.status)}">${escapeHtml(row.status)}</span>
+          </div>
+          <div class="meta-grid">
+            <div><span class="label">Source</span><span>${escapeHtml(row.source)}</span></div>
+            <div><span class="label">Repos</span><span>${escapeHtml(row.repos)}</span></div>
+            <div><span class="label">Updated</span><span>${escapeHtml(formatTimestamp(row.updatedAt))}</span></div>
+            <div><span class="label">Next</span><code>${escapeHtml(row.next)}</code></div>
+          </div>
+          ${renderRepoTaskTable(row.repoTasks)}
+        </section>`
+    )
+    .join("\n");
 }
 
 function renderRepoTaskTable(rows: RepoTaskBoardRow[]): string {
@@ -205,7 +246,7 @@ function renderRepoTaskTable(rows: RepoTaskBoardRow[]): string {
     </div>`;
 }
 
-function summarizeWorkspace(rows: WorkspaceBoardPageData["rows"]): {
+function summarizeWorkspace(rows: WorkspaceBoardPageRow[]): {
   total: number;
   executing: number;
   blocked: number;
@@ -220,6 +261,156 @@ function summarizeWorkspace(rows: WorkspaceBoardPageData["rows"]): {
     }),
     { total: 0, executing: 0, blocked: 0, materialized: 0 }
   );
+}
+
+function toIndexEntries(reports: BoardHtmlReport[]): BoardIndexPageEntry[] {
+  return reports.map((report) => ({
+    workspaceId: report.workspaceId,
+    workspaceRoot: report.workspaceRoot,
+    workCount: report.workCount
+  }));
+}
+
+function renderSummaryCards(summary: ReturnType<typeof summarizeWorkspace>): string {
+  return [
+    ["Work Items", summary.total.toString()],
+    ["Executing", summary.executing.toString()],
+    ["Blocked", summary.blocked.toString()],
+    ["Materialized", summary.materialized.toString()]
+  ]
+    .map(
+      ([label, value]) => `<div class="summary-card"><span class="metric">${escapeHtml(value)}</span><span class="label">${escapeHtml(label)}</span></div>`
+    )
+    .join("");
+}
+
+function renderLiveIndexScript(workspaceId?: string): string {
+  const apiPath = workspaceId ? `/api/index?workspace=${encodeURIComponent(workspaceId)}` : "/api/index";
+  return `<script>
+const refreshButton = document.querySelector("[data-refresh-button]");
+const grid = document.querySelector("[data-index-grid]");
+const generatedAt = document.querySelector("[data-generated-at]");
+async function refreshIndex() {
+  refreshButton.disabled = true;
+  refreshButton.textContent = "Refreshing...";
+  try {
+    const response = await fetch(${JSON.stringify(apiPath)}, { cache: "no-store" });
+    if (!response.ok) throw new Error("Failed to refresh board");
+    const data = await response.json();
+    generatedAt.textContent = "Generated " + formatTimestamp(data.generatedAt);
+    grid.innerHTML = data.entries.length === 0
+      ? '<p class="empty">No workspaces were available.</p>'
+      : data.entries.map((entry) => \`
+          <a class="workspace-card" href="\${workspaceHref(entry.workspaceId)}">
+            <span class="workspace-id">\${escapeHtml(entry.workspaceId)}</span>
+            <span class="workspace-meta">\${escapeHtml(String(entry.workCount))} work items</span>
+            <span class="workspace-path">\${escapeHtml(entry.workspaceRoot)}</span>
+          </a>\`).join("");
+  } finally {
+    refreshButton.disabled = false;
+    refreshButton.textContent = "Refresh";
+  }
+}
+function workspaceHref(id) { return "/workspaces/" + encodeURIComponent(id); }
+function escapeHtml(value) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+function formatTimestamp(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+}
+refreshButton.addEventListener("click", refreshIndex);
+</script>`;
+}
+
+function renderLiveWorkspaceScript(workspaceId: string): string {
+  return `<script>
+const refreshButton = document.querySelector("[data-refresh-button]");
+const titleNode = document.querySelector("[data-workspace-title]");
+const rootNode = document.querySelector("[data-workspace-root]");
+const summaryRow = document.querySelector("[data-summary-row]");
+const generatedAt = document.querySelector("[data-generated-at]");
+const workList = document.querySelector("[data-work-list]");
+async function refreshWorkspace() {
+  refreshButton.disabled = true;
+  refreshButton.textContent = "Refreshing...";
+  try {
+    const response = await fetch("/api/workspaces/" + encodeURIComponent(${JSON.stringify(workspaceId)}), { cache: "no-store" });
+    if (!response.ok) throw new Error("Failed to refresh workspace");
+    const data = await response.json();
+    titleNode.textContent = data.workspaceId;
+    rootNode.textContent = data.workspaceRoot;
+    generatedAt.textContent = "Generated " + formatTimestamp(data.generatedAt);
+    summaryRow.innerHTML = renderSummary(data.rows);
+    workList.innerHTML = renderRows(data.rows);
+  } finally {
+    refreshButton.disabled = false;
+    refreshButton.textContent = "Refresh";
+  }
+}
+function renderSummary(rows) {
+  const summary = rows.reduce((acc, row) => {
+    acc.total += 1;
+    if (row.status === "executing") acc.executing += 1;
+    if (row.status.includes("blocked") || row.repoTasks.some((task) => task.status === "blocked")) acc.blocked += 1;
+    if (row.status === "materialized") acc.materialized += 1;
+    return acc;
+  }, { total: 0, executing: 0, blocked: 0, materialized: 0 });
+  return [
+    ["Work Items", summary.total],
+    ["Executing", summary.executing],
+    ["Blocked", summary.blocked],
+    ["Materialized", summary.materialized]
+  ].map(([label, value]) => \`<div class="summary-card"><span class="metric">\${escapeHtml(String(value))}</span><span class="label">\${escapeHtml(label)}</span></div>\`).join("");
+}
+function renderRows(rows) {
+  if (rows.length === 0) return '<p class="empty">No work items in this workspace.</p>';
+  return rows.map((row) => \`
+    <section class="work-card">
+      <div class="work-card-header">
+        <div>
+          <p class="eyebrow">\${escapeHtml(row.workId)}</p>
+          <h2>\${escapeHtml(row.title)}</h2>
+        </div>
+        <span class="status-chip status-\${escapeClass(row.status)}">\${escapeHtml(row.status)}</span>
+      </div>
+      <div class="meta-grid">
+        <div><span class="label">Source</span><span>\${escapeHtml(row.source)}</span></div>
+        <div><span class="label">Repos</span><span>\${escapeHtml(row.repos)}</span></div>
+        <div><span class="label">Updated</span><span>\${escapeHtml(formatTimestamp(row.updatedAt))}</span></div>
+        <div><span class="label">Next</span><code>\${escapeHtml(row.next)}</code></div>
+      </div>
+      \${renderRepoTasks(row.repoTasks)}
+    </section>\`).join("");
+}
+function renderRepoTasks(rows) {
+  if (rows.length === 0) return '<p class="empty">No repo tasks.</p>';
+  return \`<div class="table-shell"><table><thead><tr><th>Repo</th><th>Phase</th><th>Status</th><th>Blocked</th><th>Check</th><th>Review</th><th>PR</th><th>Next</th></tr></thead><tbody>\${rows.map((row) => \`
+    <tr>
+      <td>\${escapeHtml(row.repo)}</td>
+      <td>\${escapeHtml(row.phase)}</td>
+      <td><span class="status-chip status-\${escapeClass(row.status)}">\${escapeHtml(row.status)}</span></td>
+      <td>\${escapeHtml(row.blocked)}</td>
+      <td>\${escapeHtml(row.check)}</td>
+      <td>\${escapeHtml(row.review)}</td>
+      <td>\${escapeHtml(row.pr)}</td>
+      <td><code>\${escapeHtml(row.next)}</code></td>
+    </tr>\`).join("")}</tbody></table></div>\`;
+}
+function escapeHtml(value) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+function escapeClass(value) { return String(value).replace(/[^a-zA-Z0-9_-]+/g, "-"); }
+function formatTimestamp(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+}
+refreshButton.addEventListener("click", refreshWorkspace);
+</script>`;
+}
+
+function workspaceHref(workspaceId: string, live: boolean): string {
+  return live ? `/workspaces/${encodeURIComponent(workspaceId)}` : `./workspaces/${workspaceId}.html`;
 }
 
 function renderHtmlDocument(title: string, body: string): string {
@@ -265,6 +456,8 @@ function renderHtmlDocument(title: string, body: string): string {
 
       .page-header {
         margin-bottom: 24px;
+        display: grid;
+        gap: 16px;
       }
 
       .eyebrow,
@@ -342,7 +535,7 @@ function renderHtmlDocument(title: string, body: string): string {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 12px;
-        margin: 20px 0 14px;
+        margin: 0;
       }
 
       .summary-card {
@@ -405,6 +598,23 @@ function renderHtmlDocument(title: string, body: string): string {
       .status-pending {
         background: var(--warning-soft);
         color: var(--warning);
+      }
+
+      .refresh-button {
+        justify-self: start;
+        appearance: none;
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fffdf8;
+        border-radius: 999px;
+        padding: 10px 16px;
+        font: 600 0.95rem "Avenir Next", "Segoe UI", sans-serif;
+        cursor: pointer;
+      }
+
+      .refresh-button:disabled {
+        opacity: 0.7;
+        cursor: wait;
       }
 
       .table-shell {

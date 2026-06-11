@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { resolveWorkspacePaths } from "../infra/paths.js";
 import { getWorkBoard, getWorkspaceBoard } from "../services/board-service.js";
 import { generateBoardHtmlReports } from "../services/board-html-service.js";
+import { startBoardServer } from "../services/board-server-service.js";
 import { printError, printTable } from "./common.js";
 
 export function registerBoardCommands(program: Command): void {
@@ -41,6 +42,26 @@ export function registerBoardCommands(program: Command): void {
         for (const report of reports) {
           console.log(`${report.workspaceId}: ${report.outputPath}`);
         }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  board
+    .command("serve")
+    .description("Serve the board as a local live read-only web app.")
+    .option("--workspace <workspace-id>", "Serve one registered workspace")
+    .option("--host <host>", "Bind host", "127.0.0.1")
+    .option("--port <port>", "Bind port")
+    .action(async (options: { workspace?: string; host: string; port?: string }) => {
+      try {
+        const server = await startBoardServer({
+          workspaceId: options.workspace,
+          host: options.host,
+          port: options.port ? Number.parseInt(options.port, 10) : undefined
+        });
+        console.log(`Board server: ${server.url}`);
+        console.log("Press Ctrl+C to stop");
       } catch (error) {
         printError(error);
       }

@@ -120,13 +120,21 @@ devtask board html --workspace <workspace-id>
 devtask board html --out <dir>
 ```
 
+Live local board app:
+
+```bash
+devtask board serve
+devtask board serve --workspace <workspace-id>
+devtask board serve --host 127.0.0.1 --port 4310
+```
+
 Single work board:
 
 ```bash
 devtask board work <work-id>
 ```
 
-Current board UX is terminal table output plus a static HTML export, both built from read models. It is not a TUI or live web app.
+Current board UX is terminal table output plus optional HTML surfaces built from the same read models. `board serve` is a local read-only app, not a separate product backend.
 
 Current diagnostic workflow is:
 - `work board` for a compact repo-task status table

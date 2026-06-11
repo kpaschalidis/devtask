@@ -12,6 +12,7 @@ describe("board CLI", () => {
     const subcommandNames = board?.commands.map((command) => command.name()) ?? [];
 
     expect(subcommandNames).toContain("html");
+    expect(subcommandNames).toContain("serve");
     expect(subcommandNames).toContain("work");
   });
 });
