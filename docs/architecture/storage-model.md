@@ -110,15 +110,21 @@ Examples:
 - `work/<workId>/reviews/`
 - `work/<workId>/plans/`
 - `work/<workId>/spec-runs/`
+- `work/<workId>/phase-runs/<phase>/...`
+
+Observability-relevant local artifacts include:
+- task metadata with runtime state, paused/blocked reasons, tmux session name, thread id, and agent session id
+- persisted phase-run records that link phase status to prompt path, output path, artifact paths, and session metadata
+- materialization, result, and review artifacts used by `work diagnose`, `work inspect`, `work runs`, and `session list/show`
 
 ## Repo-Local State
 
 Repo-local `devtask` state is intentionally minimized.
 
-Current location:
+Current location for workspace flows:
 
 ```text
-<repo-root>/.devtask/worktrees/
+~/.devtask/workspaces/<workspaceId>/local/worktrees/
 ```
 
 Purpose:

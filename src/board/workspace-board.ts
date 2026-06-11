@@ -39,7 +39,7 @@ export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem
       hasSpecArtifact(paths, item.id),
       planRecord?.status ?? null,
       materialization !== null,
-      sessions.some((session) => session.status === "active")
+      sessions.some((session) => session.sessionStatus === "active")
     ),
     repos: materialization ? materialization.tasks.map((task) => task.repoId).join(", ") : "-",
     updatedAt: newestUpdatedAt(item.updatedAt, [
@@ -52,7 +52,7 @@ export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem
       hasPlan: planRecord?.status === "planned" || hasPlanArtifacts(paths, item.id),
       hasRepoPlans: hasRepoPlanArtifacts(paths, item.id),
       isMaterialized: materialization !== null,
-      hasActiveSession: sessions.some((session) => session.status === "active")
+      hasActiveSession: sessions.some((session) => session.sessionStatus === "active")
     })
   };
 }

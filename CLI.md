@@ -70,6 +70,10 @@ Inspect work:
 ```bash
 devtask work board <work-id>
 devtask work next <work-id>
+devtask work diagnose <work-id>
+devtask work inspect <work-id>
+devtask work runs <work-id> [--phase <phase>] [--repo <repo-id>] [--latest]
+devtask work runs show <work-id> <phase> [repo-id]
 ```
 
 Main flow:
@@ -116,6 +120,12 @@ devtask board work <work-id>
 
 Current board UX is terminal table output built from read models. It is not a TUI yet.
 
+Current diagnostic workflow is:
+- `work board` for a compact repo-task status table
+- `work diagnose` for why the work or repo task is waiting and which artifact is missing
+- `work inspect` for stored artifact paths, latest phase runs, and blocked/failed/paused repo tasks
+- `work runs` and `work runs show` for persisted prompt/output/artifact/session traceability by phase
+
 ## Session
 
 Repo task sessions:
@@ -127,12 +137,7 @@ devtask session attach <work-id> <repo-id>
 devtask session send <work-id> <repo-id> <message>
 ```
 
-Current CLI support is narrower than the target direction:
-- `list`
-- `show`
-- `attach`
-- `send`
-- current session steering is tmux-backed
+`session list` now surfaces task status, session liveness, runtime reason, last activity, and result summary from stored task metadata. `session show` exposes the richer JSON shape, including thread and agent session identifiers when available.
 
 ## Worktree
 

@@ -9,9 +9,16 @@ export interface SessionSummary {
   workId: string;
   repoId: string;
   taskId: string;
+  taskStatus: "created" | "planned" | "ready" | "running" | "paused" | "blocked" | "done" | "failed";
   sessionName: string | null;
   worktreePath: string;
-  status: "active" | "inactive" | "none";
+  sessionStatus: "active" | "inactive" | "none";
+  runtimeState: "unknown" | "alive" | "missing" | "completed" | null;
+  runtimeReason: string | null;
+  lastActivityAt: string | null;
+  resultSummary: string | null;
+  threadId: string | null;
+  agentSessionId: string | null;
   updatedAt: string;
 }
 
@@ -33,9 +40,16 @@ export async function listSessions(paths: DevtaskPaths, workId?: string): Promis
         workId: id,
         repoId: task.repoId,
         taskId: task.taskId,
+        taskStatus: meta.status,
         sessionName: meta.tmuxSession,
         worktreePath: meta.worktreePath,
-        status: !meta.tmuxSession ? "none" : tmuxSessionExists(meta.tmuxSession) ? "active" : "inactive",
+        sessionStatus: !meta.tmuxSession ? "none" : tmuxSessionExists(meta.tmuxSession) ? "active" : "inactive",
+        runtimeState: meta.runtime?.state ?? null,
+        runtimeReason: meta.runtime?.reason || meta.resultSummary,
+        lastActivityAt: meta.runtime?.lastObservedAt ?? meta.updatedAt,
+        resultSummary: meta.resultSummary,
+        threadId: meta.agentThreadId,
+        agentSessionId: meta.agentSessionId,
         updatedAt: meta.updatedAt
       });
     }

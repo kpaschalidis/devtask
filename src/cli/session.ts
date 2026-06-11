@@ -18,8 +18,16 @@ export function registerSessionCommands(program: Command): void {
           return;
         }
         printTable(
-          ["REPO", "TASK", "STATUS", "SESSION", "UPDATED"],
-          sessions.map((entry) => [entry.repoId, entry.taskId, entry.status, entry.sessionName ?? "-", entry.updatedAt])
+          ["REPO", "TASK", "STATUS", "SESSION", "RUNTIME", "LAST_ACTIVITY", "SUMMARY"],
+          sessions.map((entry) => [
+            entry.repoId,
+            entry.taskId,
+            `${entry.taskStatus}/${entry.sessionStatus}`,
+            entry.sessionName ?? "-",
+            entry.runtimeReason ?? "-",
+            entry.lastActivityAt ?? "-",
+            entry.resultSummary ?? "-"
+          ])
         );
       } catch (error) {
         printError(error);
