@@ -9,7 +9,32 @@ vi.mock("../src/agent.js", async (importOriginal) => {
     ...actual,
     createDefaultAgentRunner: vi.fn(() => ({
       buildStartCommand: () => "fake-agent-start",
-      buildResumeCommand: () => "fake-agent-resume"
+      buildInteractiveStartCommand: () => ({
+        command: "fake-agent-interactive-start",
+        session: {
+          provider: "codex",
+          transportId: null,
+          providerSessionId: null,
+          conversationId: null,
+          resumeTarget: null,
+          storageRoot: "/tmp/codex-home",
+          transcriptPath: null,
+          summary: null,
+          summaryIsFallback: null
+        }
+      }),
+      buildResumeCommand: () => "fake-agent-resume",
+      buildInteractiveResumeCommand: () => "fake-agent-interactive-resume",
+      hydrateSessionRef: vi.fn(async (session) => ({
+        ...session,
+        providerSessionId: session.providerSessionId ?? "agent-123",
+        conversationId: session.conversationId ?? "thread-123",
+        resumeTarget: session.resumeTarget ?? "agent-123",
+        transcriptPath: session.transcriptPath ?? "/tmp/codex-home/sessions/spec.jsonl",
+        summary: "hydrated session",
+        summaryIsFallback: false
+      })),
+      inspectSessionActivity: vi.fn(async () => "unknown")
     })),
     runAgentPrompt: vi.fn(),
     resumeAgentPrompt: vi.fn(async (_runner, session, resumeOptions: { workspacePath: string }, _prompt: string, options: { outputPath: string }) => {
@@ -31,8 +56,11 @@ vi.mock("../src/agent.js", async (importOriginal) => {
 });
 
 vi.mock("../src/infra/tmux.js", () => ({
+  attachTmuxSession: vi.fn(),
   createBareSession: vi.fn(),
+  killTmuxSession: vi.fn(),
   sendLaunchCommand: vi.fn(),
+  startPipePane: vi.fn(async () => {}),
   startTmuxSession: vi.fn(),
   tmuxSessionExists: vi.fn(() => false),
   tmuxSessionName: vi.fn((_paths, taskId: string) => `devtask-test-${taskId}`),
@@ -45,7 +73,7 @@ import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { readScopedPhaseSession, updateScopedPhaseSession, writeRunningScopedPhaseSession } from "../src/services/phase-session-service.js";
 import { getLatestWorkPhaseRun } from "../src/services/phase-run-service.js";
-import { runSpecFeedbackWorker, sendWorkPhaseFeedback } from "../src/services/work-service.js";
+import { attachWorkPhase, runInteractivePhaseFinalizer, runSpecFeedbackWorker, sendWorkPhaseFeedback, startSpecWork } from "../src/services/work-service.js";
 
 const agent = await import("../src/agent.js");
 const tmux = await import("../src/infra/tmux.js");
@@ -154,4 +182,80 @@ describe("work phase feedback", () => {
 
     expect(readScopedPhaseSession(paths, item.id, "spec")?.live).toBe(false);
   });
+
+  it("resumes and attaches when the latest spec session is finished", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-phase-attach-resume-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Resume finished spec session"
+    });
+    fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nOriginal.\n");
+
+    writeRunningScopedPhaseSession(paths, {
+      phase: "spec",
+      workId: item.id,
+      repoId: null,
+      taskId: null,
+      runId: "run-1",
+      tmuxSession: "old-session",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      promptPath: path.join(paths.localDir, "old.prompt.md"),
+      outputPath: path.join(paths.localDir, "old.output.md"),
+      artifacts: {
+        specPath: workItemSpecPath(paths, item.id)
+      },
+      session: {
+        provider: "codex",
+        transportId: "old-session",
+        providerSessionId: "agent-123",
+        conversationId: "thread-123",
+        resumeTarget: "agent-123",
+        storageRoot: "/tmp/codex-home",
+        transcriptPath: "/tmp/codex-home/sessions/spec.jsonl",
+        summary: "spec complete",
+        summaryIsFallback: false
+      }
+    });
+    updateScopedPhaseSession(paths, item.id, "spec", null, {
+      status: "completed",
+      updatedAt: "2026-01-01T00:01:00.000Z"
+    });
+    vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-test-spec-WORK-123");
+
+    await attachWorkPhase(paths, "spec", item.id);
+
+    expect(tmux.startTmuxSession).toHaveBeenCalledTimes(1);
+    expect(tmux.attachTmuxSession).toHaveBeenCalledWith("devtask-test-spec-WORK-123");
+    expect(readScopedPhaseSession(paths, item.id, "spec")?.status).toBe("running");
+  });
+
+  it("starts fresh spec work as an interactive background session and finalizes it after tmux exits", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-phase-fresh-interactive-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Interactive fresh spec"
+    });
+    fs.writeFileSync(item.source.artifact, "# Source\n");
+    fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nFresh interactive spec.\n");
+
+    const launch = await startSpecWork(paths, item.id);
+
+    expect(launch.tmuxSession).toBe("devtask-test-spec-WORK-123");
+    expect(tmux.startTmuxSession).toHaveBeenCalledTimes(1);
+    expect(tmux.startPipePane).toHaveBeenCalledWith("devtask-test-spec-WORK-123", launch.outputPath);
+    expect(readScopedPhaseSession(paths, item.id, "spec")?.status).toBe("running");
+
+    fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nFresh interactive spec updated.\n");
+    vi.mocked(tmux.tmuxSessionExists).mockReturnValue(false);
+    await runInteractivePhaseFinalizer(paths, "spec", item.id, null);
+
+    expect(getLatestWorkPhaseRun(paths, item.id, "spec")?.status).toBe("spec-ready");
+    expect(readScopedPhaseSession(paths, item.id, "spec")?.status).toBe("completed");
+    expect(readScopedPhaseSession(paths, item.id, "spec")?.session.providerSessionId).toBe("agent-123");
+  });
+
 });

@@ -44,6 +44,13 @@ export class CursorAgentRunner implements AgentRunner {
     });
   }
 
+  buildInteractiveStartCommand(options: AgentStartOptions, _prompt: string): { command: string; session: ReturnType<typeof emptyCursorSessionRef> } {
+    return {
+      command: buildCursorLaunchCommand(options, this.config.model),
+      session: emptyCursorSessionRef()
+    };
+  }
+
   async start(options: AgentStartOptions): Promise<SessionHandle> {
     const sessionName = `devtask-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
@@ -201,6 +208,10 @@ export class CursorAgentRunner implements AgentRunner {
       summaryIsFallback: true
     };
   }
+
+  async inspectSessionActivity(_session: { transportId: string | null }, _workspacePath: string): Promise<ActivityState> {
+    return "unknown";
+  }
 }
 
 function buildCursorLaunchCommand(options: AgentStartOptions, fallbackModel?: string): string {
@@ -213,6 +224,20 @@ function buildCursorLaunchCommand(options: AgentStartOptions, fallbackModel?: st
     parts.push("--model", shellEscape(model));
   }
   return parts.join(" ");
+}
+
+function emptyCursorSessionRef() {
+  return {
+    provider: "cursor" as const,
+    transportId: null,
+    providerSessionId: null,
+    conversationId: null,
+    resumeTarget: null,
+    storageRoot: null,
+    transcriptPath: null,
+    summary: null,
+    summaryIsFallback: null
+  };
 }
 
 function buildAgentEnvResetCommand(): string {

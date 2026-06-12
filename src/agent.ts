@@ -56,7 +56,11 @@ export interface AgentRunner {
   getSessionInfo?(session: SessionHandle): Promise<Pick<AgentSessionRef, "summary" | "summaryIsFallback"> | null>;
   stop?(session: SessionHandle): Promise<void>;
   buildStartCommand?(options: AgentStartOptions): string;
+  buildInteractiveStartCommand?(options: AgentStartOptions, prompt: string): Promise<{ command: string; session: AgentSessionRef }> | { command: string; session: AgentSessionRef };
   buildResumeCommand?(session: AgentSessionRef, options: AgentResumeOptions): string | null;
+  buildInteractiveResumeCommand?(session: AgentSessionRef, options: AgentResumeOptions): string | null;
+  hydrateSessionRef?(session: AgentSessionRef, workspacePath: string): Promise<AgentSessionRef>;
+  inspectSessionActivity?(session: AgentSessionRef, workspacePath: string): Promise<ActivityState>;
 }
 
 export interface AgentPromptResult {

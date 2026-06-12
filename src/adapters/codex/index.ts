@@ -10,7 +10,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import type { AgentSessionRef } from "../../agent-session.js";
 import type { ActivityState, AgentRunner, AgentStartOptions, RunEvent, RunOptions, SessionHandle } from "../../agent.js";
-import { buildCodexCommand, buildCodexCommandArgs, buildCodexResumeCommand } from "./command.js";
+import { captureOutputAsync } from "../../infra/tmux.js";
+import {
+  buildCodexCommand,
+  buildCodexCommandArgs,
+  buildCodexInteractiveResumeCommand,
+  buildCodexInteractiveStartCommand,
+  buildCodexResumeCommand
+} from "./command.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -22,6 +29,7 @@ const SESSION_FILE_CACHE_TTL_MS = 30_000;
 const MAX_SESSION_SCAN_DEPTH = 4;
 const ACTIVE_WINDOW_MS = 5_000;
 const ACTIVITY_POLL_MS = 250;
+const DEFAULT_INTERACTIVE_MODEL = "gpt-5.5";
 
 interface CodexJsonlPayload {
   id?: string;
@@ -93,6 +101,120 @@ export class CodexAgentRunner implements AgentRunner {
       model: options.model ?? this.config.model ?? null,
       prompt: options.prompt ?? null
     });
+  }
+
+  buildInteractiveResumeCommand(session: AgentSessionRef, options: { workspacePath: string; model?: string | null; prompt?: string | null }): string | null {
+    const sessionId = session.resumeTarget ?? session.providerSessionId ?? session.conversationId;
+    if (!sessionId) {
+      return null;
+    }
+
+    return buildCodexInteractiveResumeCommand(sessionId, {
+      codexHome: session.storageRoot,
+      model: options.model ?? this.config.model ?? DEFAULT_INTERACTIVE_MODEL,
+      prompt: options.prompt ?? null
+    });
+  }
+
+  buildInteractiveStartCommand(options: AgentStartOptions, prompt: string): { command: string; session: AgentSessionRef } {
+    const sessionName = `devtask-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const codexHomePath = prepareIsolatedCodexHome(options.env?.DEVTASK_TASK_DIR ?? null, sessionName, this.config.sessionRoot ?? null);
+    const taskDir = options.env?.DEVTASK_TASK_DIR?.trim() ? [options.env.DEVTASK_TASK_DIR] : [];
+    return {
+      command: buildCodexInteractiveStartCommand(prompt, {
+        codexHome: codexHomePath,
+        model: options.model ?? this.config.model ?? DEFAULT_INTERACTIVE_MODEL,
+        fullAuto: options.fullAuto,
+        addDirs: [...taskDir, ...(options.addDirs ?? [])]
+      }),
+      session: {
+        provider: "codex",
+        transportId: null,
+        providerSessionId: null,
+        conversationId: null,
+        resumeTarget: null,
+        storageRoot: codexHomePath,
+        transcriptPath: null,
+        summary: null,
+        summaryIsFallback: null
+      }
+    };
+  }
+
+  async hydrateSessionRef(session: AgentSessionRef, workspacePath: string): Promise<AgentSessionRef> {
+    if (!session.storageRoot?.trim()) {
+      return session;
+    }
+
+    const sessionsDir = join(session.storageRoot, "sessions");
+    const transcriptPath = session.transcriptPath ?? await findSessionFileCached(sessionsDir, workspacePath);
+    if (!transcriptPath) {
+      return session;
+    }
+
+    const threadId = await extractThreadId(transcriptPath);
+    const summary = await extractAssistantSummary(transcriptPath);
+    return {
+      ...session,
+      transcriptPath,
+      providerSessionId: session.providerSessionId ?? threadId,
+      conversationId: session.conversationId ?? threadId,
+      resumeTarget: session.resumeTarget ?? threadId,
+      summary: summary ?? session.summary ?? (threadId ? "Codex session completed" : null),
+      summaryIsFallback: summary ? false : session.summaryIsFallback ?? (threadId ? true : null)
+    };
+  }
+
+  async inspectSessionActivity(session: AgentSessionRef, workspacePath: string): Promise<ActivityState> {
+    if (session.transportId) {
+      const output = await captureOutputAsync(session.transportId, 60);
+      if (output.includes("Working (") || output.includes("esc to interrupt")) {
+        return "active";
+      }
+      if (output.includes("Press enter to continue")) {
+        return "waiting_input";
+      }
+      if (output.includes("\n› ")) {
+        return "idle";
+      }
+    }
+
+    const sessionsDir = session.storageRoot?.trim() ? join(session.storageRoot, "sessions") : null;
+    if (!sessionsDir) {
+      return "unknown";
+    }
+
+    const sessionFilePath = session.transcriptPath ?? await findSessionFileCached(sessionsDir, workspacePath);
+    if (!sessionFilePath) {
+      return "unknown";
+    }
+
+    try {
+      const fileStat = await stat(sessionFilePath);
+      const ageMs = Date.now() - fileStat.mtimeMs;
+      const lines = await readJsonlTailLines(sessionFilePath, 20);
+      let lastType: string | null = null;
+
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        try {
+          const parsed = JSON.parse(lines[index]!) as CodexJsonlLine;
+          lastType = parsed.payload?.type ?? parsed.type ?? null;
+          break;
+        } catch {
+          continue;
+        }
+      }
+
+      if (lastType === "approval_request" || lastType === "exec_approval_request" || lastType === "apply_patch_approval_request") {
+        return "waiting_input";
+      }
+      if (lastType === "error" || lastType === "stream_error") {
+        return "errored";
+      }
+      return ageMs < ACTIVE_WINDOW_MS ? "active" : "idle";
+    } catch {
+      return "unknown";
+    }
   }
 
   async start(options: AgentStartOptions): Promise<SessionHandle> {

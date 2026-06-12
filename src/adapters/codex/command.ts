@@ -46,6 +46,7 @@ export function buildCodexResumeCommand(
   options: { codexHome?: string | null; model?: string | null; prompt?: string | null } = {}
 ): string {
   const args = [];
+  args.push("CODEX_DISABLE_UPDATE_CHECK=1");
   if (options.codexHome?.trim()) {
     args.push(`CODEX_HOME=${shellQuote(options.codexHome)}`);
   }
@@ -56,6 +57,55 @@ export function buildCodexResumeCommand(
   if (options.prompt?.trim()) {
     args.push(shellQuote(options.prompt.trim()));
   }
+  return args.join(" ");
+}
+
+export function buildCodexInteractiveResumeCommand(
+  sessionId: string,
+  options: { codexHome?: string | null; model?: string | null; prompt?: string | null } = {}
+): string {
+  const args = [];
+  args.push("CODEX_DISABLE_UPDATE_CHECK=1");
+  if (options.codexHome?.trim()) {
+    args.push(`CODEX_HOME=${shellQuote(options.codexHome)}`);
+  }
+  args.push("codex", "resume", shellQuote(sessionId));
+  args.push("-c", shellQuote("check_for_update_on_startup=false"));
+  if (options.model) {
+    args.push("-m", shellQuote(options.model));
+  }
+  if (options.prompt?.trim()) {
+    args.push(shellQuote(options.prompt.trim()));
+  }
+  return args.join(" ");
+}
+
+export function buildCodexInteractiveStartCommand(
+  prompt: string,
+  options: {
+    codexHome?: string | null;
+    model?: string | null;
+    fullAuto?: boolean;
+    addDirs?: readonly string[];
+  } = {}
+): string {
+  const args = [];
+  args.push("CODEX_DISABLE_UPDATE_CHECK=1");
+  if (options.codexHome?.trim()) {
+    args.push(`CODEX_HOME=${shellQuote(options.codexHome)}`);
+  }
+  args.push("codex", "--no-alt-screen");
+  args.push("-c", shellQuote("check_for_update_on_startup=false"));
+  if (options.fullAuto !== false) {
+    args.push("-a", "never", "-s", "danger-full-access");
+  }
+  for (const dir of options.addDirs ?? []) {
+    args.push("--add-dir", shellQuote(dir));
+  }
+  if (options.model) {
+    args.push("-m", shellQuote(options.model));
+  }
+  args.push(shellQuote(prompt));
   return args.join(" ");
 }
 

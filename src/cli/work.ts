@@ -20,6 +20,7 @@ import {
   readWorkPlanRecord,
   repoPlanWork,
   runPlanFeedbackWorker,
+  runInteractivePhaseFinalizer,
   reviewWork,
   runRepoPlanFeedbackWorker,
   runPlanWorker,
@@ -349,9 +350,9 @@ export function registerWorkCommands(program: Command): void {
         printError(error);
       }
     });
-  plan.command("attach").argument("<work-id>").action((workId: string) => {
+  plan.command("attach").argument("<work-id>").action(async (workId: string) => {
     try {
-      attachWorkPhase(resolveWorkspacePaths(), "plan", workId);
+      await attachWorkPhase(resolveWorkspacePaths(), "plan", workId);
     } catch (error) {
       printError(error);
     }
@@ -389,9 +390,9 @@ export function registerWorkCommands(program: Command): void {
         printError(error);
       }
     });
-  spec.command("attach").argument("<work-id>").action((workId: string) => {
+  spec.command("attach").argument("<work-id>").action(async (workId: string) => {
     try {
-      attachWorkPhase(resolveWorkspacePaths(), "spec", workId);
+      await attachWorkPhase(resolveWorkspacePaths(), "spec", workId);
     } catch (error) {
       printError(error);
     }
@@ -429,9 +430,9 @@ export function registerWorkCommands(program: Command): void {
         printError(error);
       }
     });
-  repoPlan.command("attach").argument("<work-id>").argument("<repo-id>").action((workId: string, repoId: string) => {
+  repoPlan.command("attach").argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
     try {
-      attachWorkPhase(resolveWorkspacePaths(), "repo-plan", workId, repoId);
+      await attachWorkPhase(resolveWorkspacePaths(), "repo-plan", workId, repoId);
     } catch (error) {
       printError(error);
     }
@@ -476,9 +477,9 @@ export function registerWorkCommands(program: Command): void {
         printError(error);
       }
     });
-  execute.command("attach").argument("<work-id>").argument("<repo-id>").action((workId: string, repoId: string) => {
+  execute.command("attach").argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
     try {
-      attachWorkPhase(resolveWorkspacePaths(), "execute", workId, repoId);
+      await attachWorkPhase(resolveWorkspacePaths(), "execute", workId, repoId);
     } catch (error) {
       printError(error);
     }
@@ -545,9 +546,9 @@ export function registerWorkCommands(program: Command): void {
         printError(error);
       }
     });
-  review.command("attach").argument("<work-id>").argument("<repo-id>").action((workId: string, repoId: string) => {
+  review.command("attach").argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
     try {
-      attachWorkPhase(resolveWorkspacePaths(), "review", workId, repoId);
+      await attachWorkPhase(resolveWorkspacePaths(), "review", workId, repoId);
     } catch (error) {
       printError(error);
     }
@@ -620,6 +621,22 @@ export function registerWorkCommands(program: Command): void {
   work.command("_review-feedback-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
     try {
       await runReviewFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_phase-finalize", { hidden: true }).argument("<phase>").argument("<work-id>").argument("[repo-id]").action(async (phase: string, workId: string, repoId?: string) => {
+    try {
+      const normalized = normalizeRequiredPhase(phase);
+      if (normalized === "execute" || normalized === "compound") {
+        throw new DevtaskError(`Unsupported interactive phase finalizer: ${phase}`);
+      }
+      await runInteractivePhaseFinalizer(
+        resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()),
+        normalized,
+        workId,
+        repoId ?? null
+      );
     } catch (error) {
       printError(error);
     }
