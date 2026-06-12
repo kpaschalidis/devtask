@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { AgentSessionRef } from "../agent-session.js";
 import type { DevtaskConfig } from "../infra/config.js";
 import { readConfig } from "../infra/config.js";
 import type { DevtaskPaths } from "../infra/paths.js";
@@ -13,10 +14,12 @@ import {
   workItemReviewDir,
   workItemPhaseRunsDir,
   workItemRepoPhaseRunsDir,
+  workItemSessionRegistryDir,
   workItemSpecPath,
   workItemSpecRunsDir
 } from "../infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
+import { writeAgentSessionRegistryEntry } from "../infra/agent-session-registry.js";
 import { writePhaseRunRecord } from "../infra/phase-run.js";
 import { newRunId } from "../infra/run-record.js";
 import { collectPhaseMemory } from "../improvement-memory.js";
@@ -138,13 +141,7 @@ export interface WorkSpecResult {
   outputPath: string;
   exitCode: number | null;
   generatedAt: string;
-  session: {
-    transportSessionId: string | null;
-    threadId: string | null;
-    agentSessionId: string | null;
-    summary: string | null;
-    summaryIsFallback: boolean | null;
-  };
+  session: AgentSessionRef;
 }
 
 export interface ReviewTaskResult {
@@ -496,6 +493,18 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
     },
     exitCode: result.status === "completed" ? 0 : null
   });
+  writeAgentSessionRegistryEntry(workItemSessionRegistryDir(paths, workId), {
+    schemaVersion: 1,
+    runId,
+    workId,
+    phase: "compound",
+    repoId: null,
+    taskId: null,
+    status,
+    startedAt,
+    finishedAt,
+    session: result.session
+  });
 
   const compoundResult: CompoundWorkResult = {
     workId,
@@ -808,6 +817,7 @@ async function writeExecutePhaseRun(
   meta: TaskMeta,
   status: string
 ): Promise<void> {
+  const provider = readConfig(workspacePaths).agent.provider;
   const runId = newRunId();
   writePhaseRunRecord(workItemRepoPhaseRunsDir(workspacePaths, workId, "execute", task.repoId), {
     schemaVersion: 1,
@@ -822,13 +832,15 @@ async function writeExecutePhaseRun(
     startedAt: meta.updatedAt,
     finishedAt: meta.updatedAt,
     session: {
-      transportSessionId: meta.tmuxSession,
-      threadId: meta.agentThreadId,
-      agentSessionId: meta.agentSessionId,
+      provider,
+      transportId: meta.tmuxSession,
+      providerSessionId: meta.agentSessionId,
+      conversationId: meta.agentThreadId,
+      resumeTarget: meta.agentSessionId,
       summary: meta.resultSummary,
       summaryIsFallback: true,
-      homePath: null,
-      sessionFilePath: null
+      storageRoot: null,
+      transcriptPath: null
     },
     artifacts: {
       taskPath: meta.taskPath,
@@ -836,6 +848,28 @@ async function writeExecutePhaseRun(
       resultPath: meta.resultPath
     },
     exitCode: null
+  });
+  writeAgentSessionRegistryEntry(workItemSessionRegistryDir(workspacePaths, workId), {
+    schemaVersion: 1,
+    runId,
+    workId,
+    phase: "execute",
+    repoId: task.repoId,
+    taskId: task.taskId,
+    status,
+    startedAt: meta.updatedAt,
+    finishedAt: meta.updatedAt,
+    session: {
+      provider,
+      transportId: meta.tmuxSession,
+      providerSessionId: meta.agentSessionId,
+      conversationId: meta.agentThreadId,
+      resumeTarget: meta.agentSessionId,
+      summary: meta.resultSummary,
+      summaryIsFallback: true,
+      storageRoot: null,
+      transcriptPath: null
+    }
   });
 }
 
@@ -1167,6 +1201,18 @@ async function runWorkspaceRepoPlan(
     },
     exitCode: result.status === "completed" ? 0 : null
   });
+  writeAgentSessionRegistryEntry(workItemSessionRegistryDir(paths, item.id), {
+    schemaVersion: 1,
+    runId,
+    workId: item.id,
+    phase: "repo-plan",
+    repoId: repo.id,
+    taskId: graphTask.id,
+    status,
+    startedAt,
+    finishedAt,
+    session: result.session
+  });
 
   return {
     status,
@@ -1312,6 +1358,18 @@ async function runSpecAgent(
     },
     exitCode: result.status === "completed" ? 0 : null
   });
+  writeAgentSessionRegistryEntry(workItemSessionRegistryDir(paths, item.id), {
+    schemaVersion: 1,
+    runId,
+    workId: item.id,
+    phase: "spec",
+    repoId: null,
+    taskId: null,
+    status,
+    startedAt,
+    finishedAt,
+    session: result.session
+  });
   return {
     runId,
     workId: item.id,
@@ -1405,6 +1463,18 @@ async function runReviewAgent(
       resultPath
     },
     exitCode: execResult.status === "completed" ? 0 : null
+  });
+  writeAgentSessionRegistryEntry(workItemSessionRegistryDir(paths, workId), {
+    schemaVersion: 1,
+    runId,
+    workId,
+    phase: "review",
+    repoId: task.repoId,
+    taskId: task.taskId,
+    status,
+    startedAt,
+    finishedAt,
+    session: execResult.session
   });
   return {
     repoId: task.repoId,

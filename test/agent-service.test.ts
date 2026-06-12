@@ -116,6 +116,12 @@ function writeDefaultConfig(paths: ReturnType<typeof resolvePaths>, provider: "c
     tracker: { provider: null },
     scm: { provider: null },
     agent: { provider },
+    agentSessions: {
+      roots: {
+        codex: null,
+        cursor: null
+      }
+    },
     codex: { model: provider === "codex" ? "gpt-5.2" : null, fullAuto: true },
     runtime: { mode: "attachable", backend: "tmux" },
     runtimeConfigured: false,

@@ -33,9 +33,13 @@ describe("planner artifacts", () => {
       exitCode: 0,
       worktreeChanged: false,
       session: {
-        transportSessionId: "session-1",
-        threadId: "thread-1",
-        agentSessionId: "agent-session-1",
+        provider: "codex",
+        transportId: "session-1",
+        providerSessionId: "agent-session-1",
+        conversationId: "thread-1",
+        resumeTarget: "agent-session-1",
+        storageRoot: null,
+        transcriptPath: null,
         summary: "planned successfully",
         summaryIsFallback: false
       }

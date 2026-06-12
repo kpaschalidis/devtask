@@ -97,7 +97,7 @@ devtask work compound APP-123
 
 `work materialize <work-id>` creates repo tasks and global workspace worktrees. `work execute <work-id>` launches or resumes the attachable coding sessions for those materialized tasks.
 
-Agent-backed phases such as `spec`, `plan`, `repo-plan`, and `review` run in dedicated persisted Codex session roots so they do not reuse the current interactive Codex thread. Their prompt, output, and session metadata can be inspected from stored phase-run records.
+Agent-backed phases such as `spec`, `plan`, `repo-plan`, and `review` persist neutral session metadata for each run. With Codex, they currently run in dedicated persisted session roots so they do not reuse the current interactive Codex thread. Their prompt, output, transcript path, and resume metadata can be inspected from stored phase-run records.
 
 Use the board to keep track of active work:
 
@@ -111,6 +111,7 @@ devtask work inspect APP-123
 devtask work runs APP-123 --latest
 devtask work runs show APP-123 execute backend
 devtask session list APP-123
+devtask session resume APP-123 backend
 ```
 
 Current observability UX is terminal output plus optional web views. `board serve` starts a local read-only board app that rereads current state on refresh, and `board html` still generates a static snapshot when you want a file artifact.

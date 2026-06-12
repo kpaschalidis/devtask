@@ -35,6 +35,17 @@ describe("codex runner isolation", () => {
     }
   });
 
+  it("can seed an isolated codex home from an explicit provider session root", () => {
+    const sourceHome = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-source-explicit-"));
+    const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-task-explicit-"));
+    fs.writeFileSync(path.join(sourceHome, "auth.json"), "{\"token\":\"explicit\"}\n");
+
+    const isolatedHome = prepareIsolatedCodexHomeForTest(taskDir, "session-2", sourceHome);
+
+    expect(isolatedHome).toBe(path.join(taskDir, "codex-sessions", "session-2", ".codex"));
+    expect(fs.readFileSync(path.join(isolatedHome, "auth.json"), "utf8")).toContain("explicit");
+  });
+
   it("matches session files only within the dedicated sessions dir", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-sessions-"));
     const workspacePath = "/tmp/project";

@@ -21,9 +21,13 @@ describe("phase run records", () => {
       startedAt: "2026-01-01T00:00:00.000Z",
       finishedAt: "2026-01-01T00:00:02.000Z",
       session: {
-        transportSessionId: "tmux-1",
-        threadId: "thread-1",
-        agentSessionId: "agent-1",
+        provider: "codex",
+        transportId: "tmux-1",
+        providerSessionId: "agent-1",
+        conversationId: "thread-1",
+        resumeTarget: "agent-1",
+        storageRoot: null,
+        transcriptPath: null,
         summary: "completed",
         summaryIsFallback: false
       },
@@ -45,9 +49,13 @@ describe("phase run records", () => {
       startedAt: "2026-01-01T00:00:03.000Z",
       finishedAt: "2026-01-01T00:00:04.000Z",
       session: {
-        transportSessionId: "tmux-2",
-        threadId: null,
-        agentSessionId: null,
+        provider: "codex",
+        transportId: "tmux-2",
+        providerSessionId: null,
+        conversationId: null,
+        resumeTarget: null,
+        storageRoot: null,
+        transcriptPath: null,
         summary: null,
         summaryIsFallback: null
       },

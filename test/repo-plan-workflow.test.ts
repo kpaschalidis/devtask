@@ -20,11 +20,15 @@ vi.mock("../src/agent.js", async (importOriginal) => {
         status: "completed",
         error: null,
         session: {
-          transportSessionId: "session-1",
-          threadId: "thread-1",
-          agentSessionId: "agent-1",
+          provider: "codex",
+          transportId: "session-1",
+          providerSessionId: "agent-1",
+          conversationId: "thread-1",
+          resumeTarget: "agent-1",
           summary: "planned",
-          summaryIsFallback: false
+          summaryIsFallback: false,
+          storageRoot: null,
+          transcriptPath: null
         }
       };
     })
@@ -62,7 +66,7 @@ describe("repo-plan workflow", () => {
     fs.mkdirSync(path.join(paths.localDir, "work", item.id, "plans"), { recursive: true });
     fs.writeFileSync(
       path.join(paths.localDir, "work", item.id, "plans", "latest.json"),
-      `${JSON.stringify({ schemaVersion: 1, phase: "plan", planId: "latest", workId: item.id, status: "planned", command: "fake", promptPath: "p", outputPath: "o", planPath: "p", graphPath: "g", startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:01.000Z", exitCode: 0, session: { transportSessionId: null, threadId: null, agentSessionId: null, summary: null, summaryIsFallback: null } }, null, 2)}\n`
+      `${JSON.stringify({ schemaVersion: 1, phase: "plan", planId: "latest", workId: item.id, status: "planned", command: "fake", promptPath: "p", outputPath: "o", planPath: "p", graphPath: "g", startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:01.000Z", exitCode: 0, session: { provider: "codex", transportId: null, providerSessionId: null, conversationId: null, resumeTarget: null, summary: null, summaryIsFallback: null, storageRoot: null, transcriptPath: null } }, null, 2)}\n`
     );
     fs.writeFileSync(
       workGraphPath(paths, item.id),

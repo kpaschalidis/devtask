@@ -263,6 +263,10 @@ export function workItemRepoPhaseRunsDir(paths: DevtaskPaths, id: string, phase:
   return path.join(workItemPhaseRunsDir(paths, id, phase), repoId);
 }
 
+export function workItemSessionRegistryDir(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemLocalDir(paths, id), "sessions");
+}
+
 export function readWorkspaceMarker(root: string): WorkspaceMarker {
   const markerPath = workspaceMarkerPath(root);
   const value = JSON.parse(fs.readFileSync(markerPath, "utf8")) as Partial<WorkspaceMarker>;

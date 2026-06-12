@@ -1,6 +1,8 @@
+import { spawn } from "node:child_process";
 import { Command } from "commander";
+import { DevtaskError } from "../infra/errors.js";
 import { resolveWorkspacePaths } from "../infra/paths.js";
-import { attachSession, getSession, listSessions, sendSessionMessage } from "../services/session-service.js";
+import { attachSession, buildSessionResumeCommand, getSession, listSessions, sendSessionMessage } from "../services/session-service.js";
 import { printError, printTable } from "./common.js";
 
 export function registerSessionCommands(program: Command): void {
@@ -48,6 +50,26 @@ export function registerSessionCommands(program: Command): void {
     });
 
   session
+    .command("resume")
+    .description("Resume one repo-local agent session through the provider adapter.")
+    .argument("<work-id>")
+    .argument("<repo-id>")
+    .argument("[prompt...]")
+    .action(async (workId: string, repoId: string, promptParts: string[]) => {
+      try {
+        const command = buildSessionResumeCommand(
+          resolveWorkspacePaths(),
+          workId,
+          repoId,
+          promptParts.length > 0 ? promptParts.join(" ") : null
+        );
+        await runInteractiveShellCommand(command);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  session
     .command("attach")
     .description("Attach to one repo-local session.")
     .argument("<work-id>")
@@ -78,4 +100,21 @@ export function registerSessionCommands(program: Command): void {
         printError(error);
       }
     });
+}
+
+async function runInteractiveShellCommand(command: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, {
+      stdio: "inherit",
+      shell: true
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new DevtaskError(`Resume command exited with code ${code ?? "unknown"}`));
+    });
+  });
 }

@@ -10,13 +10,15 @@ vi.mock("../src/infra/tmux.js", () => ({
 }));
 
 import { resolveWorkspacePathsForInit, taskMetaPath } from "../src/infra/paths.js";
+import { writeAgentSessionRegistryEntry } from "../src/infra/agent-session-registry.js";
+import { workItemSessionRegistryDir } from "../src/infra/paths.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan } from "../src/work-materializer.js";
 import { workGraphPath } from "../src/global-plan.js";
 import { readTaskMeta, writeTaskMeta } from "../src/storage/meta.js";
-import { getSession, listSessions } from "../src/services/session-service.js";
+import { buildSessionResumeCommand, getSession, listSessions } from "../src/services/session-service.js";
 import { makeTempRepo } from "./helpers.js";
 
 const tmux = await import("../src/infra/tmux.js");
@@ -45,6 +47,28 @@ describe("session service", () => {
       },
       updatedAt: "2026-01-01T00:00:11.000Z"
     });
+    writeAgentSessionRegistryEntry(workItemSessionRegistryDir(paths, "WORK-123"), {
+      schemaVersion: 1,
+      runId: "2026-01-01T00-00-11-000Z",
+      workId: "WORK-123",
+      phase: "execute",
+      repoId: "backend",
+      taskId: "work-123-backend",
+      status: "paused",
+      startedAt: "2026-01-01T00:00:09.000Z",
+      finishedAt: "2026-01-01T00:00:10.000Z",
+      session: {
+        provider: "codex",
+        transportId: "devtask-backend",
+        providerSessionId: "agent-123",
+        conversationId: "thread-123",
+        resumeTarget: "agent-123",
+        storageRoot: "/tmp/codex-home",
+        transcriptPath: "/tmp/session.jsonl",
+        summary: "waiting for API contract",
+        summaryIsFallback: false
+      }
+    });
 
     const [session] = await listSessions(paths, "WORK-123");
 
@@ -58,9 +82,44 @@ describe("session service", () => {
       runtimeReason: "recorded tmux session devtask-backend is not running",
       lastActivityAt: "2026-01-01T00:00:10.000Z",
       resultSummary: "waiting for API contract",
-      threadId: "thread-123",
-      agentSessionId: "agent-123"
+      provider: "codex",
+      conversationId: "thread-123",
+      providerSessionId: "agent-123",
+      resumeTarget: "agent-123",
+      storageRoot: "/tmp/codex-home",
+      transcriptPath: "/tmp/session.jsonl"
     });
+  });
+
+  it("builds a resume command from the persisted neutral session record", async () => {
+    const { paths } = await createMaterializedWork();
+    writeAgentSessionRegistryEntry(workItemSessionRegistryDir(paths, "WORK-123"), {
+      schemaVersion: 1,
+      runId: "2026-01-01T00-00-11-000Z",
+      workId: "WORK-123",
+      phase: "execute",
+      repoId: "backend",
+      taskId: "work-123-backend",
+      status: "paused",
+      startedAt: "2026-01-01T00:00:09.000Z",
+      finishedAt: "2026-01-01T00:00:10.000Z",
+      session: {
+        provider: "codex",
+        transportId: "devtask-backend",
+        providerSessionId: "agent-123",
+        conversationId: "thread-123",
+        resumeTarget: "agent-123",
+        storageRoot: "/tmp/codex-home",
+        transcriptPath: "/tmp/session.jsonl",
+        summary: "waiting for API contract",
+        summaryIsFallback: false
+      }
+    });
+
+    expect(buildSessionResumeCommand(paths, "WORK-123", "backend")).toBe("CODEX_HOME=/tmp/codex-home codex exec resume agent-123");
+    expect(buildSessionResumeCommand(paths, "WORK-123", "backend", "continue with tests")).toBe(
+      "CODEX_HOME=/tmp/codex-home codex exec resume agent-123 'continue with tests'"
+    );
   });
 
   it("marks live sessions as active while preserving task status", async () => {

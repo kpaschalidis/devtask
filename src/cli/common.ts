@@ -16,7 +16,7 @@ export function printTable(headers: string[], rows: string[][]): void {
 
   console.log(headers.map((header, index) => header.padEnd(widths[index])).join("  "));
   for (const row of rows) {
-    console.log(row.map((value, index) => value.padEnd(widths[index])).join("  "));
+    console.log(headers.map((_header, index) => (row[index] ?? "").padEnd(widths[index])).join("  "));
   }
 }
 

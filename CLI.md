@@ -98,7 +98,7 @@ Notes:
 - `plan` builds the global work plan
 - `repo-plan` is triggered manually and builds per-repo implementation plans for all affected repos in the work item
 - current `repo-plan` execution is sequential, not parallel
-- agent-backed phases use isolated persisted Codex session roots rather than the current interactive Codex thread
+- agent-backed phases persist neutral session records and, for Codex today, run in isolated persisted session roots rather than the current interactive Codex thread
 - `materialize` creates repo task records and global workspace worktrees for all repos in the work item
 - `execute` launches or resumes the attachable execution sessions for those repo tasks
 - `check` and `verify` are deterministic
@@ -150,11 +150,12 @@ Repo task sessions:
 ```bash
 devtask session list <work-id>
 devtask session show <work-id> <repo-id>
+devtask session resume <work-id> <repo-id> [prompt]
 devtask session attach <work-id> <repo-id>
 devtask session send <work-id> <repo-id> <message>
 ```
 
-`session list` now surfaces task status, session liveness, runtime reason, last activity, and result summary from stored task metadata. `session show` exposes the richer JSON shape, including thread and agent session identifiers when available.
+`session list` surfaces task status, session liveness, runtime reason, last activity, and result summary from stored task metadata plus the persisted session registry. `session show` exposes the richer JSON shape, including provider, conversation id, provider session id, resume target, storage root, and transcript path when available. `session resume` resumes the latest persisted provider session through the adapter when that provider supports resumable sessions.
 
 ## Worktree
 

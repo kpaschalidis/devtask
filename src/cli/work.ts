@@ -123,7 +123,7 @@ export function registerWorkCommands(program: Command): void {
             row.taskId ?? "-",
             row.status,
             row.finishedAt,
-            row.session.transportSessionId ?? "-",
+            row.session.transportId ?? "-",
             row.session.summary ?? "-"
           ])
         );
@@ -219,15 +219,16 @@ export function registerWorkCommands(program: Command): void {
         if (inspection.latestPhaseRuns.length > 0) {
           console.log("");
           printTable(
-            ["PHASE", "REPO", "TASK", "STATUS", "SESSION", "THREAD", "SESSION_FILE", "PROMPT", "ARTIFACTS", "RUN_FILE"],
+            ["PHASE", "REPO", "TASK", "STATUS", "PROVIDER", "TRANSPORT", "CONVERSATION", "TRANSCRIPT", "PROMPT", "ARTIFACTS", "RUN_FILE"],
             inspection.latestPhaseRuns.map((run) => [
               run.phase,
               run.repoId ?? "-",
               run.taskId ?? "-",
               run.status,
-              run.transportSessionId ?? "-",
-              run.threadId ?? "-",
-              run.sessionFilePath ?? "-",
+              run.provider ?? "-",
+              run.transportId ?? "-",
+              run.conversationId ?? "-",
+              run.transcriptPath ?? "-",
               run.promptPath,
               Object.entries(run.artifacts).map(([name, artifactPath]) => `${name}=${artifactPath}`).join(", ") || "-",
               run.filePath

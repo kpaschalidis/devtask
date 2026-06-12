@@ -29,12 +29,14 @@ export interface WorkInspection {
     promptPath: string;
     outputPath: string;
     filePath: string;
-    transportSessionId: string | null;
-    threadId: string | null;
-    agentSessionId: string | null;
+    provider: string;
+    transportId: string | null;
+    conversationId: string | null;
+    providerSessionId: string | null;
+    resumeTarget: string | null;
     summary: string | null;
-    homePath: string | null;
-    sessionFilePath: string | null;
+    storageRoot: string | null;
+    transcriptPath: string | null;
     artifacts: Record<string, string>;
   }>;
   problemTasks: Array<{
@@ -72,12 +74,14 @@ export function inspectWork(paths: DevtaskPaths, workId: string): WorkInspection
     promptPath: run.promptPath,
     outputPath: run.outputPath,
     filePath: run.filePath,
-    transportSessionId: run.session.transportSessionId,
-    threadId: run.session.threadId,
-    agentSessionId: run.session.agentSessionId,
+    provider: run.session.provider,
+    transportId: run.session.transportId,
+    conversationId: run.session.conversationId,
+    providerSessionId: run.session.providerSessionId,
+    resumeTarget: run.session.resumeTarget,
     summary: run.session.summary,
-    homePath: run.session.homePath ?? null,
-    sessionFilePath: run.session.sessionFilePath ?? null,
+    storageRoot: run.session.storageRoot ?? null,
+    transcriptPath: run.session.transcriptPath ?? null,
     artifacts: run.artifacts
   }));
 

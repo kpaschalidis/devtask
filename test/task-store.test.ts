@@ -28,6 +28,12 @@ describe("task store", () => {
       agent: {
         provider: "codex"
       },
+      agentSessions: {
+        roots: {
+          codex: null,
+          cursor: null
+        }
+      },
       codex: {
         model: null,
         fullAuto: true

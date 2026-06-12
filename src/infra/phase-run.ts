@@ -1,17 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { emptyAgentSessionRef, type AgentSessionRef } from "../agent-session.js";
 
 export type PhaseRunPhase = "spec" | "plan" | "repo-plan" | "review" | "execute" | "compound";
 
-export interface PhaseRunSessionMetadata {
-  transportSessionId: string | null;
-  threadId: string | null;
-  agentSessionId: string | null;
-  summary: string | null;
-  summaryIsFallback: boolean | null;
-  homePath: string | null;
-  sessionFilePath: string | null;
-}
+export type PhaseRunSessionMetadata = AgentSessionRef;
 
 export interface PhaseRunRecord {
   schemaVersion: 1;
@@ -31,15 +24,7 @@ export interface PhaseRunRecord {
 }
 
 export function emptyPhaseRunSessionMetadata(): PhaseRunSessionMetadata {
-  return {
-    transportSessionId: null,
-    threadId: null,
-    agentSessionId: null,
-    summary: null,
-    summaryIsFallback: null,
-    homePath: null,
-    sessionFilePath: null
-  };
+  return emptyAgentSessionRef();
 }
 
 export function writePhaseRunRecord(dir: string, record: PhaseRunRecord): string {

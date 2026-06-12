@@ -49,6 +49,12 @@ describe("config", () => {
       agent: {
         provider: "codex"
       },
+      agentSessions: {
+        roots: {
+          codex: null,
+          cursor: null
+        }
+      },
       codex: {
         model: null,
         fullAuto: true
@@ -78,6 +84,12 @@ describe("config", () => {
       scm: { provider: null },
       agent: {
         provider: "codex"
+      },
+      agentSessions: {
+        roots: {
+          codex: null,
+          cursor: null
+        }
       },
       codex: {
         model: null,
@@ -154,6 +166,37 @@ describe("config", () => {
 
     expect(readConfig(paths).agent).toEqual({
       provider: "codex"
+    });
+    expect(readConfig(paths).agentSessions).toEqual({
+      roots: {
+        codex: null,
+        cursor: null
+      }
+    });
+  });
+
+  it("reads configured provider session roots when present", async () => {
+    const repo = await makeTempRepo();
+    const paths = resolvePaths(repo);
+    fs.mkdirSync(paths.baseDir, { recursive: true });
+    fs.writeFileSync(
+      paths.configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        agentSessions: {
+          roots: {
+            codex: "/tmp/codex-root",
+            cursor: "/tmp/cursor-root"
+          }
+        }
+      })
+    );
+
+    expect(readConfig(paths).agentSessions).toEqual({
+      roots: {
+        codex: "/tmp/codex-root",
+        cursor: "/tmp/cursor-root"
+      }
     });
   });
 

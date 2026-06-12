@@ -8,8 +8,9 @@ import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
+import type { AgentSessionRef } from "../../agent-session.js";
 import type { ActivityState, AgentRunner, AgentStartOptions, RunEvent, RunOptions, SessionHandle } from "../../agent.js";
-import { buildCodexCommand, buildCodexCommandArgs } from "./command.js";
+import { buildCodexCommand, buildCodexCommandArgs, buildCodexResumeCommand } from "./command.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -50,6 +51,7 @@ interface SessionState {
 
 export interface CodexAgentRunnerConfig {
   model?: string;
+  sessionRoot?: string;
 }
 
 interface CodexSessionMeta {
@@ -80,9 +82,22 @@ export class CodexAgentRunner implements AgentRunner {
     });
   }
 
+  buildResumeCommand(session: AgentSessionRef, options: { workspacePath: string; model?: string | null; prompt?: string | null }): string | null {
+    const sessionId = session.resumeTarget ?? session.providerSessionId ?? session.conversationId;
+    if (!sessionId) {
+      return null;
+    }
+
+    return buildCodexResumeCommand(sessionId, {
+      codexHome: session.storageRoot,
+      model: options.model ?? this.config.model ?? null,
+      prompt: options.prompt ?? null
+    });
+  }
+
   async start(options: AgentStartOptions): Promise<SessionHandle> {
     const sessionName = `devtask-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const codexHomePath = prepareIsolatedCodexHome(options.env?.DEVTASK_TASK_DIR ?? null, sessionName);
+    const codexHomePath = prepareIsolatedCodexHome(options.env?.DEVTASK_TASK_DIR ?? null, sessionName, this.config.sessionRoot ?? null);
 
     this.sessionStates.set(sessionName, {
       workspacePath: options.workspacePath,
@@ -95,9 +110,12 @@ export class CodexAgentRunner implements AgentRunner {
 
     return {
       id: sessionName,
-      threadId: null,
-      homePath: codexHomePath,
-      sessionFilePath: null
+      provider: "codex",
+      providerSessionId: null,
+      conversationId: null,
+      resumeTarget: null,
+      storageRoot: codexHomePath,
+      transcriptPath: null
     };
   }
 
@@ -199,7 +217,7 @@ export class CodexAgentRunner implements AgentRunner {
       const sessionFilePath = state.sessionFilePath ?? await findSessionFileCached(state.sessionsDir, state.workspacePath, state.startedAtMs);
       if (sessionFilePath) {
         state.sessionFilePath = sessionFilePath;
-        session.sessionFilePath = sessionFilePath;
+        session.transcriptPath = sessionFilePath;
         try {
           const fileStat = await stat(sessionFilePath);
           activityState = updateSessionActivity(activityState, fileStat.mtimeMs, Date.now());
@@ -224,9 +242,12 @@ export class CodexAgentRunner implements AgentRunner {
 
     const sessionFilePath = await findSessionFileCached(state.sessionsDir, state.workspacePath, state.startedAtMs);
     state.sessionFilePath = sessionFilePath;
-    session.sessionFilePath = sessionFilePath;
+    session.transcriptPath = sessionFilePath;
     if (sessionFilePath) {
-      session.threadId = await extractThreadId(sessionFilePath);
+      const threadId = await extractThreadId(sessionFilePath);
+      session.conversationId = threadId;
+      session.providerSessionId = threadId;
+      session.resumeTarget = threadId;
     }
 
     if (spawnErrorMessage) {
@@ -291,23 +312,21 @@ export class CodexAgentRunner implements AgentRunner {
     }
   }
 
-  async getSessionInfo(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean; agentSessionId: string | null } | null> {
+  async getSessionInfo(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean } | null> {
     const state = this.sessionStates.get(session.id);
-    const sessionFilePath = session.sessionFilePath ?? state?.sessionFilePath ?? null;
+    const sessionFilePath = session.transcriptPath ?? state?.sessionFilePath ?? null;
     if (!sessionFilePath) {
       return null;
     }
 
     const summary = await extractAssistantSummary(sessionFilePath);
-    const agentSessionId = await extractThreadId(sessionFilePath);
-    if (!summary && !agentSessionId) {
+    if (!summary && !session.providerSessionId) {
       return null;
     }
 
     return {
       summary: summary ?? "Codex session completed",
-      summaryIsFallback: summary === null,
-      agentSessionId
+      summaryIsFallback: summary === null
     };
   }
 
@@ -356,7 +375,10 @@ export async function resolveCodexBinary(): Promise<string> {
   return "codex";
 }
 
-function defaultCodexHome(): string {
+function defaultCodexHome(explicitRoot?: string | null): string {
+  if (explicitRoot?.trim()) {
+    return explicitRoot;
+  }
   return process.env.CODEX_HOME?.trim() ? process.env.CODEX_HOME : join(homedir(), ".codex");
 }
 
@@ -371,8 +393,8 @@ function copyCodexHomeFileIfPresent(sourceHome: string, targetHome: string, rela
   fs.copyFileSync(source, target);
 }
 
-function prepareIsolatedCodexHome(taskDir: string | null, sessionName: string): string {
-  const sourceHome = defaultCodexHome();
+function prepareIsolatedCodexHome(taskDir: string | null, sessionName: string, sourceRoot?: string | null): string {
+  const sourceHome = defaultCodexHome(sourceRoot);
   const targetRoot = taskDir
     ? join(taskDir, "codex-sessions", sessionName)
     : join(tmpdir(), `devtask-codex-home-${sessionName}`);
@@ -387,8 +409,8 @@ function prepareIsolatedCodexHome(taskDir: string | null, sessionName: string): 
   return targetHome;
 }
 
-export function prepareIsolatedCodexHomeForTest(taskDir: string | null, sessionName: string): string {
-  return prepareIsolatedCodexHome(taskDir, sessionName);
+export function prepareIsolatedCodexHomeForTest(taskDir: string | null, sessionName: string, sourceRoot?: string | null): string {
+  return prepareIsolatedCodexHome(taskDir, sessionName, sourceRoot);
 }
 
 function buildSessionCacheKey(sessionsDir: string, workspacePath: string, startedAtMs?: number): string {

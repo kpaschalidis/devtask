@@ -13,11 +13,13 @@ vi.mock("../src/infra/tmux.js", () => ({
 }));
 
 import { resolvePaths, resolveWorkspacePathsForInit, taskMetaPath } from "../src/infra/paths.js";
+import { writeConfig } from "../src/infra/config.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan } from "../src/work-materializer.js";
 import { workGraphPath } from "../src/global-plan.js";
+import { getLatestWorkPhaseRun } from "../src/services/phase-run-service.js";
 import { executeWork } from "../src/services/work-service.js";
 import { readTaskMeta } from "../src/storage/meta.js";
 import { getWorkItem } from "../src/storage/work-store.js";
@@ -94,6 +96,27 @@ describe("work execute", () => {
     expect(updated.resultSummary).toBe("waiting for API contract");
     expect(tmux.createBareSession).not.toHaveBeenCalled();
     expect(getWorkItem(paths, "WORK-123").status).toBe("blocked");
+  });
+
+  it("writes execute session records with the configured provider", async () => {
+    const { paths } = await createMaterializedWork();
+    writeConfig(paths, {
+      schemaVersion: 1,
+      tracker: { provider: null },
+      scm: { provider: null },
+      agent: { provider: "cursor" },
+      agentSessions: { roots: { codex: null, cursor: null } },
+      codex: { model: null, fullAuto: true },
+      runtime: { mode: "attachable", backend: "tmux" },
+      runtimeConfigured: false,
+      jira: { baseUrl: null, email: null, cloudId: null },
+      verify: []
+    });
+    vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-test-work-123-backend");
+
+    await executeWork(paths, "WORK-123");
+
+    expect(getLatestWorkPhaseRun(paths, "WORK-123", "execute", "backend")?.session.provider).toBe("cursor");
   });
 });
 

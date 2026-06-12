@@ -41,6 +41,24 @@ export function buildCodexCommandArgs(
   return args;
 }
 
+export function buildCodexResumeCommand(
+  sessionId: string,
+  options: { codexHome?: string | null; model?: string | null; prompt?: string | null } = {}
+): string {
+  const args = [];
+  if (options.codexHome?.trim()) {
+    args.push(`CODEX_HOME=${shellQuote(options.codexHome)}`);
+  }
+  args.push("codex", "exec", "resume", shellQuote(sessionId));
+  if (options.model) {
+    args.push("-m", shellQuote(options.model));
+  }
+  if (options.prompt?.trim()) {
+    args.push(shellQuote(options.prompt.trim()));
+  }
+  return args.join(" ");
+}
+
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9._/:@+-]+$/.test(value)) {
     return value;

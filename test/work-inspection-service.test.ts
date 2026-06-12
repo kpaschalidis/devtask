@@ -81,11 +81,15 @@ describe("work inspection service", () => {
       startedAt: "2026-01-01T00:00:09.000Z",
       finishedAt: "2026-01-01T00:00:10.000Z",
       session: {
-        transportSessionId: "devtask-backend",
-        threadId: "thread-123",
-        agentSessionId: "agent-123",
+        provider: "codex",
+        transportId: "devtask-backend",
+        providerSessionId: "agent-123",
+        conversationId: "thread-123",
+        resumeTarget: "agent-123",
         summary: "waiting for API contract",
-        summaryIsFallback: false
+        summaryIsFallback: false,
+        storageRoot: null,
+        transcriptPath: null
       },
       artifacts: {
         resultPath: "/tmp/result.json"
@@ -101,10 +105,11 @@ describe("work inspection service", () => {
       repoId: "backend",
       status: "blocked",
       promptPath: "/tmp/execute.prompt.md",
-      transportSessionId: "devtask-backend",
-      threadId: "thread-123",
-      agentSessionId: "agent-123",
-      sessionFilePath: null,
+      provider: "codex",
+      transportId: "devtask-backend",
+      conversationId: "thread-123",
+      providerSessionId: "agent-123",
+      transcriptPath: null,
       artifacts: {
         resultPath: "/tmp/result.json"
       }

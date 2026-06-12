@@ -73,7 +73,15 @@ export class CursorAgentRunner implements AgentRunner {
       lastOutput: initialOutput
     });
 
-    return { id: sessionName, threadId: null };
+    return {
+      id: sessionName,
+      provider: "cursor",
+      providerSessionId: null,
+      conversationId: null,
+      resumeTarget: null,
+      storageRoot: null,
+      transcriptPath: null
+    };
   }
 
   async *run(session: SessionHandle, prompt: string, opts?: RunOptions): AsyncIterable<RunEvent> {
@@ -177,7 +185,7 @@ export class CursorAgentRunner implements AgentRunner {
     return (await hasRecentActivitySignal(state.workspacePath)) ? "active" : "idle";
   }
 
-  async getSessionInfo(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean; agentSessionId: null } | null> {
+  async getSessionInfo(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean } | null> {
     const state = this.sessionStates.get(session.id);
     if (!state) {
       return null;
@@ -190,8 +198,7 @@ export class CursorAgentRunner implements AgentRunner {
 
     return {
       summary,
-      summaryIsFallback: true,
-      agentSessionId: null
+      summaryIsFallback: true
     };
   }
 }

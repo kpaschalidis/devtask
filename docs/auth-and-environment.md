@@ -31,6 +31,7 @@ tmux is recommended for attachable repo-local sessions:
 tmux -V
 devtask config runtime attachable
 devtask session list <work-id>
+devtask session resume <work-id> <repo-id>
 devtask session attach <work-id> <repo-id>
 devtask session send <work-id> <repo-id> "message"
 devtask work execute <work-id>

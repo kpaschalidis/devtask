@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import type { AgentProvider, AgentSessionRef } from "./agent-session.js";
 import { CodexAgentRunner } from "./adapters/codex/index.js";
 import { buildCodexCommand } from "./adapters/codex/command.js";
 import { CursorAgentRunner } from "./adapters/cursor/index.js";
@@ -7,9 +8,12 @@ import { captureOutputAsync, getForegroundCommand, isSessionAliveAsync, sendKeyA
 
 export interface SessionHandle {
   id: string;
-  threadId?: string | null;
-  homePath?: string | null;
-  sessionFilePath?: string | null;
+  provider: AgentProvider;
+  providerSessionId?: string | null;
+  conversationId?: string | null;
+  resumeTarget?: string | null;
+  storageRoot?: string | null;
+  transcriptPath?: string | null;
 }
 
 export type ActivityState = "idle" | "active" | "waiting_input" | "errored" | "unknown";
@@ -21,6 +25,12 @@ export interface AgentStartOptions {
   skipGitRepoCheck?: boolean;
   addDirs?: readonly string[];
   env?: Record<string, string>;
+}
+
+export interface AgentResumeOptions {
+  workspacePath: string;
+  model?: string | null;
+  prompt?: string | null;
 }
 
 export interface RunOptions {
@@ -42,23 +52,16 @@ export interface AgentRunner {
   sendInput?(session: SessionHandle, message: string): Promise<void>;
   isAlive?(session: SessionHandle): Promise<boolean>;
   getActivityState?(session: SessionHandle): Promise<ActivityState>;
-  getSessionInfo?(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean; agentSessionId: string | null } | null>;
+  getSessionInfo?(session: SessionHandle): Promise<Pick<AgentSessionRef, "summary" | "summaryIsFallback"> | null>;
   stop?(session: SessionHandle): Promise<void>;
   buildStartCommand?(options: AgentStartOptions): string;
+  buildResumeCommand?(session: AgentSessionRef, options: AgentResumeOptions): string | null;
 }
 
 export interface AgentPromptResult {
   status: "completed" | "failed" | "input_required" | "stalled";
   error: string | null;
-  session: {
-    transportSessionId: string | null;
-    threadId: string | null;
-    agentSessionId: string | null;
-    summary: string | null;
-    summaryIsFallback: boolean | null;
-    homePath: string | null;
-    sessionFilePath: string | null;
-  };
+  session: AgentSessionRef;
 }
 
 export function createDefaultAgentRunner(config: DevtaskConfig): AgentRunner {
@@ -69,7 +72,8 @@ export function createDefaultAgentRunner(config: DevtaskConfig): AgentRunner {
   }
 
   return new CodexAgentRunner({
-    model: config.codex.model ?? undefined
+    model: config.codex.model ?? undefined,
+    sessionRoot: config.agentSessions.roots.codex ?? undefined
   });
 }
 
@@ -141,13 +145,15 @@ export async function runAgentPrompt(
       status,
       error,
       session: {
-        transportSessionId: session.id ?? null,
-        threadId: session.threadId ?? null,
-        agentSessionId: sessionInfo?.agentSessionId ?? null,
+        provider: session.provider,
+        transportId: session.id ?? null,
+        providerSessionId: session.providerSessionId ?? null,
+        conversationId: session.conversationId ?? null,
+        resumeTarget: session.resumeTarget ?? null,
+        storageRoot: session.storageRoot ?? null,
+        transcriptPath: session.transcriptPath ?? null,
         summary: sessionInfo?.summary ?? null,
-        summaryIsFallback: sessionInfo?.summaryIsFallback ?? null,
-        homePath: session.homePath ?? null,
-        sessionFilePath: session.sessionFilePath ?? null
+        summaryIsFallback: sessionInfo?.summaryIsFallback ?? null
       }
     };
   }
