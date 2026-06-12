@@ -20,7 +20,7 @@ import {
   readWorkPlanRecord,
   repoPlanWork,
   runPlanFeedbackWorker,
-  runInteractivePhaseFinalizer,
+  runManagedPhaseHookFinalizer,
   reviewWork,
   runRepoPlanFeedbackWorker,
   runPlanWorker,
@@ -625,16 +625,17 @@ export function registerWorkCommands(program: Command): void {
       printError(error);
     }
   });
-  work.command("_phase-finalize", { hidden: true }).argument("<phase>").argument("<work-id>").argument("[repo-id]").action(async (phase: string, workId: string, repoId?: string) => {
+  work.command("_phase-finalize-hook", { hidden: true }).argument("<phase>").argument("<work-id>").argument("<run-id>").argument("[repo-id]").action(async (phase: string, workId: string, runId: string, repoId?: string) => {
     try {
       const normalized = normalizeRequiredPhase(phase);
       if (normalized === "execute" || normalized === "compound") {
         throw new DevtaskError(`Unsupported interactive phase finalizer: ${phase}`);
       }
-      await runInteractivePhaseFinalizer(
+      await runManagedPhaseHookFinalizer(
         resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()),
         normalized,
         workId,
+        runId,
         repoId ?? null
       );
     } catch (error) {

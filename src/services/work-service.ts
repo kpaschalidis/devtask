@@ -1,7 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { setTimeout as sleep } from "node:timers/promises";
 import type { AgentSessionRef } from "../agent-session.js";
 import type { DevtaskConfig } from "../infra/config.js";
 import { readConfig } from "../infra/config.js";
@@ -360,27 +358,20 @@ function launchInteractiveResume(cwd: string, tmuxSession: string, command: stri
   }
 }
 
-function spawnDetachedPhaseFinalizer(
+function buildManagedPhaseCompletionCommand(
   paths: DevtaskPaths,
   phase: "spec" | "plan" | "repo-plan" | "review",
   workId: string,
-  repoId: string | null
-): void {
-  const entry = path.resolve(process.cwd(), "dist/bin/devtask.js");
-  const args = ["work", "_phase-finalize", phase, workId];
-  if (repoId) {
-    args.push(repoId);
-  }
-  const child = spawn(process.execPath, [entry, ...args], {
-    cwd: paths.root,
-    env: {
-      ...process.env,
-      DEVTASK_WORKSPACE_ROOT: paths.root
-    },
-    detached: true,
-    stdio: "ignore"
-  });
-  child.unref();
+  repoId: string | null,
+  runId: string
+): string {
+  const args = repoId
+    ? ["work", "_phase-finalize-hook", phase, workId, runId, repoId]
+    : ["work", "_phase-finalize-hook", phase, workId, runId];
+  return [
+    `export DEVTASK_WORKSPACE_ROOT=${shellEscape(paths.root)}`,
+    `exec ${phaseWorkerCommand(args)}`
+  ].join("\n");
 }
 
 async function startInteractivePhaseFreshSession(
@@ -430,7 +421,6 @@ async function startInteractivePhaseFreshSession(
       summaryIsFallback: true
     }
   });
-  spawnDetachedPhaseFinalizer(paths, phase, workId, repoId);
   return {
     phase,
     workId,
@@ -460,16 +450,6 @@ async function startPhaseFeedbackSession(
   );
 }
 
-async function startPhaseResumeSession(
-  paths: DevtaskPaths,
-  phase: "spec" | "plan" | "repo-plan" | "review",
-  workId: string,
-  repoId: string | null
-): Promise<PhaseLaunchResult> {
-  const previous = readResumeSession(paths, workId, phase, repoId);
-  return startPhaseResumedSession(paths, phase, workId, repoId, buildPhaseResumePrompt(phase, previous.session));
-}
-
 async function startInteractivePhaseResumeSession(
   paths: DevtaskPaths,
   phase: "spec" | "plan" | "repo-plan" | "review",
@@ -480,18 +460,19 @@ async function startInteractivePhaseResumeSession(
 ): Promise<PhaseLaunchResult> {
   ensureNoLiveScopedPhaseSession(paths, workId, phase, repoId);
   const previous = readResumeSession(paths, workId, phase, repoId);
+  const runId = newRunId();
   const config = readConfig(paths);
   const runner = createDefaultAgentRunner(config);
   const command = runner.buildInteractiveResumeCommand?.(previous.session, {
     workspacePath: phaseCwd(paths, phase, workId, repoId),
     model: config.codex.model ?? null,
-    prompt: prompt ?? null
+    prompt: prompt ?? null,
+    managedCompletionCommand: trackCompletion ? buildManagedPhaseCompletionCommand(paths, phase, workId, repoId, runId) : null
   });
   if (!command) {
     throw new DevtaskError(`Provider ${previous.session.provider} does not support interactive resume for ${phase}`);
   }
 
-  const runId = newRunId();
   const startedAt = new Date().toISOString();
   const { tmuxSession, cwd, promptPath, outputPath, taskId, artifacts } = preparePhaseFeedbackScope(paths, phase, workId, repoId, runId);
   fs.mkdirSync(path.dirname(promptPath), { recursive: true });
@@ -516,62 +497,7 @@ async function startInteractivePhaseResumeSession(
       summaryIsFallback: true
     }
   });
-  if (trackCompletion) {
-    spawnDetachedPhaseFinalizer(paths, phase, workId, repoId);
-  }
   return { phase, workId, repoId, taskId, status: "started", tmuxSession, promptPath, outputPath };
-}
-
-async function startPhaseResumedSession(
-  paths: DevtaskPaths,
-  phase: "spec" | "plan" | "repo-plan" | "review",
-  workId: string,
-  repoId: string | null,
-  prompt: string
-): Promise<PhaseLaunchResult> {
-  ensureNoLiveScopedPhaseSession(paths, workId, phase, repoId);
-  const previous = readResumeSession(paths, workId, phase, repoId);
-  const runId = newRunId();
-  const startedAt = new Date().toISOString();
-  const { tmuxSession, cwd, promptPath, outputPath, taskId, artifacts } = preparePhaseFeedbackScope(paths, phase, workId, repoId, runId);
-  fs.mkdirSync(path.dirname(promptPath), { recursive: true });
-  fs.writeFileSync(promptPath, `${prompt}\n`);
-  const args = repoId
-    ? ["work", feedbackWorkerCommand(phase), workId, repoId]
-    : ["work", feedbackWorkerCommand(phase), workId];
-  launchPhaseWorker(cwd, tmuxSession, args, paths.root);
-  writeRunningScopedPhaseSession(paths, {
-    phase,
-    workId,
-    repoId,
-    taskId,
-    runId,
-    tmuxSession,
-    startedAt,
-    promptPath,
-    outputPath,
-    artifacts,
-    session: {
-      ...previous.session,
-      transportId: tmuxSession,
-      summary: `${phase} feedback session started`,
-      summaryIsFallback: true
-    }
-  });
-  return { phase, workId, repoId, taskId, status: "started", tmuxSession, promptPath, outputPath };
-}
-
-function feedbackWorkerCommand(phase: "spec" | "plan" | "repo-plan" | "review"): string {
-  switch (phase) {
-    case "spec":
-      return "_spec-feedback-worker";
-    case "plan":
-      return "_plan-feedback-worker";
-    case "repo-plan":
-      return "_repo-plan-feedback-worker";
-    case "review":
-      return "_review-feedback-worker";
-  }
 }
 
 function buildPhaseFeedbackPrompt(
@@ -756,6 +682,7 @@ export async function startSpecWork(paths: DevtaskPaths, workId: string): Promis
       fullAuto: readConfig(paths).codex.fullAuto,
       skipGitRepoCheck: true,
       addDirs: [path.dirname(item.source.artifact)],
+      managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "spec", workId, null, runId),
       env: {
         ...process.env,
         DEVTASK_TASK_DIR: workItemDir(paths, item.id),
@@ -794,6 +721,7 @@ export async function startPlanWork(paths: DevtaskPaths, workId: string): Promis
       fullAuto: readConfig(paths).codex.fullAuto,
       skipGitRepoCheck: true,
       addDirs: workPlanAddDirsForTest(item, repos),
+      managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "plan", workId, null, runId),
       env: {
         ...process.env,
         DEVTASK_TASK_DIR: workItemDir(paths, workId),
@@ -873,6 +801,7 @@ export async function startRepoPlanScope(paths: DevtaskPaths, workId: string, re
       fullAuto: readConfig(paths).codex.fullAuto,
       skipGitRepoCheck: true,
       addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
+      managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "repo-plan", workId, repoId, runId),
       env: {
         ...process.env,
         DEVTASK_TASK_DIR: workItemDir(paths, workId),
@@ -933,6 +862,7 @@ export async function startReviewScope(paths: DevtaskPaths, workId: string, repo
       fullAuto: false,
       skipGitRepoCheck: true,
       addDirs: [workItemDir(paths, workId)],
+      managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "review", workId, repoId, path.basename(promptPath).replace(/\.prompt\.md$/, "")),
       env: {
         ...process.env,
         DEVTASK_TASK_DIR: workItemDir(paths, workId),
@@ -1286,81 +1216,41 @@ export async function reviewWork(paths: DevtaskPaths, workId: string): Promise<R
   return result;
 }
 
-export async function runInteractivePhaseFinalizer(
+export async function runManagedPhaseHookFinalizer(
   paths: DevtaskPaths,
   phase: "spec" | "plan" | "repo-plan" | "review",
   workId: string,
+  runId: string,
   repoId: string | null
 ): Promise<void> {
-  const initial = readScopedPhaseSession(paths, workId, phase, repoId);
-  if (!initial || initial.status !== "running") {
-    return;
-  }
-
-  const runner = createDefaultAgentRunner(readConfig(paths));
-  let sawProgress = false;
-  let idlePolls = 0;
-  const startedAtMs = Date.parse(initial.startedAt);
-  while (true) {
-    const current = readScopedPhaseSession(paths, workId, phase, repoId);
-    if (!current || current.runId !== initial.runId || current.status !== "running") {
-      return;
-    }
-
-    if (!tmuxSessionExists(initial.tmuxSession)) {
-      break;
-    }
-
-    const activity = await runner.inspectSessionActivity?.(current.session, phaseCwd(paths, phase, workId, repoId)) ?? "unknown";
-    if (activity === "active") {
-      sawProgress = true;
-      idlePolls = 0;
-    } else if (
-      activity === "idle" ||
-      activity === "waiting_input" ||
-      activity === "errored"
-    ) {
-      const allowIdleFinalize = sawProgress || Date.now() - startedAtMs > 10_000;
-      if (!allowIdleFinalize) {
-        idlePolls = 0;
-      } else {
-        idlePolls += 1;
-        if (idlePolls >= 3) {
-          killTmuxSession(initial.tmuxSession);
-          break;
-        }
-      }
-    } else {
-      idlePolls = 0;
-    }
-
-    await sleep(500);
-  }
-
   const current = readScopedPhaseSession(paths, workId, phase, repoId);
-  if (!current || current.runId !== initial.runId || current.status !== "running") {
+  if (!current || current.runId !== runId || current.status !== "running") {
     return;
   }
 
   switch (phase) {
     case "spec":
       await finalizeInteractiveSpecPhase(paths, workId, current);
-      return;
+      break;
     case "plan":
       await finalizeInteractivePlanPhase(paths, workId, current);
-      return;
+      break;
     case "repo-plan":
       if (!repoId) {
         throw new DevtaskError("repo-plan finalizer requires a repo id");
       }
       await finalizeInteractiveRepoPlanPhase(paths, workId, repoId, current);
-      return;
+      break;
     case "review":
       if (!repoId) {
         throw new DevtaskError("review finalizer requires a repo id");
       }
       await finalizeInteractiveReviewPhase(paths, workId, repoId, current);
-      return;
+      break;
+  }
+
+  if (tmuxSessionExists(current.tmuxSession)) {
+    killTmuxSession(current.tmuxSession);
   }
 }
 

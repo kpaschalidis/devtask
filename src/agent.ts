@@ -26,12 +26,14 @@ export interface AgentStartOptions {
   skipGitRepoCheck?: boolean;
   addDirs?: readonly string[];
   env?: Record<string, string>;
+  managedCompletionCommand?: string | null;
 }
 
 export interface AgentResumeOptions {
   workspacePath: string;
   model?: string | null;
   prompt?: string | null;
+  managedCompletionCommand?: string | null;
 }
 
 export interface RunOptions {
@@ -60,7 +62,6 @@ export interface AgentRunner {
   buildResumeCommand?(session: AgentSessionRef, options: AgentResumeOptions): string | null;
   buildInteractiveResumeCommand?(session: AgentSessionRef, options: AgentResumeOptions): string | null;
   hydrateSessionRef?(session: AgentSessionRef, workspacePath: string): Promise<AgentSessionRef>;
-  inspectSessionActivity?(session: AgentSessionRef, workspacePath: string): Promise<ActivityState>;
 }
 
 export interface AgentPromptResult {

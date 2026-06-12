@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CodexAgentRunner,
+  configureManagedHooks,
   findCodexSessionFileInDirForTest,
   prepareIsolatedCodexHomeForTest,
   updateSessionActivity
@@ -100,5 +101,83 @@ describe("codex runner isolation", () => {
       lastActivityAtMs: 200,
       lastSessionMtimeMs: 11
     });
+  });
+
+  it("writes managed stop hooks into the isolated codex home", () => {
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-hooks-"));
+
+    configureManagedHooks(codexHome, "devtask work _phase-finalize-hook spec WORK-123 run-1");
+
+    const hooks = JSON.parse(fs.readFileSync(path.join(codexHome, "hooks.json"), "utf8")) as {
+      hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> };
+    };
+    expect(hooks.hooks.Stop[0]?.hooks[0]?.command).toContain("_phase-finalize-hook spec WORK-123 run-1");
+  });
+
+  it("removes managed stop hooks when completion is unmanaged", () => {
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-hooks-remove-"));
+    const hooksPath = path.join(codexHome, "hooks.json");
+    fs.writeFileSync(hooksPath, "{\"hooks\":{}}\n");
+
+    configureManagedHooks(codexHome, null);
+
+    expect(fs.existsSync(hooksPath)).toBe(false);
+  });
+
+  it("provisions managed hooks for interactive fresh starts", () => {
+    const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-managed-start-"));
+    const runner = new CodexAgentRunner({ model: "gpt-5" });
+
+    const start = runner.buildInteractiveStartCommand(
+      {
+        workspacePath: taskDir,
+        model: "gpt-5",
+        fullAuto: true,
+        addDirs: [taskDir],
+        env: {
+          DEVTASK_TASK_DIR: taskDir
+        },
+        managedCompletionCommand: "devtask work _phase-finalize-hook spec WORK-123 run-1"
+      },
+      "Plan work item WORK-123."
+    );
+
+    expect(fs.existsSync(path.join(start.session.storageRoot!, "hooks.json"))).toBe(true);
+    expect(start.command).toContain("--dangerously-bypass-hook-trust");
+  });
+
+  it("updates managed hooks for interactive resumes and clears them for unmanaged attach", () => {
+    const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-managed-resume-"));
+    const codexHome = prepareIsolatedCodexHomeForTest(taskDir, "session-resume");
+    const runner = new CodexAgentRunner({ model: "gpt-5" });
+    const session = {
+      provider: "codex" as const,
+      transportId: null,
+      providerSessionId: "thread-123",
+      conversationId: "thread-123",
+      resumeTarget: "thread-123",
+      storageRoot: codexHome,
+      transcriptPath: null,
+      summary: null,
+      summaryIsFallback: null
+    };
+
+    const managed = runner.buildInteractiveResumeCommand(session, {
+      workspacePath: taskDir,
+      model: "gpt-5",
+      prompt: "Continue",
+      managedCompletionCommand: "devtask work _phase-finalize-hook plan WORK-123 run-2"
+    });
+    expect(managed).toContain("codex resume --dangerously-bypass-hook-trust");
+    expect(fs.readFileSync(path.join(codexHome, "hooks.json"), "utf8")).toContain("_phase-finalize-hook plan WORK-123 run-2");
+
+    const unmanaged = runner.buildInteractiveResumeCommand(session, {
+      workspacePath: taskDir,
+      model: "gpt-5",
+      prompt: null,
+      managedCompletionCommand: null
+    });
+    expect(unmanaged).toContain("codex resume");
+    expect(fs.existsSync(path.join(codexHome, "hooks.json"))).toBe(false);
   });
 });

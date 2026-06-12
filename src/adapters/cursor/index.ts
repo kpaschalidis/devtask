@@ -209,9 +209,6 @@ export class CursorAgentRunner implements AgentRunner {
     };
   }
 
-  async inspectSessionActivity(_session: { transportId: string | null }, _workspacePath: string): Promise<ActivityState> {
-    return "unknown";
-  }
 }
 
 function buildCursorLaunchCommand(options: AgentStartOptions, fallbackModel?: string): string {

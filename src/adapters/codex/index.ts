@@ -9,8 +9,7 @@ import { StringDecoder } from "node:string_decoder";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import type { AgentSessionRef } from "../../agent-session.js";
-import type { ActivityState, AgentRunner, AgentStartOptions, RunEvent, RunOptions, SessionHandle } from "../../agent.js";
-import { captureOutputAsync } from "../../infra/tmux.js";
+import type { ActivityState, AgentResumeOptions, AgentRunner, AgentStartOptions, RunEvent, RunOptions, SessionHandle } from "../../agent.js";
 import {
   buildCodexCommand,
   buildCodexCommandArgs,
@@ -103,29 +102,36 @@ export class CodexAgentRunner implements AgentRunner {
     });
   }
 
-  buildInteractiveResumeCommand(session: AgentSessionRef, options: { workspacePath: string; model?: string | null; prompt?: string | null }): string | null {
+  buildInteractiveResumeCommand(session: AgentSessionRef, options: AgentResumeOptions): string | null {
     const sessionId = session.resumeTarget ?? session.providerSessionId ?? session.conversationId;
     if (!sessionId) {
       return null;
     }
+    if (options.managedCompletionCommand?.trim() && !session.storageRoot?.trim()) {
+      return null;
+    }
+    configureManagedHooks(session.storageRoot ?? null, options.managedCompletionCommand ?? null);
 
     return buildCodexInteractiveResumeCommand(sessionId, {
       codexHome: session.storageRoot,
       model: options.model ?? this.config.model ?? DEFAULT_INTERACTIVE_MODEL,
-      prompt: options.prompt ?? null
+      prompt: options.prompt ?? null,
+      bypassHookTrust: Boolean(options.managedCompletionCommand?.trim())
     });
   }
 
   buildInteractiveStartCommand(options: AgentStartOptions, prompt: string): { command: string; session: AgentSessionRef } {
     const sessionName = `devtask-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const codexHomePath = prepareIsolatedCodexHome(options.env?.DEVTASK_TASK_DIR ?? null, sessionName, this.config.sessionRoot ?? null);
+    configureManagedHooks(codexHomePath, options.managedCompletionCommand ?? null);
     const taskDir = options.env?.DEVTASK_TASK_DIR?.trim() ? [options.env.DEVTASK_TASK_DIR] : [];
     return {
       command: buildCodexInteractiveStartCommand(prompt, {
         codexHome: codexHomePath,
         model: options.model ?? this.config.model ?? DEFAULT_INTERACTIVE_MODEL,
         fullAuto: options.fullAuto,
-        addDirs: [...taskDir, ...(options.addDirs ?? [])]
+        addDirs: [...taskDir, ...(options.addDirs ?? [])],
+        bypassHookTrust: Boolean(options.managedCompletionCommand?.trim())
       }),
       session: {
         provider: "codex",
@@ -163,58 +169,6 @@ export class CodexAgentRunner implements AgentRunner {
       summary: summary ?? session.summary ?? (threadId ? "Codex session completed" : null),
       summaryIsFallback: summary ? false : session.summaryIsFallback ?? (threadId ? true : null)
     };
-  }
-
-  async inspectSessionActivity(session: AgentSessionRef, workspacePath: string): Promise<ActivityState> {
-    if (session.transportId) {
-      const output = await captureOutputAsync(session.transportId, 60);
-      if (output.includes("Working (") || output.includes("esc to interrupt")) {
-        return "active";
-      }
-      if (output.includes("Press enter to continue")) {
-        return "waiting_input";
-      }
-      if (output.includes("\n› ")) {
-        return "idle";
-      }
-    }
-
-    const sessionsDir = session.storageRoot?.trim() ? join(session.storageRoot, "sessions") : null;
-    if (!sessionsDir) {
-      return "unknown";
-    }
-
-    const sessionFilePath = session.transcriptPath ?? await findSessionFileCached(sessionsDir, workspacePath);
-    if (!sessionFilePath) {
-      return "unknown";
-    }
-
-    try {
-      const fileStat = await stat(sessionFilePath);
-      const ageMs = Date.now() - fileStat.mtimeMs;
-      const lines = await readJsonlTailLines(sessionFilePath, 20);
-      let lastType: string | null = null;
-
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        try {
-          const parsed = JSON.parse(lines[index]!) as CodexJsonlLine;
-          lastType = parsed.payload?.type ?? parsed.type ?? null;
-          break;
-        } catch {
-          continue;
-        }
-      }
-
-      if (lastType === "approval_request" || lastType === "exec_approval_request" || lastType === "apply_patch_approval_request") {
-        return "waiting_input";
-      }
-      if (lastType === "error" || lastType === "stream_error") {
-        return "errored";
-      }
-      return ageMs < ACTIVE_WINDOW_MS ? "active" : "idle";
-    } catch {
-      return "unknown";
-    }
   }
 
   async start(options: AgentStartOptions): Promise<SessionHandle> {
@@ -533,6 +487,45 @@ function prepareIsolatedCodexHome(taskDir: string | null, sessionName: string, s
 
 export function prepareIsolatedCodexHomeForTest(taskDir: string | null, sessionName: string, sourceRoot?: string | null): string {
   return prepareIsolatedCodexHome(taskDir, sessionName, sourceRoot);
+}
+
+export function configureManagedHooks(codexHomePath: string | null, command: string | null): void {
+  if (!codexHomePath?.trim()) {
+    return;
+  }
+
+  const hooksPath = join(codexHomePath, "hooks.json");
+  if (!command?.trim()) {
+    try {
+      fs.unlinkSync(hooksPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    return;
+  }
+
+  fs.mkdirSync(codexHomePath, { recursive: true });
+  fs.writeFileSync(
+    hooksPath,
+    `${JSON.stringify({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command,
+                timeout: 30,
+                statusMessage: "Finalizing devtask phase run"
+              }
+            ]
+          }
+        ]
+      }
+    }, null, 2)}\n`
+  );
 }
 
 function buildSessionCacheKey(sessionsDir: string, workspacePath: string, startedAtMs?: number): string {

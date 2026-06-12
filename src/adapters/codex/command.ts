@@ -62,18 +62,22 @@ export function buildCodexResumeCommand(
 
 export function buildCodexInteractiveResumeCommand(
   sessionId: string,
-  options: { codexHome?: string | null; model?: string | null; prompt?: string | null } = {}
+  options: { codexHome?: string | null; model?: string | null; prompt?: string | null; bypassHookTrust?: boolean } = {}
 ): string {
   const args = [];
   args.push("CODEX_DISABLE_UPDATE_CHECK=1");
   if (options.codexHome?.trim()) {
     args.push(`CODEX_HOME=${shellQuote(options.codexHome)}`);
   }
-  args.push("codex", "resume", shellQuote(sessionId));
+  args.push("codex", "resume");
+  if (options.bypassHookTrust) {
+    args.push("--dangerously-bypass-hook-trust");
+  }
   args.push("-c", shellQuote("check_for_update_on_startup=false"));
   if (options.model) {
     args.push("-m", shellQuote(options.model));
   }
+  args.push(shellQuote(sessionId));
   if (options.prompt?.trim()) {
     args.push(shellQuote(options.prompt.trim()));
   }
@@ -87,6 +91,7 @@ export function buildCodexInteractiveStartCommand(
     model?: string | null;
     fullAuto?: boolean;
     addDirs?: readonly string[];
+    bypassHookTrust?: boolean;
   } = {}
 ): string {
   const args = [];
@@ -95,6 +100,9 @@ export function buildCodexInteractiveStartCommand(
     args.push(`CODEX_HOME=${shellQuote(options.codexHome)}`);
   }
   args.push("codex", "--no-alt-screen");
+  if (options.bypassHookTrust) {
+    args.push("--dangerously-bypass-hook-trust");
+  }
   args.push("-c", shellQuote("check_for_update_on_startup=false"));
   if (options.fullAuto !== false) {
     args.push("-a", "never", "-s", "danger-full-access");

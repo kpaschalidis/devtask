@@ -99,6 +99,7 @@ Notes:
 - `repo-plan` is triggered manually and builds per-repo implementation plans for all affected repos in the work item
 - current `repo-plan` execution is sequential, not parallel
 - agent-backed phases persist neutral session records and, for Codex today, run in isolated persisted session roots rather than the current interactive Codex thread
+- managed `fresh` and `feedback` runs for `spec`, `plan`, `repo-plan`, and `review` install provider-scoped completion hooks automatically; no global hook setup is required
 - `materialize` creates repo task records and global workspace worktrees for all repos in the work item
 - `execute` launches or resumes the attachable execution sessions for those repo tasks
 - `check` and `verify` are deterministic
@@ -172,7 +173,7 @@ devtask work execute feedback <work-id> <repo-id> <message>
 devtask work execute fresh <work-id> <repo-id>
 ```
 
-All important phases now start in background tmux sessions. Use the phase-specific `attach` and `feedback` commands to inspect or intervene, and use `fresh` to start a new same-scope phase session when no live session exists.
+`spec`, `plan`, `repo-plan`, and `review` start managed background sessions for `fresh` and `feedback`, finalize automatically when the provider reports the turn stopped, and then close their managed tmux session. `attach` opens the live session if one exists, or reopens a finished phase interactively without turning that manual continuation into a new tracked run.
 
 ## Worktree
 
