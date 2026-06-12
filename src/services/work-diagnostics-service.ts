@@ -127,7 +127,7 @@ function buildRepoTaskDiagnostic(
       repoId,
       taskId,
       status,
-      next: `devtask session attach ${shellQuote(workId)} ${shellQuote(repoId)}`,
+      next: `devtask work execute attach ${shellQuote(workId)} ${shellQuote(repoId)}`,
       waitingOn: "execution",
       reason: runtimeReason ?? "An execution session is active.",
       missingArtifacts: []
@@ -149,7 +149,7 @@ function buildRepoTaskDiagnostic(
       repoId,
       taskId,
       status,
-      next: `devtask session show ${shellQuote(workId)} ${shellQuote(repoId)}`,
+      next: `devtask work inspect ${shellQuote(workId)}`,
       waitingOn: "unblock",
       reason: runtimeReason ?? `The repo task is ${status}.`,
       missingArtifacts: []

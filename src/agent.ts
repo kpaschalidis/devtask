@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { spawn } from "node:child_process";
 import type { AgentProvider, AgentSessionRef } from "./agent-session.js";
 import { CodexAgentRunner } from "./adapters/codex/index.js";
 import { buildCodexCommand } from "./adapters/codex/command.js";
@@ -156,6 +157,139 @@ export async function runAgentPrompt(
         summaryIsFallback: sessionInfo?.summaryIsFallback ?? null
       }
     };
+  }
+}
+
+export async function resumeAgentPrompt(
+  runner: AgentRunner,
+  session: AgentSessionRef,
+  resumeOptions: AgentResumeOptions,
+  prompt: string,
+  options: {
+    outputPath: string;
+    runOptions?: RunOptions;
+    onOutput?: (chunk: string) => void;
+  }
+): Promise<AgentPromptResult> {
+  const command = runner.buildResumeCommand?.(session, {
+    workspacePath: resumeOptions.workspacePath,
+    model: resumeOptions.model ?? null,
+    prompt
+  });
+  if (!command) {
+    return {
+      status: "failed",
+      error: `Agent provider ${session.provider} does not support session resume`,
+      session
+    };
+  }
+
+  const output = fs.createWriteStream(options.outputPath, { flags: "w" });
+  const stallMs = options.runOptions?.stallMs ?? 120_000;
+  const maxTurnMs = options.runOptions?.maxTurnMs ?? 600_000;
+  const shell = process.env.SHELL?.trim() || "/bin/sh";
+  const child = spawn(shell, ["-lc", command], {
+    cwd: resumeOptions.workspacePath,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+
+  let status: AgentPromptResult["status"] = "failed";
+  let error: string | null = null;
+  let lastActivityAt = Date.now();
+  let exited = false;
+  let exitCode: number | null = null;
+  let stalled = false;
+  const stderrChunks: string[] = [];
+
+  const killChild = (): void => {
+    if (!child.killed) {
+      child.kill("SIGTERM");
+    }
+  };
+
+  const maxTimer = setTimeout(() => {
+    stalled = true;
+    killChild();
+  }, maxTurnMs);
+
+  const stallTimer = setInterval(() => {
+    if (Date.now() - lastActivityAt > stallMs && !exited) {
+      stalled = true;
+      killChild();
+    }
+  }, 250);
+
+  child.stdout.on("data", (chunk: string) => {
+    lastActivityAt = Date.now();
+    output.write(chunk);
+    options.onOutput?.(chunk);
+  });
+  child.stderr.on("data", (chunk: string) => {
+    lastActivityAt = Date.now();
+    stderrChunks.push(chunk);
+    output.write(chunk);
+    options.onOutput?.(chunk);
+  });
+
+  await new Promise<void>((resolve) => {
+    child.on("error", (spawnError) => {
+      error = spawnError.message;
+      exited = true;
+      resolve();
+    });
+    child.on("close", (code) => {
+      exitCode = code;
+      exited = true;
+      resolve();
+    });
+  });
+
+  clearTimeout(maxTimer);
+  clearInterval(stallTimer);
+
+  try {
+    const pseudoHandle: SessionHandle = {
+      id: session.transportId ?? session.resumeTarget ?? session.providerSessionId ?? session.conversationId ?? "resume",
+      provider: session.provider,
+      providerSessionId: session.providerSessionId,
+      conversationId: session.conversationId,
+      resumeTarget: session.resumeTarget,
+      storageRoot: session.storageRoot,
+      transcriptPath: session.transcriptPath
+    };
+    const sessionInfo = await runner.getSessionInfo?.(pseudoHandle);
+    await closeStream(output);
+
+    if (!stalled) {
+      if (error) {
+        status = "failed";
+      } else if (exitCode === 0) {
+        status = "completed";
+      } else {
+        status = "failed";
+        error = stderrChunks.join("").trim() || `Resume command exited with code ${exitCode ?? "unknown"}`;
+      }
+    } else {
+      status = "stalled";
+    }
+
+    return {
+      status,
+      error,
+      session: {
+        ...session,
+        summary: sessionInfo?.summary ?? session.summary,
+        summaryIsFallback: sessionInfo?.summaryIsFallback ?? session.summaryIsFallback
+      }
+    };
+  } finally {
+    if (!exited) {
+      killChild();
+    }
   }
 }
 

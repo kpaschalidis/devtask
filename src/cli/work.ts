@@ -10,6 +10,7 @@ import {
   compoundWork,
   createWorkPullRequests,
   createManualWork,
+  freshExecuteWork,
   getWork,
   importJiraWork,
   listWork,
@@ -18,11 +19,28 @@ import {
   planWork,
   readWorkPlanRecord,
   repoPlanWork,
+  runPlanFeedbackWorker,
   reviewWork,
+  runRepoPlanFeedbackWorker,
+  runPlanWorker,
+  runRepoPlanWorker,
+  runReviewFeedbackWorker,
+  runReviewWorker,
+  runSpecFeedbackWorker,
+  runSpecWorker,
+  sendWorkPhaseFeedback,
+  attachWorkPhase,
   specWork,
+  startPlanWork,
+  startRepoPlanWork,
+  startRepoPlanScope,
+  startReviewWork,
+  startReviewScope,
+  startSpecWork,
   verifyWork
 } from "../services/work-service.js";
 import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns } from "../services/phase-run-service.js";
+import { listWorkPhaseSessions } from "../services/phase-session-service.js";
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
 import { printError, printTable } from "./common.js";
@@ -110,22 +128,37 @@ export function registerWorkCommands(program: Command): void {
           repoId: options.repo,
           latest: options.latest === true
         });
-        if (rows.length === 0) {
+        const liveSessions = listWorkPhaseSessions(resolveWorkspacePaths(), workId)
+          .filter((session) => normalizePhaseOption(options.phase) ? session.phase === normalizePhaseOption(options.phase) : true)
+          .filter((session) => options.repo ? session.repoId === options.repo : true);
+        if (rows.length === 0 && liveSessions.length === 0) {
           console.log(hasWorkPhaseRuns(resolveWorkspacePaths(), workId) ? "No matching phase runs" : "No phase runs");
           return;
         }
         printTable(
           ["RUN", "PHASE", "REPO", "TASK", "STATUS", "FINISHED", "SESSION", "SUMMARY"],
-          rows.map((row) => [
-            row.runId,
-            row.phase,
-            row.repoId ?? "-",
-            row.taskId ?? "-",
-            row.status,
-            row.finishedAt,
-            row.session.transportId ?? "-",
-            row.session.summary ?? "-"
-          ])
+          [
+            ...liveSessions.map((session) => [
+              session.runId,
+              session.phase,
+              session.repoId ?? "-",
+              session.taskId ?? "-",
+              session.live ? "running" : session.status,
+              session.live ? "-" : session.updatedAt,
+              session.tmuxSession,
+              session.session.summary ?? "-"
+            ]),
+            ...rows.map((row) => [
+              row.runId,
+              row.phase,
+              row.repoId ?? "-",
+              row.taskId ?? "-",
+              row.status,
+              row.finishedAt,
+              row.session.transportId ?? "-",
+              row.session.summary ?? "-"
+            ])
+          ]
         );
       } catch (error) {
         printError(error);
@@ -235,6 +268,21 @@ export function registerWorkCommands(program: Command): void {
             ])
           );
         }
+        if (inspection.livePhaseSessions.length > 0) {
+          console.log("");
+          printTable(
+            ["LIVE_PHASE", "REPO", "TASK", "STATUS", "SESSION", "PROMPT", "OUTPUT"],
+            inspection.livePhaseSessions.map((session) => [
+              session.phase,
+              session.repoId ?? "-",
+              session.taskId ?? "-",
+              session.live ? "running" : session.status,
+              session.tmuxSession,
+              session.promptPath,
+              session.outputPath
+            ])
+          );
+        }
         if (inspection.problemTasks.length > 0) {
           console.log("");
           printTable(
@@ -285,78 +333,130 @@ export function registerWorkCommands(program: Command): void {
       }
     });
 
-  work
+  const plan = work
     .command("plan")
-    .description("Run the global work planner from the refined spec.")
+    .description("Start the global work planner in a background tmux session.");
+  plan
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
-        const record = await planWork(resolveWorkspacePaths(), workId, {
-          onStart: (start) => {
-            console.log(`Prompt: ${start.promptPath}`);
-            console.log(`Plan: ${start.planPath}`);
-            console.log(`Graph: ${start.graphPath}`);
-            console.log(`Output: ${start.outputPath}`);
-            console.log(`Command: ${start.command}`);
-          },
-          onStdout: (chunk) => process.stdout.write(chunk),
-          onStderr: (chunk) => process.stderr.write(chunk)
-        });
-        console.log("");
-        console.log(`Plan status: ${record.status}`);
+        const result = await startPlanWork(resolveWorkspacePaths(), workId);
+        console.log(`Started plan session: ${result.tmuxSession}`);
+        console.log(`Prompt: ${result.promptPath}`);
+        console.log(`Output: ${result.outputPath}`);
+        console.log(`Attach: devtask work plan attach ${workId}`);
       } catch (error) {
         printError(error);
       }
     });
+  plan.command("attach").argument("<work-id>").action((workId: string) => {
+    try {
+      attachWorkPhase(resolveWorkspacePaths(), "plan", workId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  plan.command("feedback").argument("<work-id>").argument("<message...>").action(async (workId: string, messageParts: string[]) => {
+    try {
+      const result = await sendWorkPhaseFeedback(resolveWorkspacePaths(), "plan", workId, messageParts.join(" "));
+      console.log(`Started plan feedback session: ${result.tmuxSession}`);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  plan.command("fresh").argument("<work-id>").action(async (workId: string) => {
+    try {
+      const result = await startPlanWork(resolveWorkspacePaths(), workId);
+      console.log(`Started fresh plan session: ${result.tmuxSession}`);
+    } catch (error) {
+      printError(error);
+    }
+  });
 
-  work
+  const spec = work
     .command("spec")
-    .description("Refine the work source into an implementation-ready spec.")
+    .description("Start spec refinement in a background tmux session.");
+  spec
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
-        const result = await specWork(resolveWorkspacePaths(), workId, {
-          onStart: (start) => {
-            console.log(`Prompt: ${start.promptPath}`);
-            console.log(`Spec: ${start.specPath}`);
-            console.log(`Output: ${start.outputPath}`);
-            console.log(`Command: ${start.command}`);
-          }
-        });
-        console.log("");
-        console.log(`Spec status: ${result.status}`);
-        console.log(`Spec path: ${result.specPath}`);
+        const result = await startSpecWork(resolveWorkspacePaths(), workId);
+        console.log(`Started spec session: ${result.tmuxSession}`);
+        console.log(`Prompt: ${result.promptPath}`);
+        console.log(`Output: ${result.outputPath}`);
+        console.log(`Attach: devtask work spec attach ${workId}`);
       } catch (error) {
         printError(error);
       }
     });
+  spec.command("attach").argument("<work-id>").action((workId: string) => {
+    try {
+      attachWorkPhase(resolveWorkspacePaths(), "spec", workId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  spec.command("feedback").argument("<work-id>").argument("<message...>").action(async (workId: string, messageParts: string[]) => {
+    try {
+      const result = await sendWorkPhaseFeedback(resolveWorkspacePaths(), "spec", workId, messageParts.join(" "));
+      console.log(`Started spec feedback session: ${result.tmuxSession}`);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  spec.command("fresh").argument("<work-id>").action(async (workId: string) => {
+    try {
+      const result = await startSpecWork(resolveWorkspacePaths(), workId);
+      console.log(`Started fresh spec session: ${result.tmuxSession}`);
+    } catch (error) {
+      printError(error);
+    }
+  });
 
-  work
+  const repoPlan = work
     .command("repo-plan")
-    .description("Run repo-local implementation planning after the global plan is ready.")
+    .description("Start repo-local implementation planning in background tmux sessions.");
+  repoPlan
     .argument("<work-id>")
-    .option("--refresh", "Rerun repo-local planning even if a repo plan already exists")
-    .action(async (workId: string, options: { refresh?: boolean }) => {
+    .action(async (workId: string) => {
       try {
-        const result = await repoPlanWork(resolveWorkspacePaths(), workId, {
-          refresh: options.refresh === true,
-          onRepoPlanStart: (repoId, start) => {
-            console.log(`Repo ${repoId} prompt: ${start.promptPath}`);
-            console.log(`Repo ${repoId} plan: ${start.planPath}`);
-          }
-        });
+        const launches = await startRepoPlanWork(resolveWorkspacePaths(), workId);
         printTable(
-          ["REPO", "TASK", "STATUS", "PLAN", "WORKTREE_CHANGED"],
-          result.repoPlans.map((task) => [task.repoId, task.taskId, task.status, task.planPath, String(task.worktreeChanged)])
+          ["REPO", "TASK", "SESSION", "PROMPT"],
+          launches.map((entry) => [entry.repoId ?? "-", entry.taskId ?? "-", entry.tmuxSession, entry.promptPath])
         );
       } catch (error) {
         printError(error);
       }
     });
+  repoPlan.command("attach").argument("<work-id>").argument("<repo-id>").action((workId: string, repoId: string) => {
+    try {
+      attachWorkPhase(resolveWorkspacePaths(), "repo-plan", workId, repoId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  repoPlan.command("feedback").argument("<work-id>").argument("<repo-id>").argument("<message...>").action(async (workId: string, repoId: string, messageParts: string[]) => {
+    try {
+      const result = await sendWorkPhaseFeedback(resolveWorkspacePaths(), "repo-plan", workId, repoId, messageParts.join(" "));
+      console.log(`Started repo-plan feedback session: ${result.tmuxSession}`);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  repoPlan.command("fresh").argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
+    try {
+      const launch = await startRepoPlanScope(resolveWorkspacePaths(), workId, repoId);
+      console.log(`Started fresh repo-plan session: ${launch.tmuxSession}`);
+    } catch (error) {
+      printError(error);
+    }
+  });
 
-  work
+  const execute = work
     .command("execute")
-    .description("Launch or resume repo-task execution sessions for a work item.")
+    .description("Launch or resume repo-task execution sessions for a work item.");
+  execute
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
@@ -376,6 +476,40 @@ export function registerWorkCommands(program: Command): void {
         printError(error);
       }
     });
+  execute.command("attach").argument("<work-id>").argument("<repo-id>").action((workId: string, repoId: string) => {
+    try {
+      attachWorkPhase(resolveWorkspacePaths(), "execute", workId, repoId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  execute.command("feedback").argument("<work-id>").argument("<repo-id>").argument("<message...>").action((workId: string, repoId: string, messageParts: string[]) => {
+    try {
+      const result = sendWorkPhaseFeedback(resolveWorkspacePaths(), "execute", workId, repoId, messageParts.join(" "));
+      console.log(result.confirmed ? "Feedback sent" : "Feedback sent; no session change observed yet");
+    } catch (error) {
+      printError(error);
+    }
+  });
+  execute.command("fresh").argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
+    try {
+      freshExecuteWork(resolveWorkspacePaths(), workId, repoId);
+      const result = await executeWork(resolveWorkspacePaths(), workId);
+      printTable(
+        ["REPO", "TASK", "STATUS", "ACTION", "SESSION", "SUMMARY"],
+        result.tasks.filter((task) => task.repoId === repoId).map((task) => [
+          task.repoId,
+          task.taskId,
+          task.status,
+          task.action,
+          task.sessionName ?? "-",
+          task.summary ?? "-"
+        ])
+      );
+    } catch (error) {
+      printError(error);
+    }
+  });
 
   work
     .command("compound")
@@ -395,29 +529,101 @@ export function registerWorkCommands(program: Command): void {
       }
     });
 
-  work
+  const review = work
     .command("review")
-    .description("Run an agent-backed review for each repo task.")
+    .description("Start agent-backed review sessions for each repo task.");
+  review
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
-        const result = await reviewWork(resolveWorkspacePaths(), workId);
+        const launches = await startReviewWork(resolveWorkspacePaths(), workId);
         printTable(
-          ["REPO", "TASK", "STATUS", "SUMMARY", "CHECK", "VERIFY", "CI"],
-          result.tasks.map((task) => [
-            task.repoId,
-            task.taskId,
-            task.status,
-            task.summary,
-            task.latestCheck ?? "-",
-            task.latestVerify ?? "-",
-            task.latestCi ?? "-"
-          ])
+          ["REPO", "TASK", "SESSION", "PROMPT"],
+          launches.map((entry) => [entry.repoId ?? "-", entry.taskId ?? "-", entry.tmuxSession, entry.promptPath])
         );
       } catch (error) {
         printError(error);
       }
     });
+  review.command("attach").argument("<work-id>").argument("<repo-id>").action((workId: string, repoId: string) => {
+    try {
+      attachWorkPhase(resolveWorkspacePaths(), "review", workId, repoId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  review.command("feedback").argument("<work-id>").argument("<repo-id>").argument("<message...>").action(async (workId: string, repoId: string, messageParts: string[]) => {
+    try {
+      const result = await sendWorkPhaseFeedback(resolveWorkspacePaths(), "review", workId, repoId, messageParts.join(" "));
+      console.log(`Started review feedback session: ${result.tmuxSession}`);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  review.command("fresh").argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
+    try {
+      const launch = await startReviewScope(resolveWorkspacePaths(), workId, repoId);
+      console.log(`Started fresh review session: ${launch.tmuxSession}`);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_spec-worker", { hidden: true }).argument("<work-id>").action(async (workId: string) => {
+    try {
+      await runSpecWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_plan-worker", { hidden: true }).argument("<work-id>").action(async (workId: string) => {
+    try {
+      await runPlanWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_repo-plan-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
+    try {
+      await runRepoPlanWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_review-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
+    try {
+      await runReviewWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_spec-feedback-worker", { hidden: true }).argument("<work-id>").action(async (workId: string) => {
+    try {
+      await runSpecFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_plan-feedback-worker", { hidden: true }).argument("<work-id>").action(async (workId: string) => {
+    try {
+      await runPlanFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_repo-plan-feedback-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
+    try {
+      await runRepoPlanFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
+    } catch (error) {
+      printError(error);
+    }
+  });
+  work.command("_review-feedback-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
+    try {
+      await runReviewFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
+    } catch (error) {
+      printError(error);
+    }
+  });
 
   work
     .command("check")

@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskConfig } from "./infra/config.js";
-import { createDefaultAgentRunner, runAgentPrompt } from "./agent.js";
+import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "./agent.js";
+import type { AgentSessionRef } from "./agent-session.js";
 import { writeAgentSessionRegistryEntry } from "./infra/agent-session-registry.js";
 import type { DevtaskPaths } from "./infra/paths.js";
 import { workItemDir, workItemPhaseRunsDir, workItemPlanRunsDir, workItemSessionRegistryDir, workItemSpecPath } from "./infra/paths.js";
@@ -61,6 +62,8 @@ export async function runWorkPlanner(
     onStart?: (start: WorkPlanStart) => void;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
+    resumeSession?: AgentSessionRef | null;
+    promptOverride?: string | null;
   } = {}
 ): Promise<WorkPlanRecord> {
   const planId = newRunId();
@@ -75,7 +78,9 @@ export async function runWorkPlanner(
   const specPath = workItemSpecPath(paths, workItem.id);
   const repos = listWorkspaceRepos(paths);
   const memory = collectPhaseMemory(paths, "planning");
-  const prompt = buildGlobalPlanPrompt(paths, workItem, repos, planPath, graphPath, specPath, memory);
+  const prompt = options.promptOverride?.trim()
+    ? options.promptOverride.trim()
+    : buildGlobalPlanPrompt(paths, workItem, repos, planPath, graphPath, specPath, memory);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const previousPlan = artifactSnapshot(planPath);
@@ -95,15 +100,32 @@ export async function runWorkPlanner(
       DEVTASK_WORK_GRAPH_PATH: graphPath
     }
   } as const;
-  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  const command = options.resumeSession
+    ? (runner.buildResumeCommand?.(options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }) ?? "agent-resume")
+    : (runner.buildStartCommand?.(startOptions) ?? "agent-run");
   options.onStart?.({ command, promptPath, outputPath, planPath, graphPath });
   const startedAt = new Date().toISOString();
-  const result = await runAgentPrompt(runner, startOptions, prompt, {
-    outputPath,
-    onOutput: (chunk) => {
-      options.onStdout?.(chunk);
-    }
-  });
+  const result = options.resumeSession
+    ? await resumeAgentPrompt(runner, options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }, prompt, {
+        outputPath,
+        onOutput: (chunk) => {
+          options.onStdout?.(chunk);
+        }
+      })
+    : await runAgentPrompt(runner, startOptions, prompt, {
+        outputPath,
+        onOutput: (chunk) => {
+          options.onStdout?.(chunk);
+        }
+      });
   const finishedAt = new Date().toISOString();
   const status =
     result.status === "completed" && isFreshNonEmptyArtifact(planPath, previousPlan) && isFreshValidGraph(graphPath, previousGraph)

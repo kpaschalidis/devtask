@@ -143,19 +143,36 @@ Current diagnostic workflow is:
 - `work inspect` for stored artifact paths, latest phase runs, and blocked/failed/paused repo tasks
 - `work runs` and `work runs show` for persisted prompt/output/artifact/session traceability by phase, including isolated Codex session metadata
 
-## Session
-
-Repo task sessions:
+Phase controls:
 
 ```bash
-devtask session list <work-id>
-devtask session show <work-id> <repo-id>
-devtask session resume <work-id> <repo-id> [prompt]
-devtask session attach <work-id> <repo-id>
-devtask session send <work-id> <repo-id> <message>
+devtask work spec <work-id>
+devtask work spec attach <work-id>
+devtask work spec feedback <work-id> <message>
+devtask work spec fresh <work-id>
+
+devtask work plan <work-id>
+devtask work plan attach <work-id>
+devtask work plan feedback <work-id> <message>
+devtask work plan fresh <work-id>
+
+devtask work repo-plan <work-id>
+devtask work repo-plan attach <work-id> <repo-id>
+devtask work repo-plan feedback <work-id> <repo-id> <message>
+devtask work repo-plan fresh <work-id> <repo-id>
+
+devtask work review <work-id>
+devtask work review attach <work-id> <repo-id>
+devtask work review feedback <work-id> <repo-id> <message>
+devtask work review fresh <work-id> <repo-id>
+
+devtask work execute <work-id>
+devtask work execute attach <work-id> <repo-id>
+devtask work execute feedback <work-id> <repo-id> <message>
+devtask work execute fresh <work-id> <repo-id>
 ```
 
-`session list` surfaces task status, session liveness, runtime reason, last activity, and result summary from stored task metadata plus the persisted session registry. `session show` exposes the richer JSON shape, including provider, conversation id, provider session id, resume target, storage root, and transcript path when available. `session resume` resumes the latest persisted provider session through the adapter when that provider supports resumable sessions.
+All important phases now start in background tmux sessions. Use the phase-specific `attach` and `feedback` commands to inspect or intervene, and use `fresh` to start a new same-scope phase session when no live session exists.
 
 ## Worktree
 

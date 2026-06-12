@@ -116,7 +116,7 @@ Observability-relevant local artifacts include:
 - task metadata with runtime state, paused/blocked reasons, tmux session name, and execution/runtime identifiers
 - persisted phase-run records that link phase status to prompt path, output path, artifact paths, and provider-neutral session metadata
 - persisted per-work session registry entries that record provider, conversation/session ids, resume target, transcript path, and storage root for the latest runs
-- materialization, result, and review artifacts used by `work diagnose`, `work inspect`, `work runs`, and `session list/show`
+- materialization, result, review, and live phase-session artifacts used by `work diagnose`, `work inspect`, `work runs`, and phase-specific attach/feedback commands
 
 ## Repo-Local State
 

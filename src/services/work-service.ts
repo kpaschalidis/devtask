@@ -9,6 +9,9 @@ import {
   taskMetaPath,
   taskStoragePaths,
   workItemDir,
+  workItemGraphSnapshotPath,
+  workItemPlanRunsDir,
+  workItemPhaseSessionsDir,
   workItemRepoPlanPath,
   workItemResultsDir,
   workItemReviewDir,
@@ -18,7 +21,7 @@ import {
   workItemSpecPath,
   workItemSpecRunsDir
 } from "../infra/paths.js";
-import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
+import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "../agent.js";
 import { writeAgentSessionRegistryEntry } from "../infra/agent-session-registry.js";
 import { writePhaseRunRecord } from "../infra/phase-run.js";
 import { newRunId } from "../infra/run-record.js";
@@ -48,17 +51,32 @@ import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { runCommand } from "../infra/process-runner.js";
 import {
   createBareSession,
+  killTmuxSession,
   sendLaunchCommand,
+  startTmuxSession,
   tmuxSessionExists,
   tmuxSessionName,
   waitForTmuxSession,
   writeLaunchScript
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
+import { getLatestWorkPhaseRun } from "./phase-run-service.js";
 import { buildReviewPrompt } from "../prompts/review.js";
 import { buildSpecPrompt } from "../prompts/spec-plan.js";
 import { buildCompoundPrompt } from "../prompts/compound.js";
 import { buildRepoPlanPrompt } from "../prompts/repo-plan.js";
+import {
+  attachScopedPhaseSession,
+  ensureNoLiveScopedPhaseSession,
+  freshExecuteSession,
+  phaseWorkerCommand,
+  readScopedPhaseSession,
+  sendScopedPhaseFeedback,
+  updateScopedPhaseSession,
+  writeRunningScopedPhaseSession,
+  markExecutePhaseSession,
+  listWorkPhaseSessions
+} from "./phase-session-service.js";
 import {
   checkProviderCi,
   countBranchCommits,
@@ -166,6 +184,17 @@ export interface ReviewWorkResult {
   generatedAt: string;
 }
 
+export interface PhaseLaunchResult {
+  phase: "spec" | "plan" | "repo-plan" | "review" | "execute";
+  workId: string;
+  repoId: string | null;
+  taskId: string | null;
+  status: "started" | "running";
+  tmuxSession: string;
+  promptPath: string;
+  outputPath: string;
+}
+
 export interface RepoPlanWorkResult {
   workId: string;
   repoPlans: RepoPlanTaskResult[];
@@ -234,6 +263,431 @@ export function getWork(paths: DevtaskPaths, workId: string): WorkItem {
   return getWorkItem(paths, workId);
 }
 
+export function attachWorkPhase(paths: DevtaskPaths, phase: "spec" | "plan", workId: string): void;
+export function attachWorkPhase(paths: DevtaskPaths, phase: "repo-plan" | "review" | "execute", workId: string, repoId: string): void;
+export function attachWorkPhase(paths: DevtaskPaths, phase: "spec" | "plan" | "repo-plan" | "review" | "execute", workId: string, repoId?: string): void {
+  attachScopedPhaseSession(paths, workId, phase, repoId ?? null);
+}
+
+export function sendWorkPhaseFeedback(
+  paths: DevtaskPaths,
+  phase: "spec" | "plan",
+  workId: string,
+  message: string
+): Promise<PhaseLaunchResult>;
+export function sendWorkPhaseFeedback(
+  paths: DevtaskPaths,
+  phase: "repo-plan" | "review",
+  workId: string,
+  repoId: string,
+  message: string
+): Promise<PhaseLaunchResult>;
+export function sendWorkPhaseFeedback(
+  paths: DevtaskPaths,
+  phase: "execute",
+  workId: string,
+  repoId: string,
+  message: string
+): { confirmed: boolean; output: string };
+export function sendWorkPhaseFeedback(
+  paths: DevtaskPaths,
+  phase: "spec" | "plan" | "repo-plan" | "review" | "execute",
+  workId: string,
+  repoOrMessage: string,
+  maybeMessage?: string
+): Promise<PhaseLaunchResult> | { confirmed: boolean; output: string } {
+  const repoId = maybeMessage === undefined ? null : repoOrMessage;
+  const message = maybeMessage === undefined ? repoOrMessage : maybeMessage;
+  if (phase === "execute") {
+    return sendScopedPhaseFeedback(paths, workId, phase, message, repoId);
+  }
+  return startPhaseFeedbackSession(paths, phase, workId, message, repoId);
+}
+
+export function freshExecuteWork(paths: DevtaskPaths, workId: string, repoId: string): void {
+  freshExecuteSession(paths, workId, repoId);
+}
+
+function launchPhaseWorker(cwd: string, tmuxSession: string, args: string[], workspaceRoot?: string): void {
+  if (tmuxSessionExists(tmuxSession)) {
+    killTmuxSession(tmuxSession);
+  }
+  const scriptLines = [
+    `cd ${shellEscape(cwd)}`,
+    workspaceRoot ? `export DEVTASK_WORKSPACE_ROOT=${shellEscape(workspaceRoot)}` : null,
+    `exec ${phaseWorkerCommand(args)}`
+  ].filter((line): line is string => Boolean(line));
+  const scriptPath = writeLaunchScript(scriptLines.join("\n"));
+  startTmuxSession(tmuxSession, ["bash", scriptPath], cwd);
+  if (!waitForTmuxSession(tmuxSession, { attempts: 5, intervalMs: 200 })) {
+    throw new DevtaskError(`Phase session ${tmuxSession} failed to start`);
+  }
+}
+
+async function startPhaseFeedbackSession(
+  paths: DevtaskPaths,
+  phase: "spec" | "plan" | "repo-plan" | "review",
+  workId: string,
+  feedback: string,
+  repoId: string | null
+): Promise<PhaseLaunchResult> {
+  ensureNoLiveScopedPhaseSession(paths, workId, phase, repoId);
+  const previous = readResumeSession(paths, workId, phase, repoId);
+  const runId = newRunId();
+  const startedAt = new Date().toISOString();
+  const { tmuxSession, cwd, promptPath, outputPath, taskId, artifacts } = preparePhaseFeedbackScope(paths, phase, workId, repoId, runId);
+  const prompt = buildPhaseFeedbackPrompt(phase, feedback, previous.session);
+  fs.mkdirSync(path.dirname(promptPath), { recursive: true });
+  fs.writeFileSync(promptPath, `${prompt}\n`);
+  const args = repoId
+    ? ["work", feedbackWorkerCommand(phase), workId, repoId]
+    : ["work", feedbackWorkerCommand(phase), workId];
+  launchPhaseWorker(cwd, tmuxSession, args, paths.root);
+  writeRunningScopedPhaseSession(paths, {
+    phase,
+    workId,
+    repoId,
+    taskId,
+    runId,
+    tmuxSession,
+    startedAt,
+    promptPath,
+    outputPath,
+    artifacts,
+    session: {
+      ...previous.session,
+      transportId: tmuxSession,
+      summary: `${phase} feedback session started`,
+      summaryIsFallback: true
+    }
+  });
+  return { phase, workId, repoId, taskId, status: "started", tmuxSession, promptPath, outputPath };
+}
+
+function feedbackWorkerCommand(phase: "spec" | "plan" | "repo-plan" | "review"): string {
+  switch (phase) {
+    case "spec":
+      return "_spec-feedback-worker";
+    case "plan":
+      return "_plan-feedback-worker";
+    case "repo-plan":
+      return "_repo-plan-feedback-worker";
+    case "review":
+      return "_review-feedback-worker";
+  }
+}
+
+function buildPhaseFeedbackPrompt(
+  phase: "spec" | "plan" | "repo-plan" | "review",
+  feedback: string,
+  session: AgentSessionRef
+): string {
+  return [
+    `Continue the ${phase} task using the existing ${session.provider} session context.`,
+    "",
+    "Update the existing artifact based on this feedback:",
+    "",
+    feedback.trim()
+  ].join("\n");
+}
+
+function readResumeSession(
+  paths: DevtaskPaths,
+  workId: string,
+  phase: "spec" | "plan" | "repo-plan" | "review",
+  repoId: string | null
+): { session: AgentSessionRef; taskId: string | null } {
+  const current = readScopedPhaseSession(paths, workId, phase, repoId);
+  if (current?.session.resumeTarget || current?.session.providerSessionId || current?.session.conversationId) {
+    return {
+      session: current.session,
+      taskId: current.taskId
+    };
+  }
+
+  const latest = getLatestWorkPhaseRun(paths, workId, phase, repoId ?? undefined);
+  if (latest?.session.resumeTarget || latest?.session.providerSessionId || latest?.session.conversationId) {
+    return {
+      session: latest.session,
+      taskId: latest.taskId
+    };
+  }
+
+  throw new DevtaskError(`No resumable ${phase} session exists for ${repoId ? `${workId}/${repoId}` : workId}`);
+}
+
+function preparePhaseFeedbackScope(
+  paths: DevtaskPaths,
+  phase: "spec" | "plan" | "repo-plan" | "review",
+  workId: string,
+  repoId: string | null,
+  runId: string
+): {
+  tmuxSession: string;
+  cwd: string;
+  promptPath: string;
+  outputPath: string;
+  taskId: string | null;
+  artifacts: Record<string, string>;
+} {
+  if (phase === "spec") {
+    return {
+      tmuxSession: tmuxSessionName(paths, `spec-${workId}`),
+      cwd: paths.root,
+      promptPath: path.join(workItemSpecRunsDir(paths, workId), `${runId}.prompt.md`),
+      outputPath: path.join(workItemSpecRunsDir(paths, workId), `${runId}.md`),
+      taskId: null,
+      artifacts: {
+        specPath: workItemSpecPath(paths, workId)
+      }
+    };
+  }
+  if (phase === "plan") {
+    return {
+      tmuxSession: tmuxSessionName(paths, `plan-${workId}`),
+      cwd: paths.root,
+      promptPath: path.join(workItemPlanRunsDir(paths, workId), `${runId}.prompt.md`),
+      outputPath: path.join(workItemPlanRunsDir(paths, workId), `${runId}.md`),
+      taskId: null,
+      artifacts: {
+        planPath: path.join(workItemDir(paths, workId), "plan.md"),
+        graphPath: path.join(workItemDir(paths, workId), "graph.json")
+      }
+    };
+  }
+  if (phase === "repo-plan") {
+    if (!repoId) {
+      throw new DevtaskError("repo-plan feedback requires a repo id");
+    }
+    const graph = readWorkGraph(paths, workId);
+    const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
+    if (!graphTask) {
+      throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
+    }
+    const repo = getWorkspaceRepo(paths, repoId);
+    const phaseDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId);
+    return {
+      tmuxSession: tmuxSessionName(paths, `repo-plan-${workId}-${repoId}`),
+      cwd: repo.repoPath,
+      promptPath: path.join(phaseDir, `${runId}.prompt.md`),
+      outputPath: path.join(phaseDir, `${runId}.md`),
+      taskId: graphTask.id,
+      artifacts: {
+        planPath: workItemRepoPlanPath(paths, workId, repoId)
+      }
+    };
+  }
+  if (!repoId) {
+    throw new DevtaskError("review feedback requires a repo id");
+  }
+  const materialization = requireMaterialization(paths, workId);
+  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
+  if (!task) {
+    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
+  }
+  const reviewDir = workItemReviewDir(paths, workId);
+  return {
+    tmuxSession: tmuxSessionName(resolvePaths(task.repoPath), `review-${workId}-${repoId}`),
+    cwd: task.worktreePath,
+    promptPath: `${reviewDir}/${repoId}.prompt.md`,
+    outputPath: `${reviewDir}/${repoId}.output.md`,
+    taskId: task.taskId,
+    artifacts: {
+      reviewPath: `${reviewDir}/${repoId}.md`,
+      resultPath: `${reviewDir}/${repoId}.json`
+    }
+  };
+}
+
+export async function startSpecWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
+  const item = getWorkItem(paths, workId);
+  ensureNoLiveScopedPhaseSession(paths, workId, "spec");
+  const runId = Date.now().toString();
+  const runsDir = workItemSpecRunsDir(paths, item.id);
+  fs.mkdirSync(runsDir, { recursive: true });
+  const promptPath = `${runsDir}/${runId}.prompt.md`;
+  const outputPath = `${runsDir}/${runId}.md`;
+  fs.writeFileSync(promptPath, `${buildSpecPrompt(item, workItemSpecPath(paths, item.id))}\n`);
+  const tmuxSession = tmuxSessionName(paths, `spec-${workId}`);
+  launchPhaseWorker(paths.root, tmuxSession, ["work", "_spec-worker", workId], paths.root);
+  writeRunningScopedPhaseSession(paths, {
+    phase: "spec",
+    workId,
+    repoId: null,
+    taskId: null,
+    runId,
+    tmuxSession,
+    startedAt: new Date().toISOString(),
+    promptPath,
+    outputPath,
+    artifacts: {
+      specPath: workItemSpecPath(paths, item.id)
+    },
+    session: {
+      provider: readConfig(paths).agent.provider,
+      transportId: tmuxSession,
+      providerSessionId: null,
+      conversationId: null,
+      resumeTarget: null,
+      storageRoot: null,
+      transcriptPath: null,
+      summary: "spec session started",
+      summaryIsFallback: true
+    }
+  });
+  return { phase: "spec", workId, repoId: null, taskId: null, status: "started", tmuxSession, promptPath, outputPath };
+}
+
+export async function startPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
+  requireWorkSpec(paths, workId);
+  ensureNoLiveScopedPhaseSession(paths, workId, "plan");
+  const runId = newRunId();
+  const runsDir = workItemPlanRunsDir(paths, workId);
+  fs.mkdirSync(runsDir, { recursive: true });
+  const promptPath = path.join(runsDir, `${runId}.prompt.md`);
+  const outputPath = path.join(runsDir, `${runId}.md`);
+  const tmuxSession = tmuxSessionName(paths, `plan-${workId}`);
+  launchPhaseWorker(paths.root, tmuxSession, ["work", "_plan-worker", workId], paths.root);
+  writeRunningScopedPhaseSession(paths, {
+    phase: "plan",
+    workId,
+    repoId: null,
+    taskId: null,
+    runId,
+    tmuxSession,
+    startedAt: new Date().toISOString(),
+    promptPath,
+    outputPath,
+    artifacts: {
+      planPath: path.join(workItemDir(paths, workId), "plan.md"),
+      graphPath: path.join(workItemDir(paths, workId), "graph.json")
+    },
+    session: {
+      provider: readConfig(paths).agent.provider,
+      transportId: tmuxSession,
+      providerSessionId: null,
+      conversationId: null,
+      resumeTarget: null,
+      storageRoot: null,
+      transcriptPath: null,
+      summary: "plan session started",
+      summaryIsFallback: true
+    }
+  });
+  return { phase: "plan", workId, repoId: null, taskId: null, status: "started", tmuxSession, promptPath, outputPath };
+}
+
+export async function startRepoPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult[]> {
+  const item = getWorkItem(paths, workId);
+  const planRecord = readLatestWorkPlanRecord(paths, workId);
+  if (!planRecord || planRecord.status !== "planned") {
+    throw new DevtaskError(`Global work plan is not ready for ${workId}. Run devtask work plan ${workId} first.`);
+  }
+  const graph = readWorkGraph(paths, workId);
+  const launches: PhaseLaunchResult[] = [];
+
+  for (const graphTask of graph.tasks) {
+    launches.push(await startRepoPlanScope(paths, workId, graphTask.repoId));
+  }
+
+  await updateRecentWork(paths, item);
+  return launches;
+}
+
+export async function startReviewWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult[]> {
+  const materialization = requireMaterialization(paths, workId);
+  const launches: PhaseLaunchResult[] = [];
+  for (const task of materialization.tasks) {
+    launches.push(await startReviewScope(paths, workId, task.repoId));
+  }
+  return launches;
+}
+
+export async function startRepoPlanScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
+  const graph = readWorkGraph(paths, workId);
+  const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
+  if (!graphTask) {
+    throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
+  }
+  ensureNoLiveScopedPhaseSession(paths, workId, "repo-plan", repoId);
+  const tmuxSession = tmuxSessionName(paths, `repo-plan-${workId}-${repoId}`);
+  const runId = newRunId();
+  const phaseDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId);
+  fs.mkdirSync(phaseDir, { recursive: true });
+  const promptPath = path.join(phaseDir, `${runId}.prompt.md`);
+  const outputPath = path.join(phaseDir, `${runId}.md`);
+  const repo = getWorkspaceRepo(paths, repoId);
+  launchPhaseWorker(repo.repoPath, tmuxSession, ["work", "_repo-plan-worker", workId, repoId], paths.root);
+  writeRunningScopedPhaseSession(paths, {
+    phase: "repo-plan",
+    workId,
+    repoId,
+    taskId: graphTask.id,
+    runId,
+    tmuxSession,
+    startedAt: new Date().toISOString(),
+    promptPath,
+    outputPath,
+    artifacts: {
+      planPath: workItemRepoPlanPath(paths, workId, repoId)
+    },
+    session: {
+      provider: readConfig(paths).agent.provider,
+      transportId: tmuxSession,
+      providerSessionId: null,
+      conversationId: null,
+      resumeTarget: null,
+      storageRoot: null,
+      transcriptPath: null,
+      summary: "repo-plan session started",
+      summaryIsFallback: true
+    }
+  });
+  return { phase: "repo-plan", workId, repoId, taskId: graphTask.id, status: "started", tmuxSession, promptPath, outputPath };
+}
+
+export async function startReviewScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
+  const materialization = requireMaterialization(paths, workId);
+  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
+  if (!task) {
+    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
+  }
+  ensureNoLiveScopedPhaseSession(paths, workId, "review", repoId);
+  const tmuxSession = tmuxSessionName(resolvePaths(task.repoPath), `review-${workId}-${repoId}`);
+  const reviewDir = workItemReviewDir(paths, workId);
+  fs.mkdirSync(reviewDir, { recursive: true });
+  const promptPath = `${reviewDir}/${repoId}.prompt.md`;
+  const outputPath = `${reviewDir}/${repoId}.output.md`;
+  launchPhaseWorker(task.worktreePath, tmuxSession, ["work", "_review-worker", workId, repoId], paths.root);
+  writeRunningScopedPhaseSession(paths, {
+    phase: "review",
+    workId,
+    repoId,
+    taskId: task.taskId,
+    runId: newRunId(),
+    tmuxSession,
+    startedAt: new Date().toISOString(),
+    promptPath,
+    outputPath,
+    artifacts: {
+      reviewPath: `${reviewDir}/${repoId}.md`,
+      resultPath: `${reviewDir}/${repoId}.json`
+    },
+    session: {
+      provider: readConfig(paths).agent.provider,
+      transportId: tmuxSession,
+      providerSessionId: null,
+      conversationId: null,
+      resumeTarget: null,
+      storageRoot: null,
+      transcriptPath: null,
+      summary: "review session started",
+      summaryIsFallback: true
+    }
+  });
+  return { phase: "review", workId, repoId, taskId: task.taskId, status: "started", tmuxSession, promptPath, outputPath };
+}
+
 export async function planWork(
   paths: DevtaskPaths,
   workId: string,
@@ -241,6 +695,8 @@ export async function planWork(
     onStart?: (start: WorkPlanStart) => void;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
+    resumeSession?: AgentSessionRef | null;
+    promptOverride?: string | null;
   } = {}
 ): Promise<WorkPlanRecord> {
   const config: DevtaskConfig = readConfig(paths);
@@ -259,6 +715,8 @@ export async function specWork(
     onStart?: (start: { command: string; promptPath: string; outputPath: string; specPath: string }) => void;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
+    resumeSession?: AgentSessionRef | null;
+    promptOverride?: string | null;
   } = {}
 ): Promise<WorkSpecResult> {
   const config: DevtaskConfig = readConfig(paths);
@@ -572,6 +1030,221 @@ export async function reviewWork(paths: DevtaskPaths, workId: string): Promise<R
   return result;
 }
 
+export async function runSpecWorker(paths: DevtaskPaths, workId: string): Promise<WorkSpecResult> {
+  const result = await specWork(paths, workId);
+  updateScopedPhaseSession(paths, workId, "spec", null, {
+    status: result.status === "spec-ready" ? "completed" : "failed",
+    updatedAt: result.generatedAt,
+    promptPath: result.promptPath,
+    outputPath: result.outputPath,
+    artifacts: {
+      specPath: result.specPath
+    },
+    session: {
+      ...result.session,
+      transportId: readScopedPhaseSession(paths, workId, "spec")?.tmuxSession ?? result.session.transportId
+    }
+  });
+  return result;
+}
+
+export async function runSpecFeedbackWorker(paths: DevtaskPaths, workId: string): Promise<WorkSpecResult> {
+  const current = readScopedPhaseSession(paths, workId, "spec");
+  if (!current) {
+    throw new DevtaskError(`No spec feedback session exists for ${workId}`);
+  }
+  const previous = readResumeSession(paths, workId, "spec", null);
+  const prompt = fs.readFileSync(current.promptPath, "utf8");
+  const result = await specWork(paths, workId, {
+    resumeSession: previous.session,
+    promptOverride: prompt
+  });
+  updateScopedPhaseSession(paths, workId, "spec", null, {
+    status: result.status === "spec-ready" ? "completed" : "failed",
+    updatedAt: result.generatedAt,
+    promptPath: result.promptPath,
+    outputPath: result.outputPath,
+    artifacts: {
+      specPath: result.specPath
+    },
+    session: {
+      ...result.session,
+      transportId: current.tmuxSession
+    }
+  });
+  return result;
+}
+
+export async function runPlanWorker(paths: DevtaskPaths, workId: string): Promise<WorkPlanRecord> {
+  const result = await planWork(paths, workId);
+  updateScopedPhaseSession(paths, workId, "plan", null, {
+    status: result.status === "planned" ? "completed" : "failed",
+    updatedAt: result.finishedAt,
+    promptPath: result.promptPath,
+    outputPath: result.outputPath,
+    artifacts: {
+      planPath: result.planPath,
+      graphPath: result.graphPath
+    },
+    session: {
+      ...result.session,
+      transportId: readScopedPhaseSession(paths, workId, "plan")?.tmuxSession ?? result.session.transportId
+    }
+  });
+  return result;
+}
+
+export async function runPlanFeedbackWorker(paths: DevtaskPaths, workId: string): Promise<WorkPlanRecord> {
+  const current = readScopedPhaseSession(paths, workId, "plan");
+  if (!current) {
+    throw new DevtaskError(`No plan feedback session exists for ${workId}`);
+  }
+  const previous = readResumeSession(paths, workId, "plan", null);
+  const prompt = fs.readFileSync(current.promptPath, "utf8");
+  const result = await planWork(paths, workId, {
+    resumeSession: previous.session,
+    promptOverride: prompt
+  });
+  updateScopedPhaseSession(paths, workId, "plan", null, {
+    status: result.status === "planned" ? "completed" : "failed",
+    updatedAt: result.finishedAt,
+    promptPath: result.promptPath,
+    outputPath: result.outputPath,
+    artifacts: {
+      planPath: result.planPath,
+      graphPath: result.graphPath
+    },
+    session: {
+      ...result.session,
+      transportId: current.tmuxSession
+    }
+  });
+  return result;
+}
+
+export async function runRepoPlanWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
+  const item = getWorkItem(paths, workId);
+  const graph = readWorkGraph(paths, workId);
+  const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
+  if (!graphTask) {
+    throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
+  }
+  const repo = getWorkspaceRepo(paths, repoId);
+  const record = await runWorkspaceRepoPlan(paths, item, graphTask, repo);
+  updateScopedPhaseSession(paths, workId, "repo-plan", repoId, {
+    status: record.status === "planned" ? "completed" : record.status === "blocked" ? "blocked" : "failed",
+    updatedAt: new Date().toISOString(),
+    artifacts: {
+      planPath: record.planPath
+    },
+    session: {
+      ...record.session,
+      transportId: readScopedPhaseSession(paths, workId, "repo-plan", repoId)?.tmuxSession ?? record.session.transportId
+    }
+  });
+}
+
+export async function runRepoPlanFeedbackWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
+  const current = readScopedPhaseSession(paths, workId, "repo-plan", repoId);
+  if (!current) {
+    throw new DevtaskError(`No repo-plan feedback session exists for ${workId}/${repoId}`);
+  }
+  const item = getWorkItem(paths, workId);
+  const graph = readWorkGraph(paths, workId);
+  const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
+  if (!graphTask) {
+    throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
+  }
+  const repo = getWorkspaceRepo(paths, repoId);
+  const previous = readResumeSession(paths, workId, "repo-plan", repoId);
+  const prompt = fs.readFileSync(current.promptPath, "utf8");
+  const record = await runWorkspaceRepoPlan(paths, item, graphTask, repo, {
+    resumeSession: previous.session,
+    promptOverride: prompt
+  });
+  updateScopedPhaseSession(paths, workId, "repo-plan", repoId, {
+    status: record.status === "planned" ? "completed" : record.status === "blocked" ? "blocked" : "failed",
+    updatedAt: new Date().toISOString(),
+    artifacts: {
+      planPath: record.planPath
+    },
+    session: {
+      ...record.session,
+      transportId: current.tmuxSession,
+      providerSessionId: record.session.providerSessionId,
+      conversationId: record.session.conversationId,
+      resumeTarget: record.session.resumeTarget
+    }
+  });
+}
+
+export async function runReviewWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
+  const materialization = requireMaterialization(paths, workId);
+  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
+  if (!task) {
+    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
+  }
+  const latestCheck = readWorkResultSummary(paths, workId, "check");
+  const latestVerify = readWorkResultSummary(paths, workId, "verify");
+  const latestCi = readWorkResultSummary(paths, workId, "ci");
+  const result = await runReviewAgent(paths, workId, task, readConfig(paths), { latestCheck, latestVerify, latestCi });
+  const latest = getLatestWorkPhaseRun(paths, workId, "review", repoId);
+  if (!latest) {
+    throw new DevtaskError(`Review phase run was not recorded for ${workId}/${repoId}`);
+  }
+  updateScopedPhaseSession(paths, workId, "review", repoId, {
+    status: result.status === "blocked" ? "blocked" : result.status === "failed" ? "failed" : "completed",
+    updatedAt: latest.finishedAt,
+    promptPath: latest.promptPath,
+    outputPath: latest.outputPath,
+    artifacts: latest.artifacts,
+    taskId: latest.taskId,
+    runId: latest.runId,
+    session: {
+      ...latest.session,
+      transportId: readScopedPhaseSession(paths, workId, "review", repoId)?.tmuxSession ?? latest.session.transportId
+    }
+  });
+}
+
+export async function runReviewFeedbackWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
+  const current = readScopedPhaseSession(paths, workId, "review", repoId);
+  if (!current) {
+    throw new DevtaskError(`No review feedback session exists for ${workId}/${repoId}`);
+  }
+  const materialization = requireMaterialization(paths, workId);
+  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
+  if (!task) {
+    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
+  }
+  const previous = readResumeSession(paths, workId, "review", repoId);
+  const prompt = fs.readFileSync(current.promptPath, "utf8");
+  const latestCheck = readWorkResultSummary(paths, workId, "check");
+  const latestVerify = readWorkResultSummary(paths, workId, "verify");
+  const latestCi = readWorkResultSummary(paths, workId, "ci");
+  const result = await runReviewAgent(paths, workId, task, readConfig(paths), { latestCheck, latestVerify, latestCi }, {
+    resumeSession: previous.session,
+    promptOverride: prompt
+  });
+  const latest = getLatestWorkPhaseRun(paths, workId, "review", repoId);
+  if (!latest) {
+    throw new DevtaskError(`Review phase run was not recorded for ${workId}/${repoId}`);
+  }
+  updateScopedPhaseSession(paths, workId, "review", repoId, {
+    status: result.status === "blocked" ? "blocked" : result.status === "failed" ? "failed" : "completed",
+    updatedAt: latest.finishedAt,
+    promptPath: latest.promptPath,
+    outputPath: latest.outputPath,
+    artifacts: latest.artifacts,
+    taskId: latest.taskId,
+    runId: latest.runId,
+    session: {
+      ...latest.session,
+      transportId: current.tmuxSession
+    }
+  });
+}
+
 async function runDeterministicChecks(paths: DevtaskPaths, workId: string): Promise<VerifyWorkResult> {
   const materialization = requireMaterialization(paths, workId);
   const tasks: VerifyTaskResult[] = [];
@@ -654,6 +1327,18 @@ async function executeMaterializedTask(
       updatedAt: new Date().toISOString()
     });
     await writeExecutePhaseRun(workspacePaths, workId, task, meta, current.status);
+    const existingSession = readScopedPhaseSession(workspacePaths, workId, "execute", task.repoId);
+    if (existingSession) {
+      updateScopedPhaseSession(workspacePaths, workId, "execute", task.repoId, {
+        status: current.status === "blocked" ? "blocked" : current.status === "failed" ? "failed" : "completed",
+        updatedAt: meta.updatedAt,
+        session: {
+          ...existingSession.session,
+          summary: meta.resultSummary,
+          summaryIsFallback: true
+        }
+      });
+    }
     return {
       repoId: task.repoId,
       taskId: task.taskId,
@@ -676,6 +1361,16 @@ async function executeMaterializedTask(
       }
     });
     await writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
+    markExecutePhaseSession(workspacePaths, workId, task.repoId, task.taskId, meta.tmuxSession!, {
+      promptPath: meta.taskPath,
+      outputPath: meta.statePath,
+      resultPath: meta.resultPath,
+      updatedAt: meta.updatedAt,
+      summary: meta.resultSummary,
+      provider: readConfig(workspacePaths).agent.provider,
+      providerSessionId: meta.agentSessionId,
+      conversationId: meta.agentThreadId
+    });
     return {
       repoId: task.repoId,
       taskId: task.taskId,
@@ -708,6 +1403,16 @@ async function executeMaterializedTask(
     updatedAt: new Date().toISOString()
   });
   await writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
+  markExecutePhaseSession(workspacePaths, workId, task.repoId, task.taskId, sessionName, {
+    promptPath: meta.taskPath,
+    outputPath: meta.statePath,
+    resultPath: meta.resultPath,
+    updatedAt: meta.updatedAt,
+    summary: meta.resultSummary,
+    provider: readConfig(workspacePaths).agent.provider,
+    providerSessionId: meta.agentSessionId,
+    conversationId: meta.agentThreadId
+  });
   return {
     repoId: task.repoId,
     taskId: task.taskId,
@@ -1120,11 +1825,14 @@ async function runWorkspaceRepoPlan(
     onStart?: (start: PlanAgentStart) => void;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
+    resumeSession?: AgentSessionRef | null;
+    promptOverride?: string | null;
   } = {}
 ): Promise<{
   status: RepoPlanTaskResult["status"];
   planPath: string;
   outputPath: string;
+  session: AgentSessionRef;
 }> {
   const config = readConfig(paths);
   const repoPaths = resolvePaths(repo.repoPath);
@@ -1140,14 +1848,16 @@ async function runWorkspaceRepoPlan(
   const finalPlanPath = workItemRepoPlanPath(paths, item.id, repo.id);
   const taskDocument = buildWorkspaceRepoPlanTask(item, graphTask, repo);
   const stateDocument = `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${item.id}\n`;
-  const prompt = buildRepoPlanPrompt(
-    { id: graphTask.id },
-    runtimePlanPath,
-    finalPlanPath,
-    taskDocument,
-    stateDocument,
-    collectPhaseMemory(paths, "planning", { repoId: repo.id })
-  );
+  const prompt = options.promptOverride?.trim()
+    ? options.promptOverride.trim()
+    : buildRepoPlanPrompt(
+        { id: graphTask.id },
+        runtimePlanPath,
+        finalPlanPath,
+        taskDocument,
+        stateDocument,
+        collectPhaseMemory(paths, "planning", { repoId: repo.id })
+      );
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const startOptions = {
@@ -1166,13 +1876,28 @@ async function runWorkspaceRepoPlan(
     }
   } as const;
   const runner = createDefaultAgentRunner(config);
-  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  const command = options.resumeSession
+    ? (runner.buildResumeCommand?.(options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }) ?? "agent-resume")
+    : (runner.buildStartCommand?.(startOptions) ?? "agent-run");
   options.onStart?.({ command, promptPath, outputPath, planPath: finalPlanPath });
   const startedAt = new Date().toISOString();
-  const result = await runAgentPrompt(runner, startOptions, prompt, {
-    outputPath,
-    onOutput: options.onStdout
-  });
+  const result = options.resumeSession
+    ? await resumeAgentPrompt(runner, options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }, prompt, {
+        outputPath,
+        onOutput: options.onStdout
+      })
+    : await runAgentPrompt(runner, startOptions, prompt, {
+        outputPath,
+        onOutput: options.onStdout
+      });
   const finishedAt = new Date().toISOString();
   persistSharedRepoPlan(paths, item.id, repo.id, runtimePlanPath);
   const blocked = readTaskResult(resultPath).status === "blocked";
@@ -1217,7 +1942,8 @@ async function runWorkspaceRepoPlan(
   return {
     status,
     planPath: finalPlanPath,
-    outputPath
+    outputPath,
+    session: result.session
   };
 }
 
@@ -1302,6 +2028,8 @@ async function runSpecAgent(
     onStart?: (start: { command: string; promptPath: string; outputPath: string; specPath: string }) => void;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
+    resumeSession?: AgentSessionRef | null;
+    promptOverride?: string | null;
   }
 ): Promise<WorkSpecResult> {
   const specPath = workItemSpecPath(paths, item.id);
@@ -1310,7 +2038,7 @@ async function runSpecAgent(
   const runId = Date.now().toString();
   const promptPath = `${runsDir}/${runId}.prompt.md`;
   const outputPath = `${runsDir}/${runId}.md`;
-  const prompt = buildSpecPrompt(item, specPath);
+  const prompt = options.promptOverride?.trim() ? options.promptOverride.trim() : buildSpecPrompt(item, specPath);
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const runner = createDefaultAgentRunner(config);
@@ -1327,15 +2055,32 @@ async function runSpecAgent(
       DEVTASK_WORK_SPEC_PATH: specPath
     }
   } as const;
-  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  const command = options.resumeSession
+    ? (runner.buildResumeCommand?.(options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }) ?? "agent-resume")
+    : (runner.buildStartCommand?.(startOptions) ?? "agent-run");
   options.onStart?.({ command, promptPath, outputPath, specPath });
   const startedAt = new Date().toISOString();
-  const result = await runAgentPrompt(runner, startOptions, prompt, {
-    outputPath,
-    onOutput: (chunk) => {
-      options.onStdout?.(chunk);
-    }
-  });
+  const result = options.resumeSession
+    ? await resumeAgentPrompt(runner, options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }, prompt, {
+        outputPath,
+        onOutput: (chunk) => {
+          options.onStdout?.(chunk);
+        }
+      })
+    : await runAgentPrompt(runner, startOptions, prompt, {
+        outputPath,
+        onOutput: (chunk) => {
+          options.onStdout?.(chunk);
+        }
+      });
   const finishedAt = new Date().toISOString();
   const currentSpec = readTextIfExists(specPath).trim();
   const status: WorkSpecResult["status"] =
@@ -1388,7 +2133,11 @@ async function runReviewAgent(
   workId: string,
   task: WorkMaterialization["tasks"][number],
   config: DevtaskConfig,
-  signals: { latestCheck: string | null; latestVerify: string | null; latestCi: string | null }
+  signals: { latestCheck: string | null; latestVerify: string | null; latestCi: string | null },
+  options: {
+    resumeSession?: AgentSessionRef | null;
+    promptOverride?: string | null;
+  } = {}
 ): Promise<ReviewTaskResult> {
   const storagePaths = taskStoragePaths(paths, task.repoPath);
   const meta = readTaskMeta(taskMetaPath(storagePaths, task.taskId));
@@ -1402,22 +2151,24 @@ async function runReviewAgent(
   const resultPath = `${reviewDir}/${task.repoId}.json`;
   const promptPath = `${reviewDir}/${task.repoId}.prompt.md`;
   const outputPath = `${reviewDir}/${task.repoId}.output.md`;
-  const prompt = buildReviewPrompt(
-    task,
-    meta,
-    reviewPath,
-    resultPath,
-    {
-      clean,
-      commits,
-      changedFiles,
-      diffStat,
-      latestCheck: signals.latestCheck,
-      latestVerify: signals.latestVerify,
-      latestCi: signals.latestCi
-    },
-    collectPhaseMemory(paths, "review", { repoId: task.repoId })
-  );
+  const prompt = options.promptOverride?.trim()
+    ? options.promptOverride.trim()
+    : buildReviewPrompt(
+        task,
+        meta,
+        reviewPath,
+        resultPath,
+        {
+          clean,
+          commits,
+          changedFiles,
+          diffStat,
+          latestCheck: signals.latestCheck,
+          latestVerify: signals.latestVerify,
+          latestCi: signals.latestCi
+        },
+        collectPhaseMemory(paths, "review", { repoId: task.repoId })
+      );
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const runner = createDefaultAgentRunner(config);
@@ -1436,9 +2187,17 @@ async function runReviewAgent(
     }
   } as const;
   const startedAt = new Date().toISOString();
-  const execResult = await runAgentPrompt(runner, startOptions, prompt, {
-    outputPath
-  });
+  const execResult = options.resumeSession
+    ? await resumeAgentPrompt(runner, options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }, prompt, {
+        outputPath
+      })
+    : await runAgentPrompt(runner, startOptions, prompt, {
+        outputPath
+      });
 
   const parsed = readReviewResult(resultPath);
   const status: ReviewTaskResult["status"] =

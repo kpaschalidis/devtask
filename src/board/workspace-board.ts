@@ -4,7 +4,7 @@ import { readWorkMaterialization } from "../work-materializer.js";
 import { workItemSpecPath } from "../infra/paths.js";
 import { readWorkPlanRecord } from "../services/work-service.js";
 import { listWorkItems, type WorkItem } from "../storage/work-store.js";
-import { listSessions } from "../services/session-service.js";
+import { listWorkPhaseSessions } from "../services/phase-session-service.js";
 import { recommendWorkNextAction } from "./next-actions.js";
 
 export interface WorkspaceBoardRow {
@@ -28,7 +28,8 @@ export async function buildWorkspaceBoard(paths: DevtaskPaths): Promise<Workspac
 
 export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem): Promise<WorkspaceBoardRow> {
   const materialization = readWorkMaterialization(paths, item.id);
-  const sessions = await listSessions(paths, item.id);
+  const sessions = listWorkPhaseSessions(paths, item.id);
+  const activeSession = sessions.find((session) => session.live) ?? null;
   const planRecord = readWorkPlanRecord(paths, item.id);
   return {
     workId: item.id,
@@ -39,7 +40,7 @@ export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem
       hasSpecArtifact(paths, item.id),
       planRecord?.status ?? null,
       materialization !== null,
-      sessions.some((session) => session.sessionStatus === "active")
+      sessions.some((session) => session.live)
     ),
     repos: materialization ? materialization.tasks.map((task) => task.repoId).join(", ") : "-",
     updatedAt: newestUpdatedAt(item.updatedAt, [
@@ -47,13 +48,15 @@ export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem
       materialization?.materializedAt ?? null,
       ...sessions.map((session) => session.updatedAt)
     ]),
-    next: recommendWorkNextAction(item, {
-      hasSpec: hasSpecArtifact(paths, item.id),
-      hasPlan: planRecord?.status === "planned" || hasPlanArtifacts(paths, item.id),
-      hasRepoPlans: hasRepoPlanArtifacts(paths, item.id),
-      isMaterialized: materialization !== null,
-      hasActiveSession: sessions.some((session) => session.sessionStatus === "active")
-    })
+    next: activeSession
+      ? phaseAttachCommand(item.id, activeSession.phase, activeSession.repoId)
+      : recommendWorkNextAction(item, {
+          hasSpec: hasSpecArtifact(paths, item.id),
+          hasPlan: planRecord?.status === "planned" || hasPlanArtifacts(paths, item.id),
+          hasRepoPlans: hasRepoPlanArtifacts(paths, item.id),
+          isMaterialized: materialization !== null,
+          hasActiveSession: false
+        })
   };
 }
 
@@ -97,4 +100,17 @@ function hasRepoPlanArtifacts(paths: DevtaskPaths, workId: string): boolean {
 
 function newestUpdatedAt(fallback: string, values: Array<string | null>): string {
   return [fallback, ...values.filter((value): value is string => Boolean(value))].sort().at(-1) ?? fallback;
+}
+
+function phaseAttachCommand(workId: string, phase: string, repoId: string | null): string {
+  return repoId
+    ? `devtask work ${shellQuote(phase)} attach ${shellQuote(workId)} ${shellQuote(repoId)}`
+    : `devtask work ${shellQuote(phase)} attach ${shellQuote(workId)}`;
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

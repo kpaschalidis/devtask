@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/infra/tmux.js", () => ({
+  tmuxSessionExists: vi.fn((session: string) => session === "devtask-review")
+}));
 import { resolveWorkspacePathsForInit, taskMetaPath, workItemRepoPhaseRunsDir } from "../src/infra/paths.js";
 import { writePhaseRunRecord } from "../src/infra/phase-run.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
@@ -10,6 +14,7 @@ import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan } from "../src/work-materializer.js";
 import { workGraphPath } from "../src/global-plan.js";
 import { readTaskMeta, writeTaskMeta } from "../src/storage/meta.js";
+import { writeRunningScopedPhaseSession } from "../src/services/phase-session-service.js";
 import { inspectWork } from "../src/services/work-inspection-service.js";
 import { makeTempRepo } from "./helpers.js";
 
@@ -96,6 +101,31 @@ describe("work inspection service", () => {
       },
       exitCode: null
     });
+    writeRunningScopedPhaseSession(paths, {
+      phase: "review",
+      workId: item.id,
+      repoId: "backend",
+      taskId: "work-123-backend",
+      runId: "2026-01-01T00-00-02-000Z",
+      tmuxSession: "devtask-review",
+      startedAt: "2026-01-01T00:00:11.000Z",
+      promptPath: "/tmp/review.prompt.md",
+      outputPath: "/tmp/review.output.md",
+      artifacts: {
+        reviewPath: "/tmp/review.md"
+      },
+      session: {
+        provider: "codex",
+        transportId: "devtask-review",
+        providerSessionId: null,
+        conversationId: null,
+        resumeTarget: null,
+        storageRoot: null,
+        transcriptPath: null,
+        summary: "review session started",
+        summaryIsFallback: true
+      }
+    });
 
     const inspection = inspectWork(paths, item.id);
 
@@ -121,6 +151,15 @@ describe("work inspection service", () => {
         status: "blocked",
         reason: "waiting for API contract",
         sessionName: "devtask-backend"
+      })
+    ]);
+    expect(inspection.livePhaseSessions).toEqual([
+      expect.objectContaining({
+        phase: "review",
+        repoId: "backend",
+        taskId: "work-123-backend",
+        tmuxSession: "devtask-review",
+        promptPath: "/tmp/review.prompt.md"
       })
     ]);
   });

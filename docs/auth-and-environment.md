@@ -30,14 +30,14 @@ tmux is recommended for attachable repo-local sessions:
 ```bash
 tmux -V
 devtask config runtime attachable
-devtask session list <work-id>
-devtask session resume <work-id> <repo-id>
-devtask session attach <work-id> <repo-id>
-devtask session send <work-id> <repo-id> "message"
+devtask work spec <work-id>
+devtask work spec attach <work-id>
+devtask work spec feedback <work-id> "message"
+devtask work execute attach <work-id> <repo-id>
 devtask work execute <work-id>
 ```
 
-Without tmux, `devtask` can still manage work, but live attach/send behavior is limited.
+Without tmux, `devtask` can still manage artifacts and state, but live attach/feedback behavior is limited.
 
 ## GitHub
 

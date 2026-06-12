@@ -168,7 +168,7 @@ function nextCommand(
     return `devtask work execute ${shellQuote(workId)}`;
   }
   if (hasSession && (status === "running" || status === "paused")) {
-    return `devtask session attach ${shellQuote(workId)} ${shellQuote(repoId)}`;
+    return `devtask work execute attach ${shellQuote(workId)} ${shellQuote(repoId)}`;
   }
   if (check === "-") {
     return `devtask work check ${shellQuote(workId)}`;

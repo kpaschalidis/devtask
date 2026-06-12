@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./infra/paths.js";
 import { planMarkdownPath, taskDir, taskMetaPath, workItemRepoPhaseRunsDir, workItemSessionRegistryDir } from "./infra/paths.js";
-import { createDefaultAgentRunner, runAgentPrompt } from "./agent.js";
+import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "./agent.js";
+import type { AgentSessionRef } from "./agent-session.js";
 import { writeAgentSessionRegistryEntry } from "./infra/agent-session-registry.js";
 import { writePhaseRunRecord, type PhaseRunSessionMetadata } from "./infra/phase-run.js";
 import { collectPhaseMemory } from "./improvement-memory.js";
@@ -50,6 +51,8 @@ export async function runPlanAgent(
     onStart?: (start: PlanAgentStart) => void;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
+    resumeSession?: AgentSessionRef | null;
+    promptOverride?: string | null;
   }
 ): Promise<PlanRecord> {
   const planId = newRunId();
@@ -68,14 +71,16 @@ export async function runPlanAgent(
   const task = readTextIfExists(meta.taskPath).trim();
   const state = readTextIfExists(meta.statePath).trim();
   const memory = collectPhaseMemory(context.workspacePaths, "planning", { repoId: context.repoId });
-  const prompt = buildRepoPlanPrompt(
-    meta,
-    runtimePlanPath,
-    planPath,
-    task || "(task file is empty)",
-    state || "(state file is empty)",
-    memory
-  );
+  const prompt = options.promptOverride?.trim()
+    ? options.promptOverride.trim()
+    : buildRepoPlanPrompt(
+        meta,
+        runtimePlanPath,
+        planPath,
+        task || "(task file is empty)",
+        state || "(state file is empty)",
+        memory
+      );
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const beforeStatus = await readGitStatus(meta.worktreePath);
@@ -109,15 +114,32 @@ export async function runPlanAgent(
       DEVTASK_RESULT_PATH: runtimeResultPath
     }
   } as const;
-  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  const command = options.resumeSession
+    ? (runner.buildResumeCommand?.(options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }) ?? "agent-resume")
+    : (runner.buildStartCommand?.(startOptions) ?? "agent-run");
   options.onStart?.({ command, outputPath, promptPath, planPath });
   const startedAt = new Date().toISOString();
-  const result = await runAgentPrompt(runner, startOptions, prompt, {
-    outputPath,
-    onOutput: (chunk) => {
-      options.onStdout?.(chunk);
-    }
-  });
+  const result = options.resumeSession
+    ? await resumeAgentPrompt(runner, options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }, prompt, {
+        outputPath,
+        onOutput: (chunk) => {
+          options.onStdout?.(chunk);
+        }
+      })
+    : await runAgentPrompt(runner, startOptions, prompt, {
+        outputPath,
+        onOutput: (chunk) => {
+          options.onStdout?.(chunk);
+        }
+      });
   const finishedAt = new Date().toISOString();
   persistRuntimePlan(runtimePlanPath, planPath);
   persistRuntimeResult(runtimeResultPath, meta.resultPath);

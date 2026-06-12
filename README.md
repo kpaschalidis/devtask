@@ -110,8 +110,9 @@ devtask work diagnose APP-123
 devtask work inspect APP-123
 devtask work runs APP-123 --latest
 devtask work runs show APP-123 execute backend
-devtask session list APP-123
-devtask session resume APP-123 backend
+devtask work spec attach APP-123
+devtask work review attach APP-123 backend
+devtask work execute attach APP-123 backend
 ```
 
 Current observability UX is terminal output plus optional web views. `board serve` starts a local read-only board app that rereads current state on refresh, and `board html` still generates a static snapshot when you want a file artifact.

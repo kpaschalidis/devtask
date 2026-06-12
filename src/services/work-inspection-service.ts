@@ -13,6 +13,7 @@ import {
   workItemSpecPath
 } from "../infra/paths.js";
 import { listWorkPhaseRuns } from "./phase-run-service.js";
+import { listWorkPhaseSessions } from "./phase-session-service.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { getTask } from "../storage/task-store.js";
 import { getWorkItem } from "../storage/work-store.js";
@@ -38,6 +39,16 @@ export interface WorkInspection {
     storageRoot: string | null;
     transcriptPath: string | null;
     artifacts: Record<string, string>;
+  }>;
+  livePhaseSessions: Array<{
+    phase: string;
+    repoId: string | null;
+    taskId: string | null;
+    status: string;
+    tmuxSession: string;
+    live: boolean;
+    promptPath: string;
+    outputPath: string;
   }>;
   problemTasks: Array<{
     repoId: string;
@@ -84,6 +95,18 @@ export function inspectWork(paths: DevtaskPaths, workId: string): WorkInspection
     transcriptPath: run.session.transcriptPath ?? null,
     artifacts: run.artifacts
   }));
+  const livePhaseSessions = listWorkPhaseSessions(paths, workId)
+    .filter((session) => session.live)
+    .map((session) => ({
+      phase: session.phase,
+      repoId: session.repoId,
+      taskId: session.taskId,
+      status: session.status,
+      tmuxSession: session.tmuxSession,
+      live: session.live,
+      promptPath: session.promptPath,
+      outputPath: session.outputPath
+    }));
 
   const problemTasks = (materialization?.tasks ?? [])
     .map((task) => {
@@ -105,6 +128,7 @@ export function inspectWork(paths: DevtaskPaths, workId: string): WorkInspection
     status: item.status,
     artifacts,
     latestPhaseRuns,
+    livePhaseSessions,
     problemTasks
   };
 }

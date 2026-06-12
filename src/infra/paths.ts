@@ -239,6 +239,23 @@ export function workItemLocalDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.localDir, "work", id);
 }
 
+export function workItemPhaseSessionsDir(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemLocalDir(paths, id), "phase-sessions");
+}
+
+export function workItemScopedPhaseSessionDir(
+  paths: DevtaskPaths,
+  workId: string,
+  phase: "spec" | "plan" | "repo-plan" | "review" | "execute",
+  repoId?: string | null
+): string {
+  const base = path.join(workItemPhaseSessionsDir(paths, workId), phase);
+  if (phase === "spec" || phase === "plan") {
+    return base;
+  }
+  return path.join(base, repoId ?? "-");
+}
+
 export function workItemLocalStatePath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "state.md");
 }

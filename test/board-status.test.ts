@@ -1,16 +1,26 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/infra/tmux.js", () => ({
+  tmuxSessionExists: vi.fn(() => false)
+}));
 import { buildWorkspaceBoardRow } from "../src/board/workspace-board.js";
 import { buildWorkBoard } from "../src/board/work-board.js";
 import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
+import { writeRunningScopedPhaseSession } from "../src/services/phase-session-service.js";
 import { initializeWorkspace, createTask } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { writeTaskMeta } from "../src/storage/meta.js";
 import { makeTempRepo } from "./helpers.js";
+const tmux = await import("../src/infra/tmux.js");
 
 describe("board status", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(tmux.tmuxSessionExists).mockReturnValue(false);
+  });
   it("recommends materialize after repo plans exist but before work is materialized", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-board-workspace-"));
     const paths = resolveWorkspacePathsForInit(workspace);
@@ -63,5 +73,45 @@ describe("board status", () => {
 
     expect(rows[0]?.next).toBe("devtask work execute WORK-123");
     expect(rows[0]?.status).toBe("ready");
+  });
+
+  it("points workspace board next action to the live phase attach command", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-board-active-phase-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-123",
+      title: "Add API behavior"
+    });
+    vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-spec");
+    writeRunningScopedPhaseSession(paths, {
+      phase: "spec",
+      workId: item.id,
+      repoId: null,
+      taskId: null,
+      runId: "run-1",
+      tmuxSession: "devtask-spec",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      promptPath: "/tmp/spec.prompt.md",
+      outputPath: "/tmp/spec.output.md",
+      artifacts: {
+        specPath: "/tmp/spec.md"
+      },
+      session: {
+        provider: "codex",
+        transportId: "devtask-spec",
+        providerSessionId: null,
+        conversationId: null,
+        resumeTarget: null,
+        storageRoot: null,
+        transcriptPath: null,
+        summary: "spec session started",
+        summaryIsFallback: true
+      }
+    });
+
+    const row = await buildWorkspaceBoardRow(paths, item);
+
+    expect(row.next).toBe("devtask work spec attach WORK-123");
   });
 });
