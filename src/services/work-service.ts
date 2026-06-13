@@ -9,13 +9,11 @@ import {
   taskMetaPath,
   taskStoragePaths,
   workItemDir,
-  workItemPlanRunsDir,
   workItemRepoPlanPath,
   workItemResultsDir,
   workItemReviewDir,
   phaseRunDir,
-  workItemSpecPath,
-  workItemSpecRunsDir
+  workItemSpecPath
 } from "../infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
 import { writePhaseRunRecord, readRunningPhaseRun, writeRunningPhaseRun, updateRunningPhaseRun, type PhaseRun } from "../infra/phase-run.js";
@@ -568,8 +566,8 @@ const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
       return {
         tmuxSession: tmuxSessionName(paths, `spec-${workId}`),
         cwd: paths.root,
-        promptPath: path.join(workItemSpecRunsDir(paths, workId), `${runId}.prompt.md`),
-        outputPath: path.join(workItemSpecRunsDir(paths, workId), `${runId}.md`),
+        promptPath: path.join(phaseRunDir(paths, workId, "spec", null), `${runId}.prompt.md`),
+        outputPath: path.join(phaseRunDir(paths, workId, "spec", null), `${runId}.md`),
         taskId: null,
         artifacts: { specPath: workItemSpecPath(paths, workId) }
       };
@@ -577,7 +575,7 @@ const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
     async freshScope(paths, workId, _repoId, runId) {
       const item = getWorkItem(paths, workId);
       const config = readConfig(paths);
-      const runsDir = workItemSpecRunsDir(paths, workId);
+      const runsDir = phaseRunDir(paths, workId, "spec", null);
       const promptPath = `${runsDir}/${runId}.prompt.md`;
       const outputPath = `${runsDir}/${runId}.md`;
       const specPath = workItemSpecPath(paths, workId);
@@ -627,8 +625,8 @@ const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
       return {
         tmuxSession: tmuxSessionName(paths, `plan-${workId}`),
         cwd: paths.root,
-        promptPath: path.join(workItemPlanRunsDir(paths, workId), `${runId}.prompt.md`),
-        outputPath: path.join(workItemPlanRunsDir(paths, workId), `${runId}.md`),
+        promptPath: path.join(phaseRunDir(paths, workId, "plan", null), `${runId}.prompt.md`),
+        outputPath: path.join(phaseRunDir(paths, workId, "plan", null), `${runId}.md`),
         taskId: null,
         artifacts: {
           planPath: path.join(workItemDir(paths, workId), "plan.md"),
@@ -641,7 +639,7 @@ const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
       const config = readConfig(paths);
       const item = getWorkItem(paths, workId);
       const repos = listWorkspaceRepos(paths);
-      const runsDir = workItemPlanRunsDir(paths, workId);
+      const runsDir = phaseRunDir(paths, workId, "plan", null);
       const promptPath = path.join(runsDir, `${runId}.prompt.md`);
       const outputPath = path.join(runsDir, `${runId}.md`);
       const planPath = path.join(workItemDir(paths, workId), "plan.md");
@@ -691,8 +689,6 @@ const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
         exitCode: status === "planned" ? 0 : null,
         session
       };
-      fs.mkdirSync(workItemPlanRunsDir(paths, workId), { recursive: true });
-      fs.writeFileSync(path.join(workItemPlanRunsDir(paths, workId), `${sessionRecord.runId}.json`), `${JSON.stringify(record, null, 2)}\n`);
       updateWorkItemStatus(paths, workId, status === "planned" ? "planned" : "failed");
       await updateRecentWork(paths, getWorkItem(paths, workId));
       return { status, artifacts: { planPath, graphPath } };

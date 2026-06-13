@@ -4,8 +4,6 @@ import { emptyAgentSessionRef, type AgentSessionRef } from "../agent-session.js"
 
 export type PhaseRunPhase = "spec" | "plan" | "repo-plan" | "review" | "execute" | "compound";
 
-export type PhaseRunSessionMetadata = AgentSessionRef;
-
 // Unified phase run — covers both live sessions and completed records.
 // Live sessions are stored as running.json; completed ones as {runId}.json.
 export interface PhaseRun {
@@ -40,13 +38,9 @@ export interface PhaseRunRecord {
   outputPath: string;
   startedAt: string;
   finishedAt: string;
-  session: PhaseRunSessionMetadata;
+  session: AgentSessionRef;
   artifacts: Record<string, string>;
   exitCode: number | null;
-}
-
-export function emptyPhaseRunSessionMetadata(): PhaseRunSessionMetadata {
-  return emptyAgentSessionRef();
 }
 
 // Write the running session marker (replaces session.json pattern).

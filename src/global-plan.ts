@@ -4,8 +4,8 @@ import type { DevtaskConfig } from "./infra/config.js";
 import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "./agent.js";
 import type { AgentSessionRef } from "./agent-session.js";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { workItemDir, workItemPhaseRunsDir, workItemPlanRunsDir, workItemSpecPath } from "./infra/paths.js";
-import { emptyPhaseRunSessionMetadata, writePhaseRunRecord } from "./infra/phase-run.js";
+import { phaseRunDir, workItemDir, workItemSpecPath } from "./infra/paths.js";
+import { writePhaseRunRecord } from "./infra/phase-run.js";
 import { collectPhaseMemory } from "./improvement-memory.js";
 import { newRunId } from "./infra/run-record.js";
 import { listWorkspaceRepos, type WorkspaceRepo } from "./storage/workspace-repos.js";
@@ -26,7 +26,7 @@ export interface WorkPlanRecord {
   startedAt: string;
   finishedAt: string;
   exitCode: number | null;
-  session: ReturnType<typeof emptyPhaseRunSessionMetadata>;
+  session: AgentSessionRef;
 }
 
 export interface WorkPlanStart {
@@ -35,10 +35,6 @@ export interface WorkPlanStart {
   outputPath: string;
   planPath: string;
   graphPath: string;
-}
-
-export function workPlansDir(paths: DevtaskPaths, id: string): string {
-  return workItemPlanRunsDir(paths, id);
 }
 
 export function workPlanPath(paths: DevtaskPaths, id: string): string {
@@ -67,7 +63,7 @@ export async function runWorkPlanner(
 ): Promise<WorkPlanRecord> {
   const planId = newRunId();
   const dir = workItemDir(paths, workItem.id);
-  const runsDir = workPlansDir(paths, workItem.id);
+  const runsDir = phaseRunDir(paths, workItem.id, "plan", null);
   fs.mkdirSync(runsDir, { recursive: true });
 
   const promptPath = path.join(runsDir, `${planId}.prompt.md`);
@@ -147,8 +143,7 @@ export async function runWorkPlanner(
     exitCode: result.status === "completed" ? 0 : null,
     session: result.session
   };
-  fs.writeFileSync(path.join(runsDir, `${planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
-  writePhaseRunRecord(workItemPhaseRunsDir(paths, workItem.id, "plan"), {
+  writePhaseRunRecord(runsDir, {
     schemaVersion: 1,
     phase: "plan",
     runId: planId,
@@ -161,24 +156,21 @@ export async function runWorkPlanner(
     startedAt,
     finishedAt,
     session: result.session,
-    artifacts: {
-      planPath,
-      graphPath
-    },
+    artifacts: { planPath, graphPath },
     exitCode: result.status === "completed" ? 0 : null
   });
   return record;
 }
 
 export function readLatestWorkPlanRecord(paths: DevtaskPaths, id: string): WorkPlanRecord | null {
-  const runsDir = workPlansDir(paths, id);
+  const runsDir = phaseRunDir(paths, id, "plan", null);
   if (!fs.existsSync(runsDir)) {
     return null;
   }
 
   const latest = fs
     .readdirSync(runsDir)
-    .filter((file) => file.endsWith(".json"))
+    .filter((file) => file.endsWith(".json") && file !== "running.json")
     .sort()
     .at(-1);
 
@@ -186,7 +178,36 @@ export function readLatestWorkPlanRecord(paths: DevtaskPaths, id: string): WorkP
     return null;
   }
 
-  return JSON.parse(fs.readFileSync(path.join(runsDir, latest), "utf8")) as WorkPlanRecord;
+  const run = JSON.parse(fs.readFileSync(path.join(runsDir, latest), "utf8")) as {
+    runId?: string;
+    planId?: string;
+    status: string;
+    promptPath: string;
+    outputPath: string;
+    startedAt: string;
+    finishedAt: string;
+    exitCode: number | null;
+    session: AgentSessionRef;
+    artifacts?: Record<string, string>;
+    planPath?: string;
+    graphPath?: string;
+  };
+  return {
+    schemaVersion: 1,
+    phase: "plan",
+    planId: run.planId ?? run.runId ?? "",
+    workId: id,
+    status: (run.status === "planned" ? "planned" : "failed") as WorkPlanRecord["status"],
+    command: "",
+    promptPath: run.promptPath,
+    outputPath: run.outputPath,
+    planPath: run.artifacts?.planPath ?? run.planPath ?? workPlanPath(paths, id),
+    graphPath: run.artifacts?.graphPath ?? run.graphPath ?? workGraphPath(paths, id),
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    exitCode: run.exitCode,
+    session: run.session
+  };
 }
 
 export function buildWorkPlanPromptForTest(

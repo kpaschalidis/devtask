@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { planMarkdownPath, taskDir, taskMetaPath, workItemRepoPhaseRunsDir } from "./infra/paths.js";
+import { planMarkdownPath, phaseRunDir, taskDir, taskMetaPath } from "./infra/paths.js";
 import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "./agent.js";
 import type { AgentSessionRef } from "./agent-session.js";
-import { writePhaseRunRecord, type PhaseRunSessionMetadata } from "./infra/phase-run.js";
+import { writePhaseRunRecord } from "./infra/phase-run.js";
 import { collectPhaseMemory } from "./improvement-memory.js";
 import { newRunId } from "./infra/run-record.js";
 import { runCommand } from "./infra/process-runner.js";
@@ -26,7 +26,7 @@ export interface PlanRecord {
   finishedAt: string;
   exitCode: number | null;
   worktreeChanged: boolean;
-  session: PhaseRunSessionMetadata;
+  session: AgentSessionRef;
 }
 
 export interface PlanAgentStart {
@@ -174,7 +174,7 @@ export async function runPlanAgent(
   };
 
   fs.writeFileSync(path.join(plansDir, `${planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
-  writePhaseRunRecord(workItemRepoPhaseRunsDir(context.workspacePaths, context.workId, "repo-plan", context.repoId), {
+  writePhaseRunRecord(phaseRunDir(context.workspacePaths, context.workId, "repo-plan", context.repoId), {
     schemaVersion: 1,
     phase: "repo-plan",
     runId: planId,

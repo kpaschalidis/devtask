@@ -9,7 +9,7 @@ vi.mock("../src/infra/tmux.js", () => ({
 import { buildWorkspaceBoardRow } from "../src/board/workspace-board.js";
 import { buildWorkBoard } from "../src/board/work-board.js";
 import { resolveWorkspacePathsForInit, phaseRunDir } from "../src/infra/paths.js";
-import { writeRunningPhaseRun } from "../src/infra/phase-run.js";
+import { writePhaseRunRecord, writeRunningPhaseRun } from "../src/infra/phase-run.js";
 import { initializeWorkspace, createTask } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { writeTaskMeta } from "../src/storage/meta.js";
@@ -33,11 +33,22 @@ describe("board status", () => {
     fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
     fs.mkdirSync(path.join(paths.workDir, item.id, "repo-plans"), { recursive: true });
     fs.writeFileSync(path.join(paths.workDir, item.id, "repo-plans", "backend.md"), "# Repo Plan\n");
-    fs.mkdirSync(path.join(paths.localDir, "work", item.id, "plans"), { recursive: true });
-    fs.writeFileSync(
-      path.join(paths.localDir, "work", item.id, "plans", "latest.json"),
-      `${JSON.stringify({ schemaVersion: 1, phase: "plan", planId: "latest", workId: item.id, status: "planned", command: "fake", promptPath: "p", outputPath: "o", planPath: "p", graphPath: "g", startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:01.000Z", exitCode: 0, session: { provider: "codex", transportId: null, providerSessionId: null, conversationId: null, resumeTarget: null, summary: null, summaryIsFallback: null, storageRoot: null, transcriptPath: null } }, null, 2)}\n`
-    );
+    writePhaseRunRecord(phaseRunDir(paths, item.id, "plan", null), {
+      schemaVersion: 1,
+      phase: "plan",
+      runId: "2026-01-01T00-00-00-000Z",
+      workId: item.id,
+      repoId: null,
+      taskId: null,
+      status: "planned",
+      promptPath: "p",
+      outputPath: "o",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      finishedAt: "2026-01-01T00:00:01.000Z",
+      exitCode: 0,
+      session: { provider: "codex", transportId: null, resumeContext: { providerSessionId: null, conversationId: null, resumeTarget: null, storageRoot: null, transcriptPath: null }, summary: null, summaryIsFallback: null },
+      artifacts: { planPath: "p", graphPath: "g" }
+    });
 
     const row = await buildWorkspaceBoardRow(paths, item);
 

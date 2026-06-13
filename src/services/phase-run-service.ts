@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { GLOBAL_PHASES, phaseRunDir, workItemPhaseRunsDir, workItemLocalDir } from "../infra/paths.js";
+import { GLOBAL_PHASES, phaseRunDir, workItemLocalDir } from "../infra/paths.js";
 import { readRunningPhaseRun, type PhaseRun, type PhaseRunPhase, type PhaseRunRecord } from "../infra/phase-run.js";
 import { tmuxSessionExists } from "../infra/tmux.js";
 
@@ -117,7 +117,7 @@ function listPhaseRuns(
   phase: PhaseRunPhase,
   repoId?: string
 ): PhaseRunSummary[] {
-  const phaseDir = workItemPhaseRunsDir(paths, workId, phase);
+  const phaseDir = phaseRunDir(paths, workId, phase, null);
   if (!fs.existsSync(phaseDir)) {
     return [];
   }
@@ -126,7 +126,7 @@ function listPhaseRuns(
     return readRunFiles(phaseDir);
   }
 
-  const repoDirs = repoId ? [path.join(phaseDir, repoId)] : listChildDirs(phaseDir);
+  const repoDirs = repoId ? [phaseRunDir(paths, workId, phase, repoId)] : listChildDirs(phaseDir);
   return repoDirs.flatMap((dir) => readRunFiles(dir));
 }
 
