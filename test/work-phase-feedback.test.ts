@@ -78,7 +78,7 @@ import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { getLatestWorkPhaseRun } from "../src/services/phase-run-service.js";
 import { readScopedPhaseSession, updateScopedPhaseSession, writeRunningScopedPhaseSession } from "../src/services/phase-session-service.js";
-import { attachWorkPhase, runManagedPhaseHookFinalizer, runSpecFeedbackWorker, sendWorkPhaseFeedback, startSpecWork } from "../src/services/work-service.js";
+import { attachWorkPhase, runManagedPhaseHookFinalizer, sendWorkPhaseFeedback, startSpecWork } from "../src/services/work-service.js";
 
 const agent = await import("../src/agent.js");
 const tmux = await import("../src/infra/tmux.js");
@@ -89,69 +89,6 @@ describe("work phase feedback", () => {
     vi.mocked(tmux.tmuxSessionExists).mockReturnValue(false);
     vi.mocked(tmux.waitForTmuxSession).mockReturnValue(true);
     vi.mocked(tmux.writeLaunchScript).mockReturnValue("/tmp/devtask-launch.sh");
-  });
-
-  it("resumes spec feedback through the agent abstraction and records a new phase run", async () => {
-    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-phase-feedback-"));
-    const paths = resolveWorkspacePathsForInit(workspace);
-    initializeWorkspace(paths);
-    const item = createManualWorkItem(paths, {
-      id: "WORK-123",
-      title: "Update spec from feedback"
-    });
-    fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nOriginal.\n");
-
-    writeRunningScopedPhaseSession(paths, {
-      phase: "spec",
-      workId: item.id,
-      repoId: null,
-      taskId: null,
-      runId: "run-1",
-      tmuxSession: "old-session",
-      startedAt: "2026-01-01T00:00:00.000Z",
-      promptPath: path.join(paths.localDir, "old.prompt.md"),
-      outputPath: path.join(paths.localDir, "old.output.md"),
-      artifacts: {
-        specPath: workItemSpecPath(paths, item.id)
-      },
-      session: {
-        provider: "codex",
-        transportId: "old-session",
-        resumeContext: {
-          providerSessionId: "agent-123",
-          conversationId: "thread-123",
-          resumeTarget: "agent-123",
-          storageRoot: "/tmp/codex-home",
-          transcriptPath: "/tmp/codex-home/sessions/spec.jsonl"
-        },
-        summary: "spec complete",
-        summaryIsFallback: false
-      }
-    });
-    updateScopedPhaseSession(paths, item.id, "spec", null, {
-      status: "completed",
-      updatedAt: "2026-01-01T00:01:00.000Z"
-    });
-
-    const launch = await sendWorkPhaseFeedback(paths, "spec", item.id, "Narrow scope to local registry cleanup only.");
-
-    expect(launch.tmuxSession).toBe("devtask-test-spec-WORK-123");
-    expect(tmux.startTmuxSession).toHaveBeenCalled();
-    const runner = vi.mocked(agent.createDefaultAgentRunner).mock.results.at(-1)?.value;
-    expect(runner?.buildInteractiveResumeCommand).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        managedCompletionCommand: expect.stringContaining("work _phase-finalize-hook spec WORK-123")
-      })
-    );
-
-    await runSpecFeedbackWorker(paths, item.id);
-
-    expect(agent.resumeAgentPrompt).toHaveBeenCalledTimes(1);
-    expect(agent.runAgentPrompt).not.toHaveBeenCalled();
-    expect(fs.readFileSync(readScopedPhaseSession(paths, item.id, "spec")!.promptPath, "utf8")).toContain("Narrow scope to local registry cleanup only.");
-    expect(getLatestWorkPhaseRun(paths, item.id, "spec")?.status).toBe("spec-ready");
-    expect(readScopedPhaseSession(paths, item.id, "spec")?.live).toBe(false);
   });
 
   it("does not treat completed sessions as live when tmux still exists", () => {

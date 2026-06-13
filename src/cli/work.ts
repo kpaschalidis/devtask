@@ -16,22 +16,10 @@ import {
   listWork,
   materializeWork,
   executeWork,
-  planWork,
   readWorkPlanRecord,
-  repoPlanWork,
-  runPlanFeedbackWorker,
   runManagedPhaseHookFinalizer,
-  reviewWork,
-  runRepoPlanFeedbackWorker,
-  runPlanWorker,
-  runRepoPlanWorker,
-  runReviewFeedbackWorker,
-  runReviewWorker,
-  runSpecFeedbackWorker,
-  runSpecWorker,
   sendWorkPhaseFeedback,
   attachWorkPhase,
-  specWork,
   startPlanWork,
   startRepoPlanWork,
   startRepoPlanScope,
@@ -567,62 +555,6 @@ export function registerWorkCommands(program: Command): void {
     try {
       const launch = await startReviewScope(resolveWorkspacePaths(), workId, repoId);
       console.log(`Started fresh review session: ${launch.tmuxSession}`);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  work.command("_spec-worker", { hidden: true }).argument("<work-id>").action(async (workId: string) => {
-    try {
-      await runSpecWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  work.command("_plan-worker", { hidden: true }).argument("<work-id>").action(async (workId: string) => {
-    try {
-      await runPlanWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  work.command("_repo-plan-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
-    try {
-      await runRepoPlanWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  work.command("_review-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
-    try {
-      await runReviewWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  work.command("_spec-feedback-worker", { hidden: true }).argument("<work-id>").action(async (workId: string) => {
-    try {
-      await runSpecFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  work.command("_plan-feedback-worker", { hidden: true }).argument("<work-id>").action(async (workId: string) => {
-    try {
-      await runPlanFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  work.command("_repo-plan-feedback-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
-    try {
-      await runRepoPlanFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  work.command("_review-feedback-worker", { hidden: true }).argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
-    try {
-      await runReviewFeedbackWorker(resolveWorkspacePaths(process.env.DEVTASK_WORKSPACE_ROOT ?? process.cwd()), workId, repoId);
     } catch (error) {
       printError(error);
     }

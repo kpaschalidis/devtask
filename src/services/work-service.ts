@@ -9,7 +9,6 @@ import {
   taskMetaPath,
   taskStoragePaths,
   workItemDir,
-  workItemGraphSnapshotPath,
   workItemPlanRunsDir,
   workItemRepoPlanPath,
   workItemResultsDir,
@@ -19,20 +18,18 @@ import {
   workItemSpecPath,
   workItemSpecRunsDir
 } from "../infra/paths.js";
-import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "../agent.js";
+import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
 import { writePhaseRunRecord } from "../infra/phase-run.js";
 import { newRunId } from "../infra/run-record.js";
 import { collectPhaseMemory } from "../improvement-memory.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
 import { readWorkGraph } from "../work-materializer.js";
-import { readLatestPlan, runPlanAgent, type PlanAgentStart, type PlanRecord } from "../repo-plan.js";
+import type { PlanRecord } from "../repo-plan.js";
 import {
   readLatestWorkPlanRecord,
-  runWorkPlanner,
   workPlanAddDirsForTest,
-  type WorkPlanRecord,
-  type WorkPlanStart
+  type WorkPlanRecord
 } from "../global-plan.js";
 import {
   createJiraWorkItem,
@@ -75,7 +72,7 @@ import {
   updateScopedPhaseSession,
   writeRunningScopedPhaseSession,
   markExecutePhaseSession,
-  listWorkPhaseSessions
+  type PhaseSessionSummary
 } from "./phase-session-service.js";
 import {
   checkProviderCi,
@@ -324,22 +321,6 @@ export function freshExecuteWork(paths: DevtaskPaths, workId: string, repoId: st
   freshExecuteSession(paths, workId, repoId);
 }
 
-function launchPhaseWorker(cwd: string, tmuxSession: string, args: string[], workspaceRoot?: string): void {
-  if (tmuxSessionExists(tmuxSession)) {
-    killTmuxSession(tmuxSession);
-  }
-  const scriptLines = [
-    `cd ${shellEscape(cwd)}`,
-    workspaceRoot ? `export DEVTASK_WORKSPACE_ROOT=${shellEscape(workspaceRoot)}` : null,
-    `exec ${phaseWorkerCommand(args)}`
-  ].filter((line): line is string => Boolean(line));
-  const scriptPath = writeLaunchScript(scriptLines.join("\n"));
-  startTmuxSession(tmuxSession, ["bash", scriptPath], cwd);
-  if (!waitForTmuxSession(tmuxSession, { attempts: 5, intervalMs: 200 })) {
-    throw new DevtaskError(`Phase session ${tmuxSession} failed to start`);
-  }
-}
-
 function launchInteractiveResume(cwd: string, tmuxSession: string, command: string): void {
   if (tmuxSessionExists(tmuxSession)) {
     killTmuxSession(tmuxSession);
@@ -449,7 +430,7 @@ async function startPhaseFeedbackSession(
 
 async function startInteractivePhaseResumeSession(
   paths: DevtaskPaths,
-  phase: "spec" | "plan" | "repo-plan" | "review",
+  phase: InteractivePhase,
   workId: string,
   repoId: string | null,
   prompt?: string,
@@ -460,10 +441,11 @@ async function startInteractivePhaseResumeSession(
   const runId = newRunId();
   const config = readConfig(paths);
   const runner = createDefaultAgentRunner(config);
+  const scope = PHASE_CONFIGS[phase].resumeScope(paths, workId, repoId, runId);
   const completionCommand = trackCompletion ? buildManagedPhaseCompletionCommand(paths, phase, workId, repoId, runId) : null;
   runner.installCompletionHook?.(previous.session, completionCommand);
   const command = runner.buildInteractiveResumeCommand?.(previous.session, {
-    workspacePath: phaseCwd(paths, phase, workId, repoId),
+    workspacePath: scope.cwd,
     model: config.codex.model ?? null,
     prompt: prompt ?? null,
     managedCompletionCommand: completionCommand
@@ -471,32 +453,30 @@ async function startInteractivePhaseResumeSession(
   if (!command) {
     throw new DevtaskError(`Provider ${previous.session.provider} does not support interactive resume for ${phase}`);
   }
-
   const startedAt = new Date().toISOString();
-  const { tmuxSession, cwd, promptPath, outputPath, taskId, artifacts } = preparePhaseFeedbackScope(paths, phase, workId, repoId, runId);
-  fs.mkdirSync(path.dirname(promptPath), { recursive: true });
-  fs.writeFileSync(promptPath, `${prompt ?? buildPhaseResumePrompt(phase, previous.session)}\n`);
-  launchInteractiveResume(cwd, tmuxSession, command);
-  await startPipePane(tmuxSession, outputPath);
+  fs.mkdirSync(path.dirname(scope.promptPath), { recursive: true });
+  fs.writeFileSync(scope.promptPath, `${prompt ?? buildPhaseResumePrompt(phase, previous.session)}\n`);
+  launchInteractiveResume(scope.cwd, scope.tmuxSession, command);
+  await startPipePane(scope.tmuxSession, scope.outputPath);
   writeRunningScopedPhaseSession(paths, {
     phase,
     workId,
     repoId,
-    taskId,
+    taskId: scope.taskId,
     runId,
-    tmuxSession,
+    tmuxSession: scope.tmuxSession,
     startedAt,
-    promptPath,
-    outputPath,
-    artifacts,
+    promptPath: scope.promptPath,
+    outputPath: scope.outputPath,
+    artifacts: scope.artifacts,
     session: {
       ...previous.session,
-      transportId: tmuxSession,
+      transportId: scope.tmuxSession,
       summary: `${phase} interactive resume session started`,
       summaryIsFallback: true
     }
   });
-  return { phase, workId, repoId, taskId, status: "started", tmuxSession, promptPath, outputPath };
+  return { phase, workId, repoId, taskId: scope.taskId, status: "started", tmuxSession: scope.tmuxSession, promptPath: scope.promptPath, outputPath: scope.outputPath };
 }
 
 function buildPhaseFeedbackPrompt(
@@ -553,189 +533,352 @@ function readResumeSession(
   throw new DevtaskError(`No resumable ${phase} session exists for ${repoId ? `${workId}/${repoId}` : workId}`);
 }
 
-function preparePhaseFeedbackScope(
-  paths: DevtaskPaths,
-  phase: "spec" | "plan" | "repo-plan" | "review",
-  workId: string,
-  repoId: string | null,
-  runId: string
-): {
+type InteractivePhase = "spec" | "plan" | "repo-plan" | "review";
+
+interface PhaseScope {
   tmuxSession: string;
   cwd: string;
   promptPath: string;
   outputPath: string;
   taskId: string | null;
   artifacts: Record<string, string>;
-} {
-  if (phase === "spec") {
-    return {
-      tmuxSession: tmuxSessionName(paths, `spec-${workId}`),
-      cwd: paths.root,
-      promptPath: path.join(workItemSpecRunsDir(paths, workId), `${runId}.prompt.md`),
-      outputPath: path.join(workItemSpecRunsDir(paths, workId), `${runId}.md`),
-      taskId: null,
-      artifacts: {
-        specPath: workItemSpecPath(paths, workId)
-      }
-    };
-  }
-  if (phase === "plan") {
-    return {
-      tmuxSession: tmuxSessionName(paths, `plan-${workId}`),
-      cwd: paths.root,
-      promptPath: path.join(workItemPlanRunsDir(paths, workId), `${runId}.prompt.md`),
-      outputPath: path.join(workItemPlanRunsDir(paths, workId), `${runId}.md`),
-      taskId: null,
-      artifacts: {
-        planPath: path.join(workItemDir(paths, workId), "plan.md"),
-        graphPath: path.join(workItemDir(paths, workId), "graph.json")
-      }
-    };
-  }
-  if (phase === "repo-plan") {
-    if (!repoId) {
-      throw new DevtaskError("repo-plan feedback requires a repo id");
-    }
-    const graph = readWorkGraph(paths, workId);
-    const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
-    if (!graphTask) {
-      throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
-    }
-    const repo = getWorkspaceRepo(paths, repoId);
-    const phaseDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId);
-    return {
-      tmuxSession: tmuxSessionName(paths, `repo-plan-${workId}-${repoId}`),
-      cwd: repo.repoPath,
-      promptPath: path.join(phaseDir, `${runId}.prompt.md`),
-      outputPath: path.join(phaseDir, `${runId}.md`),
-      taskId: graphTask.id,
-      artifacts: {
-        planPath: workItemRepoPlanPath(paths, workId, repoId)
-      }
-    };
-  }
-  if (!repoId) {
-    throw new DevtaskError("review feedback requires a repo id");
-  }
-  const materialization = requireMaterialization(paths, workId);
-  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
-  if (!task) {
-    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
-  }
-  const reviewDir = workItemReviewDir(paths, workId);
-  return {
-    tmuxSession: tmuxSessionName(resolvePaths(task.repoPath), `review-${workId}-${repoId}`),
-    cwd: task.worktreePath,
-    promptPath: `${reviewDir}/${repoId}.prompt.md`,
-    outputPath: `${reviewDir}/${repoId}.output.md`,
-    taskId: task.taskId,
-    artifacts: {
-      reviewPath: `${reviewDir}/${repoId}.md`,
-      resultPath: `${reviewDir}/${repoId}.json`
-    }
-  };
 }
 
-function phaseCwd(
-  paths: DevtaskPaths,
-  phase: "spec" | "plan" | "repo-plan" | "review",
-  workId: string,
-  repoId: string | null
-): string {
-  if (phase === "spec" || phase === "plan") {
-    return paths.root;
-  }
-  if (phase === "repo-plan") {
-    if (!repoId) {
-      throw new DevtaskError("repo-plan resume requires a repo id");
+interface PhaseFreshScope {
+  scope: PhaseScope;
+  prompt: string;
+  startOptions: Parameters<NonNullable<ReturnType<typeof createDefaultAgentRunner>["buildInteractiveStartCommand"]>>[0];
+}
+
+interface PhaseConfig {
+  resumeScope(paths: DevtaskPaths, workId: string, repoId: string | null, runId: string): PhaseScope;
+  freshScope(paths: DevtaskPaths, workId: string, repoId: string | null, runId: string): Promise<PhaseFreshScope>;
+  workspacePath(paths: DevtaskPaths, workId: string, repoId: string | null): string;
+  finalize(
+    paths: DevtaskPaths,
+    workId: string,
+    repoId: string | null,
+    sessionRecord: PhaseSessionSummary,
+    session: AgentSessionRef,
+    finishedAt: string
+  ): Promise<{ status: string; artifacts: Record<string, string> }>;
+}
+
+const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
+  spec: {
+    resumeScope(paths, workId, _repoId, runId) {
+      return {
+        tmuxSession: tmuxSessionName(paths, `spec-${workId}`),
+        cwd: paths.root,
+        promptPath: path.join(workItemSpecRunsDir(paths, workId), `${runId}.prompt.md`),
+        outputPath: path.join(workItemSpecRunsDir(paths, workId), `${runId}.md`),
+        taskId: null,
+        artifacts: { specPath: workItemSpecPath(paths, workId) }
+      };
+    },
+    async freshScope(paths, workId, _repoId, runId) {
+      const item = getWorkItem(paths, workId);
+      const config = readConfig(paths);
+      const runsDir = workItemSpecRunsDir(paths, workId);
+      const promptPath = `${runsDir}/${runId}.prompt.md`;
+      const outputPath = `${runsDir}/${runId}.md`;
+      const specPath = workItemSpecPath(paths, workId);
+      return {
+        scope: {
+          tmuxSession: tmuxSessionName(paths, `spec-${workId}`),
+          cwd: paths.root,
+          promptPath,
+          outputPath,
+          taskId: null,
+          artifacts: { specPath }
+        },
+        prompt: buildSpecPrompt(item, specPath),
+        startOptions: {
+          workspacePath: paths.root,
+          model: config.codex.model,
+          fullAuto: config.codex.fullAuto,
+          skipGitRepoCheck: true,
+          addDirs: [path.dirname(item.source.artifact)],
+          managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "spec", workId, null, runId),
+          env: { ...process.env, DEVTASK_TASK_DIR: workItemDir(paths, workId), DEVTASK_TASK_PATH: promptPath, DEVTASK_WORK_SPEC_PATH: specPath }
+        }
+      };
+    },
+    workspacePath(paths) { return paths.root; },
+    async finalize(paths, workId, _repoId, sessionRecord, session, finishedAt) {
+      const specPath = sessionRecord.artifacts.specPath ?? workItemSpecPath(paths, workId);
+      const status = isFreshArtifactSince(specPath, sessionRecord.startedAt) ? "spec-ready" : "failed";
+      writeWorkResult(paths, workId, "spec", {
+        runId: sessionRecord.runId,
+        workId,
+        status,
+        specPath,
+        promptPath: sessionRecord.promptPath,
+        outputPath: sessionRecord.outputPath,
+        exitCode: status === "spec-ready" ? 0 : null,
+        generatedAt: finishedAt,
+        session
+      } satisfies WorkSpecResult);
+      updateWorkItemStatus(paths, workId, status === "spec-ready" ? "spec-ready" : "failed");
+      await updateRecentWork(paths, getWorkItem(paths, workId));
+      return { status, artifacts: { specPath } };
     }
-    return getWorkspaceRepo(paths, repoId).repoPath;
+  },
+  plan: {
+    resumeScope(paths, workId, _repoId, runId) {
+      return {
+        tmuxSession: tmuxSessionName(paths, `plan-${workId}`),
+        cwd: paths.root,
+        promptPath: path.join(workItemPlanRunsDir(paths, workId), `${runId}.prompt.md`),
+        outputPath: path.join(workItemPlanRunsDir(paths, workId), `${runId}.md`),
+        taskId: null,
+        artifacts: {
+          planPath: path.join(workItemDir(paths, workId), "plan.md"),
+          graphPath: path.join(workItemDir(paths, workId), "graph.json")
+        }
+      };
+    },
+    async freshScope(paths, workId, _repoId, runId) {
+      requireWorkSpec(paths, workId);
+      const config = readConfig(paths);
+      const item = getWorkItem(paths, workId);
+      const repos = listWorkspaceRepos(paths);
+      const runsDir = workItemPlanRunsDir(paths, workId);
+      const promptPath = path.join(runsDir, `${runId}.prompt.md`);
+      const outputPath = path.join(runsDir, `${runId}.md`);
+      const planPath = path.join(workItemDir(paths, workId), "plan.md");
+      const graphPath = path.join(workItemDir(paths, workId), "graph.json");
+      return {
+        scope: {
+          tmuxSession: tmuxSessionName(paths, `plan-${workId}`),
+          cwd: paths.root,
+          promptPath,
+          outputPath,
+          taskId: null,
+          artifacts: { planPath, graphPath }
+        },
+        prompt: buildGlobalPlanPrompt(paths, item, repos, planPath, graphPath, workItemSpecPath(paths, workId), collectPhaseMemory(paths, "planning")),
+        startOptions: {
+          workspacePath: paths.root,
+          model: config.codex.model,
+          fullAuto: config.codex.fullAuto,
+          skipGitRepoCheck: true,
+          addDirs: workPlanAddDirsForTest(item, repos),
+          managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "plan", workId, null, runId),
+          env: { ...process.env, DEVTASK_TASK_DIR: workItemDir(paths, workId), DEVTASK_TASK_PATH: promptPath, DEVTASK_WORK_PLAN_PATH: planPath, DEVTASK_WORK_GRAPH_PATH: graphPath }
+        }
+      };
+    },
+    workspacePath(paths) { return paths.root; },
+    async finalize(paths, workId, _repoId, sessionRecord, session, finishedAt) {
+      const planPath = sessionRecord.artifacts.planPath ?? path.join(workItemDir(paths, workId), "plan.md");
+      const graphPath = sessionRecord.artifacts.graphPath ?? path.join(workItemDir(paths, workId), "graph.json");
+      const status: WorkPlanRecord["status"] =
+        isFreshArtifactSince(planPath, sessionRecord.startedAt) && isFreshGraphSince(graphPath, sessionRecord.startedAt)
+          ? "planned"
+          : "failed";
+      const record: WorkPlanRecord = {
+        schemaVersion: 1,
+        phase: "plan",
+        planId: sessionRecord.runId,
+        workId,
+        status,
+        command: "interactive-session",
+        promptPath: sessionRecord.promptPath,
+        outputPath: sessionRecord.outputPath,
+        planPath,
+        graphPath,
+        startedAt: sessionRecord.startedAt,
+        finishedAt,
+        exitCode: status === "planned" ? 0 : null,
+        session
+      };
+      fs.mkdirSync(workItemPlanRunsDir(paths, workId), { recursive: true });
+      fs.writeFileSync(path.join(workItemPlanRunsDir(paths, workId), `${sessionRecord.runId}.json`), `${JSON.stringify(record, null, 2)}\n`);
+      updateWorkItemStatus(paths, workId, status === "planned" ? "planned" : "failed");
+      await updateRecentWork(paths, getWorkItem(paths, workId));
+      return { status, artifacts: { planPath, graphPath } };
+    }
+  },
+  "repo-plan": {
+    resumeScope(paths, workId, repoId, runId) {
+      if (!repoId) throw new DevtaskError("repo-plan resume requires a repo id");
+      const graph = readWorkGraph(paths, workId);
+      const graphTask = graph.tasks.find((t) => t.repoId === repoId);
+      if (!graphTask) throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
+      const repo = getWorkspaceRepo(paths, repoId);
+      const phaseDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId);
+      return {
+        tmuxSession: tmuxSessionName(paths, `repo-plan-${workId}-${repoId}`),
+        cwd: repo.repoPath,
+        promptPath: path.join(phaseDir, `${runId}.prompt.md`),
+        outputPath: path.join(phaseDir, `${runId}.md`),
+        taskId: graphTask.id,
+        artifacts: { planPath: workItemRepoPlanPath(paths, workId, repoId) }
+      };
+    },
+    async freshScope(paths, workId, repoId, runId) {
+      if (!repoId) throw new DevtaskError("repo-plan requires a repo id");
+      const graph = readWorkGraph(paths, workId);
+      const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
+      if (!graphTask) throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
+      const repo = getWorkspaceRepo(paths, repoId);
+      const config = readConfig(paths);
+      const repoPaths = resolvePaths(repo.repoPath);
+      const phaseDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId);
+      const promptPath = path.join(phaseDir, `${runId}.prompt.md`);
+      const outputPath = path.join(phaseDir, `${runId}.md`);
+      const runtimePrefix = path.join(repoPaths.root, `.devtask_repo_plan_${runId}`);
+      const runtimePlanPath = `${runtimePrefix}.md`;
+      const runtimeStatePath = `${runtimePrefix}.state.md`;
+      const resultPath = `${runtimePrefix}.result.json`;
+      return {
+        scope: {
+          tmuxSession: tmuxSessionName(paths, `repo-plan-${workId}-${repoId}`),
+          cwd: repo.repoPath,
+          promptPath,
+          outputPath,
+          taskId: graphTask.id,
+          artifacts: { planPath: workItemRepoPlanPath(paths, workId, repoId), runtimePlanPath, runtimeStatePath, resultPath }
+        },
+        prompt: buildRepoPlanPrompt(
+          { id: graphTask.id },
+          runtimePlanPath,
+          workItemRepoPlanPath(paths, workId, repoId),
+          buildWorkspaceRepoPlanTask(getWorkItem(paths, workId), graphTask, repo),
+          `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${workId}\n`,
+          collectPhaseMemory(paths, "planning", { repoId })
+        ),
+        startOptions: {
+          workspacePath: repoPaths.root,
+          model: config.codex.model,
+          fullAuto: config.codex.fullAuto,
+          skipGitRepoCheck: true,
+          addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
+          managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "repo-plan", workId, repoId, runId),
+          env: { ...process.env, DEVTASK_TASK_DIR: workItemDir(paths, workId), DEVTASK_TASK_PATH: promptPath, DEVTASK_PLAN_PATH: runtimePlanPath, DEVTASK_STATE_PATH: runtimeStatePath, DEVTASK_RESULT_PATH: resultPath }
+        }
+      };
+    },
+    workspacePath(paths, _workId, repoId) {
+      if (!repoId) throw new DevtaskError("repo-plan requires a repo id");
+      return getWorkspaceRepo(paths, repoId).repoPath;
+    },
+    async finalize(paths, workId, repoId, sessionRecord, _session, _finishedAt) {
+      if (!repoId) throw new DevtaskError("repo-plan finalizer requires a repo id");
+      const planPath = sessionRecord.artifacts.planPath ?? workItemRepoPlanPath(paths, workId, repoId);
+      const runtimePlanPath = sessionRecord.artifacts.runtimePlanPath;
+      const runtimeStatePath = sessionRecord.artifacts.runtimeStatePath;
+      const resultPath = sessionRecord.artifacts.resultPath;
+      if (!runtimePlanPath || !runtimeStatePath || !resultPath) {
+        throw new DevtaskError(`repo-plan session artifacts are incomplete for ${workId}/${repoId}`);
+      }
+      const graph = readWorkGraph(paths, workId);
+      const graphTask = graph.tasks.find((t) => t.repoId === repoId);
+      if (!graphTask) throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
+      persistSharedRepoPlan(paths, workId, repoId, runtimePlanPath);
+      const blocked = readTaskResult(resultPath).status === "blocked";
+      removeIfExists(runtimePlanPath);
+      removeIfExists(runtimeStatePath);
+      removeIfExists(resultPath);
+      const status = isFreshArtifactSince(planPath, sessionRecord.startedAt) ? (blocked ? "blocked" : "planned") : "failed";
+      updateWorkItemStatus(paths, workId, status === "failed" ? "failed" : "planned");
+      await updateRecentWork(paths, getWorkItem(paths, workId));
+      return { status, artifacts: { planPath } };
+    }
+  },
+  review: {
+    resumeScope(paths, workId, repoId, _runId) {
+      if (!repoId) throw new DevtaskError("review resume requires a repo id");
+      const materialization = requireMaterialization(paths, workId);
+      const task = materialization.tasks.find((t) => t.repoId === repoId);
+      if (!task) throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
+      const reviewDir = workItemReviewDir(paths, workId);
+      return {
+        tmuxSession: tmuxSessionName(resolvePaths(task.repoPath), `review-${workId}-${repoId}`),
+        cwd: task.worktreePath,
+        promptPath: `${reviewDir}/${repoId}.prompt.md`,
+        outputPath: `${reviewDir}/${repoId}.output.md`,
+        taskId: task.taskId,
+        artifacts: {
+          reviewPath: `${reviewDir}/${repoId}.md`,
+          resultPath: `${reviewDir}/${repoId}.json`
+        }
+      };
+    },
+    async freshScope(paths, workId, repoId, runId) {
+      if (!repoId) throw new DevtaskError("review requires a repo id");
+      const materialization = requireMaterialization(paths, workId);
+      const task = materialization.tasks.find((entry) => entry.repoId === repoId);
+      if (!task) throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
+      const config = readConfig(paths);
+      const storagePaths = taskStoragePaths(paths, task.repoPath);
+      const meta = readTaskMeta(taskMetaPath(storagePaths, task.taskId));
+      const clean = !(await hasUncommittedChanges(task.worktreePath));
+      const commits = await countBranchCommits(task.worktreePath).catch(() => 0);
+      const changedFiles = await readGitStatusShort(task.worktreePath);
+      const diffStat = await readGitDiffStat(task.worktreePath);
+      const reviewDir = workItemReviewDir(paths, workId);
+      const promptPath = `${reviewDir}/${repoId}.prompt.md`;
+      const outputPath = `${reviewDir}/${repoId}.output.md`;
+      const reviewPath = `${reviewDir}/${repoId}.md`;
+      const resultPath = `${reviewDir}/${repoId}.json`;
+      const completionRunId = path.basename(promptPath).replace(/\.prompt\.md$/, "") || runId;
+      return {
+        scope: {
+          tmuxSession: tmuxSessionName(resolvePaths(task.repoPath), `review-${workId}-${repoId}`),
+          cwd: task.worktreePath,
+          promptPath,
+          outputPath,
+          taskId: task.taskId,
+          artifacts: { reviewPath, resultPath }
+        },
+        prompt: buildReviewPrompt(
+          task, meta, reviewPath, resultPath,
+          { clean, commits, changedFiles, diffStat, latestCheck: readWorkResultSummary(paths, workId, "check"), latestVerify: readWorkResultSummary(paths, workId, "verify"), latestCi: readWorkResultSummary(paths, workId, "ci") },
+          collectPhaseMemory(paths, "review", { repoId })
+        ),
+        startOptions: {
+          workspacePath: task.worktreePath,
+          model: config.codex.model,
+          fullAuto: false,
+          skipGitRepoCheck: true,
+          addDirs: [workItemDir(paths, workId)],
+          managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "review", workId, repoId, completionRunId),
+          env: { ...process.env, DEVTASK_TASK_DIR: workItemDir(paths, workId), DEVTASK_TASK_PATH: promptPath, DEVTASK_REVIEW_PATH: reviewPath, DEVTASK_REVIEW_RESULT_PATH: resultPath }
+        }
+      };
+    },
+    workspacePath(paths, workId, repoId) {
+      if (!repoId) throw new DevtaskError("review requires a repo id");
+      const materialization = requireMaterialization(paths, workId);
+      const task = materialization.tasks.find((t) => t.repoId === repoId);
+      if (!task) throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
+      return task.worktreePath;
+    },
+    async finalize(_paths, workId, repoId, sessionRecord) {
+      if (!repoId) throw new DevtaskError("review finalizer requires a repo id");
+      const reviewPath = sessionRecord.artifacts.reviewPath;
+      const resultPath = sessionRecord.artifacts.resultPath;
+      if (!reviewPath || !resultPath) throw new DevtaskError(`review phase artifacts are incomplete for ${workId}/${repoId}`);
+      const parsed = readReviewResult(resultPath);
+      return { status: parsed?.status ?? "failed", artifacts: { reviewPath, resultPath } };
+    }
   }
-  if (!repoId) {
-    throw new DevtaskError("review resume requires a repo id");
-  }
-  const materialization = requireMaterialization(paths, workId);
-  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
-  if (!task) {
-    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
-  }
-  return task.worktreePath;
+};
+
+async function startInteractivePhaseWork(paths: DevtaskPaths, phase: InteractivePhase, workId: string, repoId: string | null): Promise<PhaseLaunchResult> {
+  const runId = newRunId();
+  const { scope, prompt, startOptions } = await PHASE_CONFIGS[phase].freshScope(paths, workId, repoId, runId);
+  return startInteractivePhaseFreshSession(paths, phase, workId, repoId, { ...scope, prompt, startOptions });
 }
 
 export async function startSpecWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
-  const item = getWorkItem(paths, workId);
-  const runId = newRunId();
-  const config = readConfig(paths);
-  const runsDir = workItemSpecRunsDir(paths, item.id);
-  const promptPath = `${runsDir}/${runId}.prompt.md`;
-  const outputPath = `${runsDir}/${runId}.md`;
-  const tmuxSession = tmuxSessionName(paths, `spec-${workId}`);
-  return startInteractivePhaseFreshSession(paths, "spec", workId, null, {
-    cwd: paths.root,
-    tmuxSession,
-    promptPath,
-    outputPath,
-    taskId: null,
-    artifacts: {
-      specPath: workItemSpecPath(paths, item.id)
-    },
-    prompt: buildSpecPrompt(item, workItemSpecPath(paths, item.id)),
-    startOptions: {
-      workspacePath: paths.root,
-      model: config.codex.model,
-      fullAuto: config.codex.fullAuto,
-      skipGitRepoCheck: true,
-      addDirs: [path.dirname(item.source.artifact)],
-      managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "spec", workId, null, runId),
-      env: {
-        ...process.env,
-        DEVTASK_TASK_DIR: workItemDir(paths, item.id),
-        DEVTASK_TASK_PATH: promptPath,
-        DEVTASK_WORK_SPEC_PATH: workItemSpecPath(paths, item.id)
-      }
-    }
-  });
+  return startInteractivePhaseWork(paths, "spec", workId, null);
 }
 
 export async function startPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
-  requireWorkSpec(paths, workId);
-  const runId = newRunId();
-  const config = readConfig(paths);
-  const runsDir = workItemPlanRunsDir(paths, workId);
-  const promptPath = path.join(runsDir, `${runId}.prompt.md`);
-  const outputPath = path.join(runsDir, `${runId}.md`);
-  const tmuxSession = tmuxSessionName(paths, `plan-${workId}`);
-  const item = getWorkItem(paths, workId);
-  const planPath = path.join(workItemDir(paths, workId), "plan.md");
-  const graphPath = path.join(workItemDir(paths, workId), "graph.json");
-  const repos = listWorkspaceRepos(paths);
-  return startInteractivePhaseFreshSession(paths, "plan", workId, null, {
-    cwd: paths.root,
-    tmuxSession,
-    promptPath,
-    outputPath,
-    taskId: null,
-    artifacts: {
-      planPath,
-      graphPath
-    },
-    prompt: buildGlobalPlanPrompt(paths, item, repos, planPath, graphPath, workItemSpecPath(paths, workId), collectPhaseMemory(paths, "planning")),
-    startOptions: {
-      workspacePath: paths.root,
-      model: config.codex.model,
-      fullAuto: config.codex.fullAuto,
-      skipGitRepoCheck: true,
-      addDirs: workPlanAddDirsForTest(item, repos),
-      managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "plan", workId, null, runId),
-      env: {
-        ...process.env,
-        DEVTASK_TASK_DIR: workItemDir(paths, workId),
-        DEVTASK_TASK_PATH: promptPath,
-        DEVTASK_WORK_PLAN_PATH: planPath,
-        DEVTASK_WORK_GRAPH_PATH: graphPath
-      }
-    }
-  });
+  return startInteractivePhaseWork(paths, "plan", workId, null);
 }
 
 export async function startRepoPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult[]> {
@@ -746,11 +889,9 @@ export async function startRepoPlanWork(paths: DevtaskPaths, workId: string): Pr
   }
   const graph = readWorkGraph(paths, workId);
   const launches: PhaseLaunchResult[] = [];
-
   for (const graphTask of graph.tasks) {
     launches.push(await startRepoPlanScope(paths, workId, graphTask.repoId));
   }
-
   await updateRecentWork(paths, item);
   return launches;
 }
@@ -765,277 +906,11 @@ export async function startReviewWork(paths: DevtaskPaths, workId: string): Prom
 }
 
 export async function startRepoPlanScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
-  const graph = readWorkGraph(paths, workId);
-  const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
-  if (!graphTask) {
-    throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
-  }
-  const tmuxSession = tmuxSessionName(paths, `repo-plan-${workId}-${repoId}`);
-  const runId = newRunId();
-  const phaseDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId);
-  const promptPath = path.join(phaseDir, `${runId}.prompt.md`);
-  const outputPath = path.join(phaseDir, `${runId}.md`);
-  const repo = getWorkspaceRepo(paths, repoId);
-  const runtimeArtifactPrefix = path.join(resolvePaths(repo.repoPath).root, `.devtask_repo_plan_${runId}`);
-  const runtimePlanPath = `${runtimeArtifactPrefix}.md`;
-  const runtimeStatePath = `${runtimeArtifactPrefix}.state.md`;
-  const resultPath = `${runtimeArtifactPrefix}.result.json`;
-  return startInteractivePhaseFreshSession(paths, "repo-plan", workId, repoId, {
-    cwd: repo.repoPath,
-    tmuxSession,
-    promptPath,
-    outputPath,
-    taskId: graphTask.id,
-    artifacts: {
-      planPath: workItemRepoPlanPath(paths, workId, repoId),
-      runtimePlanPath,
-      runtimeStatePath,
-      resultPath
-    },
-    prompt: buildRepoPlanPrompt(
-      { id: graphTask.id },
-      runtimePlanPath,
-      workItemRepoPlanPath(paths, workId, repoId),
-      buildWorkspaceRepoPlanTask(getWorkItem(paths, workId), graphTask, repo),
-      `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${workId}\n`,
-      collectPhaseMemory(paths, "planning", { repoId })
-    ),
-    startOptions: {
-      workspacePath: resolvePaths(repo.repoPath).root,
-      model: readConfig(paths).codex.model,
-      fullAuto: readConfig(paths).codex.fullAuto,
-      skipGitRepoCheck: true,
-      addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
-      managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "repo-plan", workId, repoId, runId),
-      env: {
-        ...process.env,
-        DEVTASK_TASK_DIR: workItemDir(paths, workId),
-        DEVTASK_TASK_PATH: promptPath,
-        DEVTASK_PLAN_PATH: runtimePlanPath,
-        DEVTASK_STATE_PATH: runtimeStatePath,
-        DEVTASK_RESULT_PATH: resultPath
-      }
-    }
-  });
+  return startInteractivePhaseWork(paths, "repo-plan", workId, repoId);
 }
 
 export async function startReviewScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
-  const materialization = requireMaterialization(paths, workId);
-  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
-  if (!task) {
-    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
-  }
-  const tmuxSession = tmuxSessionName(resolvePaths(task.repoPath), `review-${workId}-${repoId}`);
-  const reviewDir = workItemReviewDir(paths, workId);
-  const promptPath = `${reviewDir}/${repoId}.prompt.md`;
-  const outputPath = `${reviewDir}/${repoId}.output.md`;
-  const storagePaths = taskStoragePaths(paths, task.repoPath);
-  const meta = readTaskMeta(taskMetaPath(storagePaths, task.taskId));
-  const clean = !(await hasUncommittedChanges(task.worktreePath));
-  const commits = await countBranchCommits(task.worktreePath).catch(() => 0);
-  const changedFiles = await readGitStatusShort(task.worktreePath);
-  const diffStat = await readGitDiffStat(task.worktreePath);
-  return startInteractivePhaseFreshSession(paths, "review", workId, repoId, {
-    cwd: task.worktreePath,
-    tmuxSession,
-    promptPath,
-    outputPath,
-    taskId: task.taskId,
-    artifacts: {
-      reviewPath: `${reviewDir}/${repoId}.md`,
-      resultPath: `${reviewDir}/${repoId}.json`
-    },
-    prompt: buildReviewPrompt(
-      task,
-      meta,
-      `${reviewDir}/${repoId}.md`,
-      `${reviewDir}/${repoId}.json`,
-      {
-        clean,
-        commits,
-        changedFiles,
-        diffStat,
-        latestCheck: readWorkResultSummary(paths, workId, "check"),
-        latestVerify: readWorkResultSummary(paths, workId, "verify"),
-        latestCi: readWorkResultSummary(paths, workId, "ci")
-      },
-      collectPhaseMemory(paths, "review", { repoId })
-    ),
-    startOptions: {
-      workspacePath: task.worktreePath,
-      model: readConfig(paths).codex.model,
-      fullAuto: false,
-      skipGitRepoCheck: true,
-      addDirs: [workItemDir(paths, workId)],
-      managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "review", workId, repoId, path.basename(promptPath).replace(/\.prompt\.md$/, "")),
-      env: {
-        ...process.env,
-        DEVTASK_TASK_DIR: workItemDir(paths, workId),
-        DEVTASK_TASK_PATH: promptPath,
-        DEVTASK_REVIEW_PATH: `${reviewDir}/${repoId}.md`,
-        DEVTASK_REVIEW_RESULT_PATH: `${reviewDir}/${repoId}.json`
-      }
-    }
-  });
-}
-
-export async function planWork(
-  paths: DevtaskPaths,
-  workId: string,
-  options: {
-    onStart?: (start: WorkPlanStart) => void;
-    onStdout?: (chunk: string) => void;
-    onStderr?: (chunk: string) => void;
-    resumeSession?: AgentSessionRef | null;
-    promptOverride?: string | null;
-  } = {}
-): Promise<WorkPlanRecord> {
-  const config: DevtaskConfig = readConfig(paths);
-  const item = getWorkItem(paths, workId);
-  requireWorkSpec(paths, workId);
-  const record = await runWorkPlanner(paths, item, config, options);
-  updateWorkItemStatus(paths, workId, record.status === "planned" ? "planned" : "failed");
-  await updateRecentWork(paths, item);
-  return record;
-}
-
-export async function specWork(
-  paths: DevtaskPaths,
-  workId: string,
-  options: {
-    onStart?: (start: { command: string; promptPath: string; outputPath: string; specPath: string }) => void;
-    onStdout?: (chunk: string) => void;
-    onStderr?: (chunk: string) => void;
-    resumeSession?: AgentSessionRef | null;
-    promptOverride?: string | null;
-  } = {}
-): Promise<WorkSpecResult> {
-  const config: DevtaskConfig = readConfig(paths);
-  const item = getWorkItem(paths, workId);
-  const result = await runSpecAgent(paths, item, config, options);
-  writeWorkResult(paths, workId, "spec", result);
-  updateWorkItemStatus(paths, workId, result.status === "spec-ready" ? "spec-ready" : "failed");
-  await updateRecentWork(paths, item);
-  return result;
-}
-
-export async function repoPlanWork(
-  paths: DevtaskPaths,
-  workId: string,
-  options: {
-    refresh?: boolean;
-    onRepoPlanStart?: (repoId: string, start: PlanAgentStart) => void;
-    onStdout?: (chunk: string) => void;
-    onStderr?: (chunk: string) => void;
-  } = {}
-): Promise<RepoPlanWorkResult> {
-  const item = getWorkItem(paths, workId);
-  const planRecord = readLatestWorkPlanRecord(paths, workId);
-  if (!planRecord || planRecord.status !== "planned") {
-    throw new Error(`Global work plan is not ready for ${workId}. Run devtask work plan ${workId} first.`);
-  }
-
-  const repoPlans: RepoPlanTaskResult[] = [];
-  const graph = readWorkGraph(paths, workId);
-
-  if (paths.workspaceId === null) {
-    const existingMaterialization = readWorkMaterialization(paths, workId);
-    const materialization = existingMaterialization ?? (await materializeWorkPlan(paths, item));
-
-    for (const task of materialization.tasks) {
-      const storagePaths = taskStoragePaths(paths, task.repoPath);
-      const meta = readTaskMeta(taskMetaPath(storagePaths, task.taskId));
-      const latestPlan = readLatestPlan(storagePaths, task.taskId);
-
-      if (latestPlan && !options.refresh) {
-        repoPlans.push({
-          repoId: task.repoId,
-          taskId: task.taskId,
-          status: latestPlan.status,
-          planPath: latestPlan.planPath,
-          outputPath: latestPlan.outputPath,
-          worktreeChanged: latestPlan.worktreeChanged
-        });
-        continue;
-      }
-
-      const record = await runPlanAgent(storagePaths, meta, {
-        workspacePaths: paths,
-        workId,
-        repoId: task.repoId
-      }, {
-        model: meta.model,
-        fullAuto: true,
-        onStart: (start) => options.onRepoPlanStart?.(task.repoId, start),
-        onStdout: options.onStdout,
-        onStderr: options.onStderr
-      });
-      persistSharedRepoPlan(paths, workId, task.repoId, record.planPath);
-      repoPlans.push({
-        repoId: task.repoId,
-        taskId: task.taskId,
-        status: record.status,
-        planPath: record.planPath,
-        outputPath: record.outputPath,
-        worktreeChanged: record.worktreeChanged
-      });
-    }
-
-    const repoPlanResult = {
-      workId,
-      repoPlans,
-      materialized: existingMaterialization !== null,
-      generatedAt: new Date().toISOString()
-    };
-    writeWorkResult(paths, workId, "repo-plan", repoPlanResult);
-    updateWorkItemStatus(paths, workId, repoPlans.every((task) => task.status !== "failed") ? "planned" : "failed");
-    await updateRecentWork(paths, item);
-    return repoPlanResult;
-  }
-
-  for (const graphTask of graph.tasks) {
-    const repo = getWorkspaceRepo(paths, graphTask.repoId);
-    const repoPlanPath = workItemRepoPlanPath(paths, workId, graphTask.repoId);
-    const phaseRunsDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", graphTask.repoId);
-    const latestRun = readLatestPhaseRunStatus(phaseRunsDir);
-
-    if (latestRun && fs.existsSync(repoPlanPath) && !options.refresh) {
-      repoPlans.push({
-        repoId: graphTask.repoId,
-        taskId: graphTask.id,
-        status: latestRun.status as RepoPlanTaskResult["status"],
-        planPath: repoPlanPath,
-        outputPath: latestRun.outputPath,
-        worktreeChanged: false
-      });
-      continue;
-    }
-
-    const record = await runWorkspaceRepoPlan(paths, item, graphTask, repo, {
-      onStart: (start) => options.onRepoPlanStart?.(graphTask.repoId, start),
-      onStdout: options.onStdout,
-      onStderr: options.onStderr
-    });
-    repoPlans.push({
-      repoId: graphTask.repoId,
-      taskId: graphTask.id,
-      status: record.status,
-      planPath: record.planPath,
-      outputPath: record.outputPath,
-      worktreeChanged: false
-    });
-  }
-
-  const repoPlanResult = {
-    workId,
-    repoPlans,
-    materialized: false,
-    generatedAt: new Date().toISOString()
-  };
-  writeWorkResult(paths, workId, "repo-plan", repoPlanResult);
-  updateWorkItemStatus(paths, workId, repoPlans.every((task) => task.status !== "failed") ? "planned" : "failed");
-  await updateRecentWork(paths, item);
-  return repoPlanResult;
+  return startInteractivePhaseWork(paths, "review", workId, repoId);
 }
 
 export async function materializeWork(paths: DevtaskPaths, workId: string): Promise<WorkMaterialization> {
@@ -1186,31 +1061,9 @@ export async function checkWork(paths: DevtaskPaths, workId: string): Promise<Ve
   return result;
 }
 
-export async function reviewWork(paths: DevtaskPaths, workId: string): Promise<ReviewWorkResult> {
-  const materialization = requireMaterialization(paths, workId);
-  const latestCheck = readWorkResultSummary(paths, workId, "check");
-  const latestVerify = readWorkResultSummary(paths, workId, "verify");
-  const latestCi = readWorkResultSummary(paths, workId, "ci");
-  const tasks: ReviewTaskResult[] = [];
-  const config = readConfig(paths);
-
-  for (const task of materialization.tasks) {
-    tasks.push(await runReviewAgent(paths, workId, task, config, { latestCheck, latestVerify, latestCi }));
-  }
-
-  const result: ReviewWorkResult = {
-    workId,
-    tasks,
-    generatedAt: new Date().toISOString()
-  };
-  writeWorkResult(paths, workId, "review", result);
-  updateWorkItemStatus(paths, workId, summarizeReviewWorkStatus(result.tasks));
-  return result;
-}
-
 export async function runManagedPhaseHookFinalizer(
   paths: DevtaskPaths,
-  phase: "spec" | "plan" | "repo-plan" | "review",
+  phase: InteractivePhase,
   workId: string,
   runId: string,
   repoId: string | null
@@ -1219,243 +1072,10 @@ export async function runManagedPhaseHookFinalizer(
   if (!current || current.runId !== runId || current.status !== "running") {
     return;
   }
-
-  switch (phase) {
-    case "spec":
-      await finalizeInteractiveSpecPhase(paths, workId, current);
-      break;
-    case "plan":
-      await finalizeInteractivePlanPhase(paths, workId, current);
-      break;
-    case "repo-plan":
-      if (!repoId) {
-        throw new DevtaskError("repo-plan finalizer requires a repo id");
-      }
-      await finalizeInteractiveRepoPlanPhase(paths, workId, repoId, current);
-      break;
-    case "review":
-      if (!repoId) {
-        throw new DevtaskError("review finalizer requires a repo id");
-      }
-      await finalizeInteractiveReviewPhase(paths, workId, repoId, current);
-      break;
-  }
-
+  await finalizeInteractivePhase(paths, phase, workId, repoId, current);
   if (tmuxSessionExists(current.tmuxSession)) {
     killTmuxSession(current.tmuxSession);
   }
-}
-
-export async function runSpecWorker(paths: DevtaskPaths, workId: string): Promise<WorkSpecResult> {
-  const result = await specWork(paths, workId);
-  updateScopedPhaseSession(paths, workId, "spec", null, {
-    status: result.status === "spec-ready" ? "completed" : "failed",
-    updatedAt: result.generatedAt,
-    promptPath: result.promptPath,
-    outputPath: result.outputPath,
-    artifacts: {
-      specPath: result.specPath
-    },
-    session: {
-      ...result.session,
-      transportId: readScopedPhaseSession(paths, workId, "spec")?.tmuxSession ?? result.session.transportId
-    }
-  });
-  return result;
-}
-
-export async function runSpecFeedbackWorker(paths: DevtaskPaths, workId: string): Promise<WorkSpecResult> {
-  const current = readScopedPhaseSession(paths, workId, "spec");
-  if (!current) {
-    throw new DevtaskError(`No spec feedback session exists for ${workId}`);
-  }
-  const previous = readResumeSession(paths, workId, "spec", null);
-  const prompt = fs.readFileSync(current.promptPath, "utf8");
-  const result = await specWork(paths, workId, {
-    resumeSession: previous.session,
-    promptOverride: prompt
-  });
-  updateScopedPhaseSession(paths, workId, "spec", null, {
-    status: result.status === "spec-ready" ? "completed" : "failed",
-    updatedAt: result.generatedAt,
-    promptPath: result.promptPath,
-    outputPath: result.outputPath,
-    artifacts: {
-      specPath: result.specPath
-    },
-    session: {
-      ...result.session,
-      transportId: current.tmuxSession
-    }
-  });
-  return result;
-}
-
-export async function runPlanWorker(paths: DevtaskPaths, workId: string): Promise<WorkPlanRecord> {
-  const result = await planWork(paths, workId);
-  updateScopedPhaseSession(paths, workId, "plan", null, {
-    status: result.status === "planned" ? "completed" : "failed",
-    updatedAt: result.finishedAt,
-    promptPath: result.promptPath,
-    outputPath: result.outputPath,
-    artifacts: {
-      planPath: result.planPath,
-      graphPath: result.graphPath
-    },
-    session: {
-      ...result.session,
-      transportId: readScopedPhaseSession(paths, workId, "plan")?.tmuxSession ?? result.session.transportId
-    }
-  });
-  return result;
-}
-
-export async function runPlanFeedbackWorker(paths: DevtaskPaths, workId: string): Promise<WorkPlanRecord> {
-  const current = readScopedPhaseSession(paths, workId, "plan");
-  if (!current) {
-    throw new DevtaskError(`No plan feedback session exists for ${workId}`);
-  }
-  const previous = readResumeSession(paths, workId, "plan", null);
-  const prompt = fs.readFileSync(current.promptPath, "utf8");
-  const result = await planWork(paths, workId, {
-    resumeSession: previous.session,
-    promptOverride: prompt
-  });
-  updateScopedPhaseSession(paths, workId, "plan", null, {
-    status: result.status === "planned" ? "completed" : "failed",
-    updatedAt: result.finishedAt,
-    promptPath: result.promptPath,
-    outputPath: result.outputPath,
-    artifacts: {
-      planPath: result.planPath,
-      graphPath: result.graphPath
-    },
-    session: {
-      ...result.session,
-      transportId: current.tmuxSession
-    }
-  });
-  return result;
-}
-
-export async function runRepoPlanWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
-  const item = getWorkItem(paths, workId);
-  const graph = readWorkGraph(paths, workId);
-  const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
-  if (!graphTask) {
-    throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
-  }
-  const repo = getWorkspaceRepo(paths, repoId);
-  const record = await runWorkspaceRepoPlan(paths, item, graphTask, repo);
-  updateScopedPhaseSession(paths, workId, "repo-plan", repoId, {
-    status: record.status === "planned" ? "completed" : record.status === "blocked" ? "blocked" : "failed",
-    updatedAt: new Date().toISOString(),
-    artifacts: {
-      planPath: record.planPath
-    },
-    session: {
-      ...record.session,
-      transportId: readScopedPhaseSession(paths, workId, "repo-plan", repoId)?.tmuxSession ?? record.session.transportId
-    }
-  });
-}
-
-export async function runRepoPlanFeedbackWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
-  const current = readScopedPhaseSession(paths, workId, "repo-plan", repoId);
-  if (!current) {
-    throw new DevtaskError(`No repo-plan feedback session exists for ${workId}/${repoId}`);
-  }
-  const item = getWorkItem(paths, workId);
-  const graph = readWorkGraph(paths, workId);
-  const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
-  if (!graphTask) {
-    throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
-  }
-  const repo = getWorkspaceRepo(paths, repoId);
-  const previous = readResumeSession(paths, workId, "repo-plan", repoId);
-  const prompt = fs.readFileSync(current.promptPath, "utf8");
-  const record = await runWorkspaceRepoPlan(paths, item, graphTask, repo, {
-    resumeSession: previous.session,
-    promptOverride: prompt
-  });
-  updateScopedPhaseSession(paths, workId, "repo-plan", repoId, {
-    status: record.status === "planned" ? "completed" : record.status === "blocked" ? "blocked" : "failed",
-    updatedAt: new Date().toISOString(),
-    artifacts: {
-      planPath: record.planPath
-    },
-    session: {
-      ...record.session,
-      transportId: current.tmuxSession
-    }
-  });
-}
-
-export async function runReviewWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
-  const materialization = requireMaterialization(paths, workId);
-  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
-  if (!task) {
-    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
-  }
-  const latestCheck = readWorkResultSummary(paths, workId, "check");
-  const latestVerify = readWorkResultSummary(paths, workId, "verify");
-  const latestCi = readWorkResultSummary(paths, workId, "ci");
-  const result = await runReviewAgent(paths, workId, task, readConfig(paths), { latestCheck, latestVerify, latestCi });
-  const latest = getLatestWorkPhaseRun(paths, workId, "review", repoId);
-  if (!latest) {
-    throw new DevtaskError(`Review phase run was not recorded for ${workId}/${repoId}`);
-  }
-  updateScopedPhaseSession(paths, workId, "review", repoId, {
-    status: result.status === "blocked" ? "blocked" : result.status === "failed" ? "failed" : "completed",
-    updatedAt: latest.finishedAt,
-    promptPath: latest.promptPath,
-    outputPath: latest.outputPath,
-    artifacts: latest.artifacts,
-    taskId: latest.taskId,
-    runId: latest.runId,
-    session: {
-      ...latest.session,
-      transportId: readScopedPhaseSession(paths, workId, "review", repoId)?.tmuxSession ?? latest.session.transportId
-    }
-  });
-}
-
-export async function runReviewFeedbackWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
-  const current = readScopedPhaseSession(paths, workId, "review", repoId);
-  if (!current) {
-    throw new DevtaskError(`No review feedback session exists for ${workId}/${repoId}`);
-  }
-  const materialization = requireMaterialization(paths, workId);
-  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
-  if (!task) {
-    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
-  }
-  const previous = readResumeSession(paths, workId, "review", repoId);
-  const prompt = fs.readFileSync(current.promptPath, "utf8");
-  const latestCheck = readWorkResultSummary(paths, workId, "check");
-  const latestVerify = readWorkResultSummary(paths, workId, "verify");
-  const latestCi = readWorkResultSummary(paths, workId, "ci");
-  const result = await runReviewAgent(paths, workId, task, readConfig(paths), { latestCheck, latestVerify, latestCi }, {
-    resumeSession: previous.session,
-    promptOverride: prompt
-  });
-  const latest = getLatestWorkPhaseRun(paths, workId, "review", repoId);
-  if (!latest) {
-    throw new DevtaskError(`Review phase run was not recorded for ${workId}/${repoId}`);
-  }
-  updateScopedPhaseSession(paths, workId, "review", repoId, {
-    status: result.status === "blocked" ? "blocked" : result.status === "failed" ? "failed" : "completed",
-    updatedAt: latest.finishedAt,
-    promptPath: latest.promptPath,
-    outputPath: latest.outputPath,
-    artifacts: latest.artifacts,
-    taskId: latest.taskId,
-    runId: latest.runId,
-    session: {
-      ...latest.session,
-      transportId: current.tmuxSession
-    }
-  });
 }
 
 async function runDeterministicChecks(paths: DevtaskPaths, workId: string): Promise<VerifyWorkResult> {
@@ -1554,216 +1174,47 @@ function isFreshGraphSince(filePath: string, startedAt: string): boolean {
   }
 }
 
-async function finalizeInteractiveSpecPhase(
+async function finalizeInteractivePhase(
   paths: DevtaskPaths,
+  phase: InteractivePhase,
   workId: string,
-  sessionRecord: ReturnType<typeof readScopedPhaseSession> extends infer T ? NonNullable<T> : never
+  repoId: string | null,
+  sessionRecord: PhaseSessionSummary
 ): Promise<void> {
-  const item = getWorkItem(paths, workId);
-  const specPath = sessionRecord.artifacts.specPath ?? workItemSpecPath(paths, workId);
-  const session = await hydratePhaseSession(paths, sessionRecord.session, paths.root, sessionRecord.tmuxSession);
+  const cfg = PHASE_CONFIGS[phase];
+  const workspacePath = cfg.workspacePath(paths, workId, repoId);
+  const session = await hydratePhaseSession(paths, sessionRecord.session, workspacePath, sessionRecord.tmuxSession);
   const finishedAt = new Date().toISOString();
-  const status: WorkSpecResult["status"] = isFreshArtifactSince(specPath, sessionRecord.startedAt) ? "spec-ready" : "failed";
-  writePhaseRunRecord(workItemPhaseRunsDir(paths, workId, "spec"), {
+  const { status, artifacts } = await cfg.finalize(paths, workId, repoId, sessionRecord, session, finishedAt);
+  const phaseRunsDir =
+    phase === "spec" || phase === "plan"
+      ? workItemPhaseRunsDir(paths, workId, phase)
+      : workItemRepoPhaseRunsDir(paths, workId, phase, repoId!);
+  writePhaseRunRecord(phaseRunsDir, {
     schemaVersion: 1,
-    phase: "spec",
+    phase,
     runId: sessionRecord.runId,
     workId,
-    repoId: null,
-    taskId: null,
+    repoId: repoId ?? null,
+    taskId: sessionRecord.taskId,
     status,
     promptPath: sessionRecord.promptPath,
     outputPath: sessionRecord.outputPath,
     startedAt: sessionRecord.startedAt,
     finishedAt,
     session,
-    artifacts: { specPath },
-    exitCode: status === "spec-ready" ? 0 : null
-  });
-  updateScopedPhaseSession(paths, workId, "spec", null, {
-    status: status === "spec-ready" ? "completed" : "failed",
-    updatedAt: finishedAt,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    artifacts: { specPath },
-    session
-  });
-  writeWorkResult(paths, workId, "spec", {
-    runId: sessionRecord.runId,
-    workId,
-    status,
-    specPath,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    exitCode: status === "spec-ready" ? 0 : null,
-    generatedAt: finishedAt,
-    session
-  } satisfies WorkSpecResult);
-  updateWorkItemStatus(paths, workId, status === "spec-ready" ? "spec-ready" : "failed");
-  await updateRecentWork(paths, item);
-}
-
-async function finalizeInteractivePlanPhase(
-  paths: DevtaskPaths,
-  workId: string,
-  sessionRecord: ReturnType<typeof readScopedPhaseSession> extends infer T ? NonNullable<T> : never
-): Promise<void> {
-  const item = getWorkItem(paths, workId);
-  const planPath = sessionRecord.artifacts.planPath ?? path.join(workItemDir(paths, workId), "plan.md");
-  const graphPath = sessionRecord.artifacts.graphPath ?? path.join(workItemDir(paths, workId), "graph.json");
-  const session = await hydratePhaseSession(paths, sessionRecord.session, paths.root, sessionRecord.tmuxSession);
-  const finishedAt = new Date().toISOString();
-  const status: WorkPlanRecord["status"] =
-    isFreshArtifactSince(planPath, sessionRecord.startedAt) && isFreshGraphSince(graphPath, sessionRecord.startedAt)
-      ? "planned"
-      : "failed";
-  const record: WorkPlanRecord = {
-    schemaVersion: 1,
-    phase: "plan",
-    planId: sessionRecord.runId,
-    workId,
-    status,
-    command: "interactive-session",
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    planPath,
-    graphPath,
-    startedAt: sessionRecord.startedAt,
-    finishedAt,
-    exitCode: status === "planned" ? 0 : null,
-    session
-  };
-  fs.mkdirSync(workItemPlanRunsDir(paths, workId), { recursive: true });
-  fs.writeFileSync(path.join(workItemPlanRunsDir(paths, workId), `${sessionRecord.runId}.json`), `${JSON.stringify(record, null, 2)}\n`);
-  writePhaseRunRecord(workItemPhaseRunsDir(paths, workId, "plan"), {
-    schemaVersion: 1,
-    phase: "plan",
-    runId: sessionRecord.runId,
-    workId,
-    repoId: null,
-    taskId: null,
-    status,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    startedAt: sessionRecord.startedAt,
-    finishedAt,
-    session,
-    artifacts: { planPath, graphPath },
-    exitCode: status === "planned" ? 0 : null
-  });
-  updateScopedPhaseSession(paths, workId, "plan", null, {
-    status: status === "planned" ? "completed" : "failed",
-    updatedAt: finishedAt,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    artifacts: { planPath, graphPath },
-    session
-  });
-  updateWorkItemStatus(paths, workId, status === "planned" ? "planned" : "failed");
-  await updateRecentWork(paths, item);
-}
-
-async function finalizeInteractiveRepoPlanPhase(
-  paths: DevtaskPaths,
-  workId: string,
-  repoId: string,
-  sessionRecord: ReturnType<typeof readScopedPhaseSession> extends infer T ? NonNullable<T> : never
-): Promise<void> {
-  const item = getWorkItem(paths, workId);
-  const planPath = sessionRecord.artifacts.planPath ?? workItemRepoPlanPath(paths, workId, repoId);
-  const runtimePlanPath = sessionRecord.artifacts.runtimePlanPath;
-  const runtimeStatePath = sessionRecord.artifacts.runtimeStatePath;
-  const resultPath = sessionRecord.artifacts.resultPath;
-  if (!runtimePlanPath || !runtimeStatePath || !resultPath) {
-    throw new DevtaskError(`repo-plan phase artifacts are incomplete for ${workId}/${repoId}`);
-  }
-  const graph = readWorkGraph(paths, workId);
-  const graphTask = graph.tasks.find((entry) => entry.repoId === repoId);
-  if (!graphTask) {
-    throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
-  }
-  persistSharedRepoPlan(paths, workId, repoId, runtimePlanPath);
-  const blocked = readTaskResult(resultPath).status === "blocked";
-  removeIfExists(runtimePlanPath);
-  removeIfExists(runtimeStatePath);
-  removeIfExists(resultPath);
-  const session = await hydratePhaseSession(paths, sessionRecord.session, phaseCwd(paths, "repo-plan", workId, repoId), sessionRecord.tmuxSession);
-  const finishedAt = new Date().toISOString();
-  const status: RepoPlanTaskResult["status"] =
-    isFreshArtifactSince(planPath, sessionRecord.startedAt) ? (blocked ? "blocked" : "planned") : "failed";
-  writePhaseRunRecord(workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId), {
-    schemaVersion: 1,
-    phase: "repo-plan",
-    runId: sessionRecord.runId,
-    workId,
-    repoId,
-    taskId: graphTask.id,
-    status,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    startedAt: sessionRecord.startedAt,
-    finishedAt,
-    session,
-    artifacts: { planPath },
+    artifacts,
     exitCode: status === "failed" ? null : 0
   });
-  updateScopedPhaseSession(paths, workId, "repo-plan", repoId, {
-    status: status === "planned" ? "completed" : status === "blocked" ? "blocked" : "failed",
-    updatedAt: finishedAt,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    artifacts: { planPath },
-    session
-  });
-  updateWorkItemStatus(paths, workId, status === "failed" ? "failed" : "planned");
-  await updateRecentWork(paths, item);
-}
-
-async function finalizeInteractiveReviewPhase(
-  paths: DevtaskPaths,
-  workId: string,
-  repoId: string,
-  sessionRecord: ReturnType<typeof readScopedPhaseSession> extends infer T ? NonNullable<T> : never
-): Promise<void> {
-  const reviewPath = sessionRecord.artifacts.reviewPath;
-  const resultPath = sessionRecord.artifacts.resultPath;
-  if (!reviewPath || !resultPath) {
-    throw new DevtaskError(`review phase artifacts are incomplete for ${workId}/${repoId}`);
-  }
-  const materialization = requireMaterialization(paths, workId);
-  const task = materialization.tasks.find((entry) => entry.repoId === repoId);
-  if (!task) {
-    throw new DevtaskError(`No review task exists for ${workId}/${repoId}`);
-  }
-  const parsed = readReviewResult(resultPath);
-  const session = await hydratePhaseSession(paths, sessionRecord.session, task.worktreePath, sessionRecord.tmuxSession);
-  const finishedAt = new Date().toISOString();
-  const status: ReviewTaskResult["status"] = parsed?.status ?? "failed";
-  writePhaseRunRecord(workItemRepoPhaseRunsDir(paths, workId, "review", repoId), {
-    schemaVersion: 1,
-    phase: "review",
-    runId: sessionRecord.runId,
-    workId,
-    repoId,
-    taskId: task.taskId,
-    status,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    startedAt: sessionRecord.startedAt,
-    finishedAt,
-    session,
-    artifacts: { reviewPath, resultPath },
-    exitCode: parsed ? 0 : null
-  });
-  updateScopedPhaseSession(paths, workId, "review", repoId, {
+  updateScopedPhaseSession(paths, workId, phase, repoId, {
     status: status === "blocked" ? "blocked" : status === "failed" ? "failed" : "completed",
     updatedAt: finishedAt,
     promptPath: sessionRecord.promptPath,
     outputPath: sessionRecord.outputPath,
-    artifacts: { reviewPath, resultPath },
-    taskId: task.taskId,
-    runId: sessionRecord.runId,
-    session
+    artifacts,
+    session,
+    taskId: sessionRecord.taskId,
+    runId: sessionRecord.runId
   });
 }
 
@@ -1967,13 +1418,6 @@ function summarizeExecuteWorkStatus(tasks: ExecuteTaskResult[]): import("../stor
   return "executing";
 }
 
-function summarizeReviewWorkStatus(tasks: ReviewTaskResult[]): import("../storage/work-store.js").WorkItemStatus {
-  if (tasks.some((task) => task.status === "failed" || task.status === "blocked")) {
-    return "blocked";
-  }
-  return "review-ready";
-}
-
 function persistExecutionMeta(metaPath: string, meta: TaskMeta): TaskMeta {
   writeTaskMeta(metaPath, meta);
   return meta;
@@ -2041,7 +1485,6 @@ export async function createWorkPullRequests(
   const tasks: PullRequestTaskResult[] = [];
 
   for (const task of materialization.tasks) {
-    const repoPaths = resolvePaths(task.repoPath);
     const storagePaths = taskStoragePaths(paths, task.repoPath);
     const metaPath = taskMetaPath(storagePaths, task.taskId);
     const meta = readTaskMeta(metaPath);
@@ -2234,22 +1677,6 @@ function writeWorkResult(paths: DevtaskPaths, workId: string, name: string, valu
   fs.writeFileSync(`${dir}/${name}.json`, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function readLatestPhaseRunStatus(dir: string): { status: string; outputPath: string } | null {
-  try {
-    const files = fs.readdirSync(dir).filter((file) => file.endsWith(".json")).sort();
-    const latest = files.at(-1);
-    if (!latest) {
-      return null;
-    }
-    const value = JSON.parse(fs.readFileSync(path.join(dir, latest), "utf8")) as { status?: unknown; outputPath?: unknown };
-    return typeof value.status === "string" && typeof value.outputPath === "string"
-      ? { status: value.status, outputPath: value.outputPath }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function persistSharedRepoPlan(paths: DevtaskPaths, workId: string, repoId: string, sourcePlanPath: string): void {
   const plan = readTextIfExists(sourcePlanPath).trim();
   if (!plan) {
@@ -2258,125 +1685,6 @@ function persistSharedRepoPlan(paths: DevtaskPaths, workId: string, repoId: stri
   const target = workItemRepoPlanPath(paths, workId, repoId);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, `${plan}\n`);
-}
-
-async function runWorkspaceRepoPlan(
-  paths: DevtaskPaths,
-  item: WorkItem,
-  graphTask: import("../work-materializer.js").WorkGraphTask,
-  repo: import("../storage/workspace-repos.js").WorkspaceRepo,
-  options: {
-    onStart?: (start: PlanAgentStart) => void;
-    onStdout?: (chunk: string) => void;
-    onStderr?: (chunk: string) => void;
-    resumeSession?: AgentSessionRef | null;
-    promptOverride?: string | null;
-  } = {}
-): Promise<{
-  status: RepoPlanTaskResult["status"];
-  planPath: string;
-  outputPath: string;
-  session: AgentSessionRef;
-}> {
-  const config = readConfig(paths);
-  const repoPaths = resolvePaths(repo.repoPath);
-  const phaseRunsDir = workItemRepoPhaseRunsDir(paths, item.id, "repo-plan", repo.id);
-  fs.mkdirSync(phaseRunsDir, { recursive: true });
-  const runId = newRunId();
-  const promptPath = path.join(phaseRunsDir, `${runId}.prompt.md`);
-  const outputPath = path.join(phaseRunsDir, `${runId}.md`);
-  const runtimeArtifactPrefix = path.join(repoPaths.root, `.devtask_repo_plan_${runId}`);
-  const runtimePlanPath = `${runtimeArtifactPrefix}.md`;
-  const runtimeStatePath = `${runtimeArtifactPrefix}.state.md`;
-  const resultPath = `${runtimeArtifactPrefix}.result.json`;
-  const finalPlanPath = workItemRepoPlanPath(paths, item.id, repo.id);
-  const taskDocument = buildWorkspaceRepoPlanTask(item, graphTask, repo);
-  const stateDocument = `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${item.id}\n`;
-  const prompt = options.promptOverride?.trim()
-    ? options.promptOverride.trim()
-    : buildRepoPlanPrompt(
-        { id: graphTask.id },
-        runtimePlanPath,
-        finalPlanPath,
-        taskDocument,
-        stateDocument,
-        collectPhaseMemory(paths, "planning", { repoId: repo.id })
-      );
-  fs.writeFileSync(promptPath, `${prompt}\n`);
-
-  const startOptions = {
-    workspacePath: repoPaths.root,
-    model: config.codex.model,
-    fullAuto: config.codex.fullAuto,
-    skipGitRepoCheck: true,
-    addDirs: [workItemDir(paths, item.id), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
-    env: {
-      ...process.env,
-      DEVTASK_TASK_DIR: workItemDir(paths, item.id),
-      DEVTASK_TASK_PATH: promptPath,
-      DEVTASK_PLAN_PATH: runtimePlanPath,
-      DEVTASK_STATE_PATH: runtimeStatePath,
-      DEVTASK_RESULT_PATH: resultPath
-    }
-  } as const;
-  const runner = createDefaultAgentRunner(config);
-  const command = options.resumeSession
-    ? (runner.buildResumeCommand?.(options.resumeSession, {
-        workspacePath: startOptions.workspacePath,
-        model: startOptions.model ?? null,
-        prompt
-      }) ?? "agent-resume")
-    : (runner.buildStartCommand?.(startOptions) ?? "agent-run");
-  options.onStart?.({ command, promptPath, outputPath, planPath: finalPlanPath });
-  const startedAt = new Date().toISOString();
-  const result = options.resumeSession
-    ? await resumeAgentPrompt(runner, options.resumeSession, {
-        workspacePath: startOptions.workspacePath,
-        model: startOptions.model ?? null,
-        prompt
-      }, prompt, {
-        outputPath,
-        onOutput: options.onStdout
-      })
-    : await runAgentPrompt(runner, startOptions, prompt, {
-        outputPath,
-        onOutput: options.onStdout
-      });
-  const finishedAt = new Date().toISOString();
-  persistSharedRepoPlan(paths, item.id, repo.id, runtimePlanPath);
-  const blocked = readTaskResult(resultPath).status === "blocked";
-  removeIfExists(runtimePlanPath);
-  removeIfExists(runtimeStatePath);
-  removeIfExists(resultPath);
-  const status: RepoPlanTaskResult["status"] =
-    result.status === "completed" && readTextIfExists(finalPlanPath).trim()
-      ? blocked ? "blocked" : "planned"
-      : "failed";
-  writePhaseRunRecord(phaseRunsDir, {
-    schemaVersion: 1,
-    phase: "repo-plan",
-    runId,
-    workId: item.id,
-    repoId: repo.id,
-    taskId: graphTask.id,
-    status,
-    promptPath,
-    outputPath,
-    startedAt,
-    finishedAt,
-    session: result.session,
-    artifacts: {
-      planPath: finalPlanPath
-    },
-    exitCode: result.status === "completed" ? 0 : null
-  });
-
-  return {
-    status,
-    planPath: finalPlanPath,
-    outputPath,
-    session: result.session
-  };
 }
 
 function buildWorkspaceRepoPlanTask(
@@ -2452,214 +1760,6 @@ async function readGitDiffStat(worktreePath: string): Promise<string> {
   return result.stdout.trim();
 }
 
-async function runSpecAgent(
-  paths: DevtaskPaths,
-  item: WorkItem,
-  config: DevtaskConfig,
-  options: {
-    onStart?: (start: { command: string; promptPath: string; outputPath: string; specPath: string }) => void;
-    onStdout?: (chunk: string) => void;
-    onStderr?: (chunk: string) => void;
-    resumeSession?: AgentSessionRef | null;
-    promptOverride?: string | null;
-  }
-): Promise<WorkSpecResult> {
-  const specPath = workItemSpecPath(paths, item.id);
-  const runsDir = workItemSpecRunsDir(paths, item.id);
-  fs.mkdirSync(runsDir, { recursive: true });
-  const runId = newRunId();
-  const promptPath = `${runsDir}/${runId}.prompt.md`;
-  const outputPath = `${runsDir}/${runId}.md`;
-  const prompt = options.promptOverride?.trim() ? options.promptOverride.trim() : buildSpecPrompt(item, specPath);
-  fs.writeFileSync(promptPath, `${prompt}\n`);
-
-  const runner = createDefaultAgentRunner(config);
-  const startOptions = {
-    workspacePath: paths.root,
-    model: config.codex.model,
-    fullAuto: config.codex.fullAuto,
-    skipGitRepoCheck: true,
-    addDirs: [path.dirname(item.source.artifact)],
-    env: {
-      ...process.env,
-      DEVTASK_TASK_DIR: workItemDir(paths, item.id),
-      DEVTASK_TASK_PATH: promptPath,
-      DEVTASK_WORK_SPEC_PATH: specPath
-    }
-  } as const;
-  const command = options.resumeSession
-    ? (runner.buildResumeCommand?.(options.resumeSession, {
-        workspacePath: startOptions.workspacePath,
-        model: startOptions.model ?? null,
-        prompt
-      }) ?? "agent-resume")
-    : (runner.buildStartCommand?.(startOptions) ?? "agent-run");
-  options.onStart?.({ command, promptPath, outputPath, specPath });
-  const startedAt = new Date().toISOString();
-  const result = options.resumeSession
-    ? await resumeAgentPrompt(runner, options.resumeSession, {
-        workspacePath: startOptions.workspacePath,
-        model: startOptions.model ?? null,
-        prompt
-      }, prompt, {
-        outputPath,
-        onOutput: (chunk) => {
-          options.onStdout?.(chunk);
-        }
-      })
-    : await runAgentPrompt(runner, startOptions, prompt, {
-        outputPath,
-        onOutput: (chunk) => {
-          options.onStdout?.(chunk);
-        }
-      });
-  const finishedAt = new Date().toISOString();
-  const currentSpec = readTextIfExists(specPath).trim();
-  const status: WorkSpecResult["status"] =
-    result.status === "completed" && currentSpec.length > 0 ? "spec-ready" : "failed";
-  writePhaseRunRecord(workItemPhaseRunsDir(paths, item.id, "spec"), {
-    schemaVersion: 1,
-    phase: "spec",
-    runId,
-    workId: item.id,
-    repoId: null,
-    taskId: null,
-    status,
-    promptPath,
-    outputPath,
-    startedAt,
-    finishedAt,
-    session: result.session,
-    artifacts: {
-      specPath
-    },
-    exitCode: result.status === "completed" ? 0 : null
-  });
-  return {
-    runId,
-    workId: item.id,
-    status,
-    specPath,
-    promptPath,
-    outputPath,
-    exitCode: result.status === "completed" ? 0 : null,
-    generatedAt: finishedAt,
-    session: result.session
-  };
-}
-
-async function runReviewAgent(
-  paths: DevtaskPaths,
-  workId: string,
-  task: WorkMaterialization["tasks"][number],
-  config: DevtaskConfig,
-  signals: { latestCheck: string | null; latestVerify: string | null; latestCi: string | null },
-  options: {
-    resumeSession?: AgentSessionRef | null;
-    promptOverride?: string | null;
-  } = {}
-): Promise<ReviewTaskResult> {
-  const storagePaths = taskStoragePaths(paths, task.repoPath);
-  const meta = readTaskMeta(taskMetaPath(storagePaths, task.taskId));
-  const clean = !(await hasUncommittedChanges(task.worktreePath));
-  const commits = await countBranchCommits(task.worktreePath).catch(() => 0);
-  const changedFiles = await readGitStatusShort(task.worktreePath);
-  const diffStat = await readGitDiffStat(task.worktreePath);
-  const reviewDir = workItemReviewDir(paths, workId);
-  fs.mkdirSync(reviewDir, { recursive: true });
-  const reviewPath = `${reviewDir}/${task.repoId}.md`;
-  const resultPath = `${reviewDir}/${task.repoId}.json`;
-  const promptPath = `${reviewDir}/${task.repoId}.prompt.md`;
-  const outputPath = `${reviewDir}/${task.repoId}.output.md`;
-  const prompt = options.promptOverride?.trim()
-    ? options.promptOverride.trim()
-    : buildReviewPrompt(
-        task,
-        meta,
-        reviewPath,
-        resultPath,
-        {
-          clean,
-          commits,
-          changedFiles,
-          diffStat,
-          latestCheck: signals.latestCheck,
-          latestVerify: signals.latestVerify,
-          latestCi: signals.latestCi
-        },
-        collectPhaseMemory(paths, "review", { repoId: task.repoId })
-      );
-  fs.writeFileSync(promptPath, `${prompt}\n`);
-
-  const runner = createDefaultAgentRunner(config);
-  const startOptions = {
-    workspacePath: task.worktreePath,
-    model: config.codex.model,
-    fullAuto: false,
-    skipGitRepoCheck: true,
-    addDirs: [workItemDir(paths, workId)],
-    env: {
-      ...process.env,
-      DEVTASK_TASK_DIR: workItemDir(paths, workId),
-      DEVTASK_TASK_PATH: promptPath,
-      DEVTASK_REVIEW_PATH: reviewPath,
-      DEVTASK_REVIEW_RESULT_PATH: resultPath
-    }
-  } as const;
-  const startedAt = new Date().toISOString();
-  const execResult = options.resumeSession
-    ? await resumeAgentPrompt(runner, options.resumeSession, {
-        workspacePath: startOptions.workspacePath,
-        model: startOptions.model ?? null,
-        prompt
-      }, prompt, {
-        outputPath
-      })
-    : await runAgentPrompt(runner, startOptions, prompt, {
-        outputPath
-      });
-
-  const parsed = readReviewResult(resultPath);
-  const status: ReviewTaskResult["status"] =
-    execResult.status !== "completed" ? "failed" : parsed?.status ?? "failed";
-  const runId = newRunId();
-  const finishedAt = new Date().toISOString();
-  writePhaseRunRecord(workItemRepoPhaseRunsDir(paths, workId, "review", task.repoId), {
-    schemaVersion: 1,
-    phase: "review",
-    runId,
-    workId,
-    repoId: task.repoId,
-    taskId: task.taskId,
-    status,
-    promptPath,
-    outputPath,
-    startedAt,
-    finishedAt,
-    session: execResult.session,
-    artifacts: {
-      reviewPath,
-      resultPath
-    },
-    exitCode: execResult.status === "completed" ? 0 : null
-  });
-  return {
-    repoId: task.repoId,
-    taskId: task.taskId,
-    status,
-    branch: task.branch,
-    worktreePath: task.worktreePath,
-    reviewPath,
-    resultPath,
-    prUrl: meta.prUrl,
-    summary: parsed?.summary ?? "review result not produced",
-    findings: parsed?.findings ?? [],
-    latestCheck: signals.latestCheck,
-    latestVerify: signals.latestVerify,
-    latestCi: signals.latestCi
-  };
-}
-
 function readReviewResult(filePath: string): { status: ReviewTaskResult["status"]; summary: string; findings: string[] } | null {
   try {
     const value = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
@@ -2701,11 +1801,4 @@ function removeIfExists(filePath: string): void {
       throw error;
     }
   }
-}
-
-function closeStream(stream: fs.WriteStream): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stream.once("error", reject);
-    stream.end(resolve);
-  });
 }
