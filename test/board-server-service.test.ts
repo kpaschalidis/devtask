@@ -6,7 +6,7 @@ import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem, updateWorkItemStatus } from "../src/storage/work-store.js";
 import { registerWorkspace } from "../src/storage/global-index.js";
-import { startBoardServer } from "../src/services/board-server-service.js";
+import { startBoardServer } from "../src/board/server.js";
 
 describe("board server service", () => {
   const originalHome = process.env.DEVTASK_HOME;

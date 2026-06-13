@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { resolveWorkspacePaths } from "../infra/paths.js";
-import { buildWorkBoard, type RepoTaskBoardRow } from "../board/work-board.js";
-import { getWorkspaceById, listRegisteredWorkspaces } from "./workspace-service.js";
-import { getWorkspaceBoard } from "./board-service.js";
+import { buildWorkBoard, type RepoTaskBoardRow } from "./work-board.js";
+import { buildWorkspaceBoard } from "./workspace-board.js";
+import { getWorkspaceById, listRegisteredWorkspaces } from "../services/workspace-service.js";
 
 export interface GenerateBoardHtmlOptions {
   workspaceId?: string;
@@ -86,7 +86,7 @@ export async function loadBoardIndexData(workspaceId?: string): Promise<{ genera
 }
 
 export async function loadWorkspaceBoardPage(paths: DevtaskPaths, generatedAt: string): Promise<WorkspaceBoardPageData> {
-  const rows = await getWorkspaceBoard(paths);
+  const rows = await buildWorkspaceBoard(paths);
   return {
     workspaceId: paths.workspaceId ?? path.basename(paths.root),
     workspaceRoot: paths.root,

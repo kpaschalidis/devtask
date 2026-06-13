@@ -6,8 +6,8 @@ import {
   loadWorkspaceBoardPage,
   renderIndexHtml,
   renderWorkspaceBoardHtml
-} from "./board-html-service.js";
-import { getWorkspaceById } from "./workspace-service.js";
+} from "./html.js";
+import { getWorkspaceById } from "../services/workspace-service.js";
 
 export interface StartBoardServerOptions {
   workspaceId?: string;

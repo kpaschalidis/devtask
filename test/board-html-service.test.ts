@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { generateBoardHtmlReports } from "../src/services/board-html-service.js";
+import { generateBoardHtmlReports } from "../src/board/html.js";
 import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
 import { initializeWorkspace, createTask } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";

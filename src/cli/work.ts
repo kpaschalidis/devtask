@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { Command } from "commander";
 import { DevtaskError } from "../infra/errors.js";
 import { resolveWorkspacePaths } from "../infra/paths.js";
-import { getWorkBoard } from "../services/board-service.js";
+import { buildWorkBoard } from "../board/work-board.js";
 import {
   checkWork,
   checkWorkCi,
@@ -180,7 +180,7 @@ export function registerWorkCommands(program: Command): void {
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
-        const rows = await getWorkBoard(resolveWorkspacePaths(), workId);
+        const rows = await buildWorkBoard(resolveWorkspacePaths(), workId);
         if (rows.length === 0) {
           console.log("No repo tasks");
           return;

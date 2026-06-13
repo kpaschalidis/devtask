@@ -1,9 +1,10 @@
 import path from "node:path";
 import { Command } from "commander";
 import { resolveWorkspacePaths } from "../infra/paths.js";
-import { getWorkBoard, getWorkspaceBoard } from "../services/board-service.js";
-import { generateBoardHtmlReports } from "../services/board-html-service.js";
-import { startBoardServer } from "../services/board-server-service.js";
+import { buildWorkspaceBoard } from "../board/workspace-board.js";
+import { buildWorkBoard } from "../board/work-board.js";
+import { generateBoardHtmlReports } from "../board/html.js";
+import { startBoardServer } from "../board/server.js";
 import { printError, printTable } from "./common.js";
 
 export function registerBoardCommands(program: Command): void {
@@ -12,7 +13,7 @@ export function registerBoardCommands(program: Command): void {
   board
     .action(async () => {
       try {
-        const rows = await getWorkspaceBoard(resolveWorkspacePaths());
+        const rows = await buildWorkspaceBoard(resolveWorkspacePaths());
         if (rows.length === 0) {
           console.log("No work");
           return;
@@ -73,7 +74,7 @@ export function registerBoardCommands(program: Command): void {
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
-        const rows = await getWorkBoard(resolveWorkspacePaths(), workId);
+        const rows = await buildWorkBoard(resolveWorkspacePaths(), workId);
         if (rows.length === 0) {
           console.log("No repo tasks");
           return;
