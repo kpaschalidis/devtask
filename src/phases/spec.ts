@@ -73,7 +73,7 @@ export const specPhase: PhaseConfig = {
     return paths.root;
   },
 
-  async finalize(paths, workId, _repoId, sessionRecord, session, finishedAt) {
+  async finalize(paths, workId, _repoId, sessionRecord) {
     const specPath = sessionRecord.artifacts.specPath ?? workItemSpecPath(paths, workId);
     const status = isFreshArtifactSince(specPath, sessionRecord.startedAt) ? "spec-ready" : "failed";
     const dir = workItemResultsDir(paths, workId);
@@ -89,8 +89,8 @@ export const specPhase: PhaseConfig = {
           promptPath: sessionRecord.promptPath,
           outputPath: sessionRecord.outputPath,
           exitCode: status === "spec-ready" ? 0 : null,
-          generatedAt: finishedAt,
-          session
+          generatedAt: new Date().toISOString(),
+          session: sessionRecord.session
         },
         null,
         2
