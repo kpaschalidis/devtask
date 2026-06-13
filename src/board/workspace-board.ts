@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { readWorkMaterialization } from "../work-materializer.js";
-import { workItemSpecPath } from "../infra/paths.js";
-import { readWorkPlanRecord } from "../services/work-service.js";
+import { workItemPlanPath, workItemGraphPath, workItemRepoPlansDir } from "../infra/paths.js";
+import { readOrchestrateRecord } from "../services/work-service.js";
 import { listWorkItems, type WorkItem } from "../storage/work-store.js";
 import { listWorkPhaseSessions } from "../services/phase-run-service.js";
 import { recommendWorkNextAction } from "./next-actions.js";
@@ -30,71 +30,41 @@ export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem
   const materialization = readWorkMaterialization(paths, item.id);
   const sessions = listWorkPhaseSessions(paths, item.id);
   const activeSession = sessions.find((session) => session.live) ?? null;
-  const planRecord = readWorkPlanRecord(paths, item.id);
+  const orchestrateRecord = readOrchestrateRecord(paths, item.id);
+  const orchestratedPlan = hasOrchestratedPlan(paths, item.id);
   return {
     workId: item.id,
     title: item.source.title,
     source: item.source.type,
-    status: summarizeStatus(
-      item,
-      hasSpecArtifact(paths, item.id),
-      planRecord?.status ?? null,
-      materialization !== null,
-      sessions.some((session) => session.live)
-    ),
+    status: summarizeStatus(item, orchestrateRecord?.status ?? null, materialization !== null, sessions.some((s) => s.live)),
     repos: materialization ? materialization.tasks.map((task) => task.repoId).join(", ") : "-",
     updatedAt: newestUpdatedAt(item.updatedAt, [
-      planRecord?.finishedAt ?? null,
+      orchestrateRecord?.finishedAt ?? null,
       materialization?.materializedAt ?? null,
       ...sessions.map((session) => session.updatedAt)
     ]),
     next: activeSession
       ? phaseAttachCommand(item.id, activeSession.phase, activeSession.repoId)
       : recommendWorkNextAction(item, {
-          hasSpec: hasSpecArtifact(paths, item.id),
-          hasPlan: planRecord?.status === "planned" || hasPlanArtifacts(paths, item.id),
-          hasRepoPlans: hasRepoPlanArtifacts(paths, item.id),
+          hasOrchestratedPlan: orchestratedPlan,
           isMaterialized: materialization !== null,
           hasActiveSession: false
         })
   };
 }
 
-function summarizeStatus(
-  item: WorkItem,
-  hasSpec: boolean,
-  planStatus: string | null,
-  isMaterialized: boolean,
-  hasActiveSession: boolean
-): string {
-  if (hasActiveSession) {
-    return "executing";
-  }
-  if (isMaterialized) {
-    return "materialized";
-  }
-  if (planStatus === "planned") {
-    return "planned";
-  }
-  if (planStatus === "failed") {
-    return "plan-failed";
-  }
-  if (hasSpec) {
-    return "spec-ready";
-  }
+function summarizeStatus(item: WorkItem, orchestrateStatus: string | null, isMaterialized: boolean, hasActiveSession: boolean): string {
+  if (hasActiveSession) return "executing";
+  if (isMaterialized) return "materialized";
+  if (orchestrateStatus === "planned") return "planned";
+  if (orchestrateStatus === "failed") return "plan-failed";
   return item.status;
 }
 
-function hasPlanArtifacts(paths: DevtaskPaths, workId: string): boolean {
-  return fs.existsSync(paths.workDir) && fs.existsSync(`${paths.workDir}/${workId}/plan.md`);
-}
-
-function hasSpecArtifact(paths: DevtaskPaths, workId: string): boolean {
-  return fs.existsSync(workItemSpecPath(paths, workId));
-}
-
-function hasRepoPlanArtifacts(paths: DevtaskPaths, workId: string): boolean {
-  const repoPlansDir = `${paths.workDir}/${workId}/repo-plans`;
+function hasOrchestratedPlan(paths: DevtaskPaths, workId: string): boolean {
+  if (!fs.existsSync(workItemPlanPath(paths, workId))) return false;
+  if (!fs.existsSync(workItemGraphPath(paths, workId))) return false;
+  const repoPlansDir = workItemRepoPlansDir(paths, workId);
   return fs.existsSync(repoPlansDir) && fs.readdirSync(repoPlansDir).some((entry) => entry.endsWith(".md"));
 }
 

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { emptyAgentSessionRef, type AgentSessionRef } from "../agent-session.js";
 
-export type PhaseRunPhase = "spec" | "plan" | "repo-plan" | "review" | "execute" | "compound";
+export type PhaseRunPhase = "orchestrate" | "repo-plan" | "review" | "execute" | "compound";
 
 // Unified phase run — covers both live sessions and completed records.
 // Live sessions are stored as running.json; completed ones as {runId}.json.

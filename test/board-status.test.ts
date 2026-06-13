@@ -29,26 +29,13 @@ describe("board status", () => {
       id: "WORK-123",
       title: "Add API behavior"
     });
-    fs.writeFileSync(path.join(paths.workDir, item.id, "spec.md"), "# Spec\n");
     fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
+    fs.writeFileSync(
+      path.join(paths.workDir, item.id, "graph.json"),
+      JSON.stringify({ schemaVersion: 1, workId: item.id, tasks: [], validation: [], openQuestions: [] })
+    );
     fs.mkdirSync(path.join(paths.workDir, item.id, "repo-plans"), { recursive: true });
     fs.writeFileSync(path.join(paths.workDir, item.id, "repo-plans", "backend.md"), "# Repo Plan\n");
-    writePhaseRunRecord(phaseRunDir(paths, item.id, "plan", null), {
-      schemaVersion: 1,
-      phase: "plan",
-      runId: "2026-01-01T00-00-00-000Z",
-      workId: item.id,
-      repoId: null,
-      taskId: null,
-      status: "planned",
-      promptPath: "p",
-      outputPath: "o",
-      startedAt: "2026-01-01T00:00:00.000Z",
-      finishedAt: "2026-01-01T00:00:01.000Z",
-      exitCode: 0,
-      session: { provider: "codex", transportId: null, resumeContext: { providerSessionId: null, conversationId: null, resumeTarget: null, storageRoot: null, transcriptPath: null }, summary: null, summaryIsFallback: null },
-      artifacts: { planPath: "p", graphPath: "g" }
-    });
 
     const row = await buildWorkspaceBoardRow(paths, item);
 
@@ -94,23 +81,23 @@ describe("board status", () => {
       id: "WORK-123",
       title: "Add API behavior"
     });
-    vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-spec");
-    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
-      phase: "spec",
+    vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-orchestrate");
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null), {
+      phase: "orchestrate",
       workId: item.id,
       repoId: null,
       taskId: null,
       runId: "run-1",
-      tmuxSession: "devtask-spec",
+      tmuxSession: "devtask-orchestrate",
       startedAt: "2026-01-01T00:00:00.000Z",
-      promptPath: "/tmp/spec.prompt.md",
-      outputPath: "/tmp/spec.output.md",
+      promptPath: "/tmp/orchestrate.prompt.md",
+      outputPath: "/tmp/orchestrate.output.md",
       artifacts: {
-        specPath: "/tmp/spec.md"
+        planPath: "/tmp/plan.md"
       },
       session: {
         provider: "codex",
-        transportId: "devtask-spec",
+        transportId: "devtask-orchestrate",
         resumeContext: {
           providerSessionId: null,
           conversationId: null,
@@ -118,13 +105,13 @@ describe("board status", () => {
           storageRoot: null,
           transcriptPath: null
         },
-        summary: "spec session started",
+        summary: "orchestrate session started",
         summaryIsFallback: true
       }
     });
 
     const row = await buildWorkspaceBoardRow(paths, item);
 
-    expect(row.next).toBe("devtask work spec attach WORK-123");
+    expect(row.next).toBe("devtask work orchestrate attach WORK-123");
   });
 });

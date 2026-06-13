@@ -6,7 +6,6 @@ import { workItemDir, workItemJsonPath, workItemLocalDir, workItemSourcePath, wo
 
 export const WORK_ITEM_STATUSES = [
   "created",
-  "spec-ready",
   "planned",
   "materialized",
   "executing",

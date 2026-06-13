@@ -215,6 +215,18 @@ export function workItemSpecPath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemDir(paths, id), "spec.md");
 }
 
+export function workItemValidationContractPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "validation-contract.md");
+}
+
+export function workItemPlanPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "plan.md");
+}
+
+export function workItemGraphPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "graph.json");
+}
+
 export function workItemGraphSnapshotPath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "graph.snapshot.json");
 }
@@ -239,7 +251,7 @@ export function workItemLocalDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.localDir, "work", id);
 }
 
-export const GLOBAL_PHASES = new Set(["spec", "plan", "compound"]);
+export const GLOBAL_PHASES = new Set(["orchestrate", "compound"]);
 
 export function phaseRunDir(
   paths: DevtaskPaths,

@@ -35,7 +35,7 @@ vi.mock("../src/agent.js", async (importOriginal) => {
           providerSessionId: session.resumeContext?.providerSessionId ?? "agent-123",
           conversationId: session.resumeContext?.conversationId ?? "thread-123",
           resumeTarget: session.resumeContext?.resumeTarget ?? "agent-123",
-          transcriptPath: session.resumeContext?.transcriptPath ?? "/tmp/codex-home/sessions/spec.jsonl"
+          transcriptPath: session.resumeContext?.transcriptPath ?? "/tmp/codex-home/sessions/orchestrate.jsonl"
         },
         summary: "hydrated session",
         summaryIsFallback: false
@@ -78,7 +78,7 @@ import { readRunningPhaseRun, writeRunningPhaseRun, updateRunningPhaseRun } from
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { getLatestWorkPhaseRun } from "../src/services/phase-run-service.js";
-import { attachWorkPhase, runManagedPhaseHookFinalizer, sendWorkPhaseFeedback, startSpecWork } from "../src/services/work-service.js";
+import { attachWorkPhase, runManagedPhaseHookFinalizer, sendWorkPhaseFeedback, startOrchestrateWork } from "../src/services/work-service.js";
 
 const agent = await import("../src/agent.js");
 const tmux = await import("../src/infra/tmux.js");
@@ -100,16 +100,16 @@ describe("work phase feedback", () => {
       title: "Completed session visibility"
     });
 
-    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
-      phase: "spec",
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null), {
+      phase: "orchestrate",
       workId: item.id,
       repoId: null,
       taskId: null,
       runId: "run-1",
       tmuxSession: "still-there",
       startedAt: "2026-01-01T00:00:00.000Z",
-      promptPath: "/tmp/spec.prompt.md",
-      outputPath: "/tmp/spec.output.md",
+      promptPath: "/tmp/orchestrate.prompt.md",
+      outputPath: "/tmp/orchestrate.output.md",
       artifacts: {
         specPath: workItemSpecPath(paths, item.id)
       },
@@ -128,28 +128,28 @@ describe("work phase feedback", () => {
       }
     });
     vi.mocked(tmux.tmuxSessionExists).mockReturnValue(true);
-    updateRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
+    updateRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null), {
       status: "completed",
       updatedAt: "2026-01-01T00:01:00.000Z"
     });
 
-    const run = readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null));
+    const run = readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null));
     const live = run?.status === "running" && tmux.tmuxSessionExists(run.tmuxSession ?? "");
     expect(live).toBe(false);
   });
 
-  it("resumes and attaches when the latest spec session is finished without managed completion tracking", async () => {
+  it("resumes and attaches when the latest orchestrate session is finished without managed completion tracking", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-phase-attach-resume-"));
     const paths = resolveWorkspacePathsForInit(workspace);
     initializeWorkspace(paths);
     const item = createManualWorkItem(paths, {
       id: "WORK-123",
-      title: "Resume finished spec session"
+      title: "Resume finished orchestrate session"
     });
     fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nOriginal.\n");
 
-    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
-      phase: "spec",
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null), {
+      phase: "orchestrate",
       workId: item.id,
       repoId: null,
       taskId: null,
@@ -169,23 +169,23 @@ describe("work phase feedback", () => {
           conversationId: "thread-123",
           resumeTarget: "agent-123",
           storageRoot: "/tmp/codex-home",
-          transcriptPath: "/tmp/codex-home/sessions/spec.jsonl"
+          transcriptPath: "/tmp/codex-home/sessions/orchestrate.jsonl"
         },
-        summary: "spec complete",
+        summary: "orchestrate complete",
         summaryIsFallback: false
       }
     });
-    updateRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
+    updateRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null), {
       status: "completed",
       updatedAt: "2026-01-01T00:01:00.000Z"
     });
-    vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-test-spec-WORK-123");
+    vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-test-orchestrate-WORK-123");
 
-    await attachWorkPhase(paths, "spec", item.id);
+    await attachWorkPhase(paths, "orchestrate", item.id);
 
     expect(tmux.startTmuxSession).toHaveBeenCalledTimes(1);
-    expect(tmux.attachTmuxSession).toHaveBeenCalledWith("devtask-test-spec-WORK-123");
-    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.status).toBe("running");
+    expect(tmux.attachTmuxSession).toHaveBeenCalledWith("devtask-test-orchestrate-WORK-123");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.status).toBe("running");
     const runner = vi.mocked(agent.createDefaultAgentRunner).mock.results.at(-1)?.value;
     expect(runner?.buildInteractiveResumeCommand).toHaveBeenCalledWith(
       expect.anything(),
@@ -195,27 +195,27 @@ describe("work phase feedback", () => {
     );
   });
 
-  it("starts fresh spec work as an interactive background session with a managed completion hook", async () => {
+  it("starts fresh orchestrate work as an interactive background session with a managed completion hook", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-phase-fresh-interactive-"));
     const paths = resolveWorkspacePathsForInit(workspace);
     initializeWorkspace(paths);
     const item = createManualWorkItem(paths, {
       id: "WORK-123",
-      title: "Interactive fresh spec"
+      title: "Interactive fresh orchestrate"
     });
     fs.writeFileSync(item.source.artifact, "# Source\n");
     fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nFresh interactive spec.\n");
 
-    const launch = await startSpecWork(paths, item.id);
+    const launch = await startOrchestrateWork(paths, item.id);
 
-    expect(launch.tmuxSession).toBe("devtask-test-spec-WORK-123");
+    expect(launch.tmuxSession).toBe("devtask-test-orchestrate-WORK-123");
     expect(tmux.startTmuxSession).toHaveBeenCalledTimes(1);
-    expect(tmux.startPipePane).toHaveBeenCalledWith("devtask-test-spec-WORK-123", launch.outputPath);
-    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.status).toBe("running");
+    expect(tmux.startPipePane).toHaveBeenCalledWith("devtask-test-orchestrate-WORK-123", launch.outputPath);
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.status).toBe("running");
     const runner = vi.mocked(agent.createDefaultAgentRunner).mock.results.at(-1)?.value;
     expect(runner?.buildInteractiveStartCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        managedCompletionCommand: expect.stringContaining("work _phase-finalize-hook spec WORK-123")
+        managedCompletionCommand: expect.stringContaining("work _phase-finalize-hook orchestrate WORK-123")
       }),
       expect.any(String)
     );
@@ -227,16 +227,23 @@ describe("work phase feedback", () => {
     initializeWorkspace(paths);
     const item = createManualWorkItem(paths, {
       id: "WORK-123",
-      title: "Hook finalize spec"
+      title: "Hook finalize orchestrate"
     });
+    const workDir = path.join(paths.workDir, item.id);
     fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nFresh interactive spec updated.\n");
-    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
-      phase: "spec",
+    fs.writeFileSync(path.join(workDir, "validation-contract.md"), "VAL-001: API returns 200\n");
+    fs.writeFileSync(path.join(workDir, "plan.md"), "# Plan\n\nImplementation plan.\n");
+    fs.writeFileSync(
+      path.join(workDir, "graph.json"),
+      JSON.stringify({ schemaVersion: 1, workId: item.id, tasks: [], validation: [], openQuestions: [] })
+    );
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null), {
+      phase: "orchestrate",
       workId: item.id,
       repoId: null,
       taskId: null,
       runId: "run-2",
-      tmuxSession: "devtask-test-spec-WORK-123",
+      tmuxSession: "devtask-test-orchestrate-WORK-123",
       startedAt: "2026-01-01T00:00:00.000Z",
       promptPath: path.join(paths.localDir, "hook.prompt.md"),
       outputPath: path.join(paths.localDir, "hook.output.md"),
@@ -245,7 +252,7 @@ describe("work phase feedback", () => {
       },
       session: {
         provider: "codex",
-        transportId: "devtask-test-spec-WORK-123",
+        transportId: "devtask-test-orchestrate-WORK-123",
         resumeContext: {
           providerSessionId: null,
           conversationId: null,
@@ -259,12 +266,12 @@ describe("work phase feedback", () => {
     });
     vi.mocked(tmux.tmuxSessionExists).mockReturnValue(true);
 
-    await runManagedPhaseHookFinalizer(paths, "spec", item.id, "run-2", null);
+    await runManagedPhaseHookFinalizer(paths, "orchestrate", item.id, "run-2", null);
 
-    expect(getLatestWorkPhaseRun(paths, item.id, "spec")?.status).toBe("spec-ready");
-    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.status).toBe("completed");
-    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.session.resumeContext.providerSessionId).toBe("agent-123");
-    expect(tmux.killTmuxSession).toHaveBeenCalledWith("devtask-test-spec-WORK-123");
+    expect(getLatestWorkPhaseRun(paths, item.id, "orchestrate")?.status).toBe("planned");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.status).toBe("completed");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.session.resumeContext.providerSessionId).toBe("agent-123");
+    expect(tmux.killTmuxSession).toHaveBeenCalledWith("devtask-test-orchestrate-WORK-123");
   });
 
   it("ignores stale hook callbacks for older managed runs", async () => {
@@ -276,13 +283,13 @@ describe("work phase feedback", () => {
       title: "Ignore stale hook"
     });
     fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nOriginal.\n");
-    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
-      phase: "spec",
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null), {
+      phase: "orchestrate",
       workId: item.id,
       repoId: null,
       taskId: null,
       runId: "run-current",
-      tmuxSession: "devtask-test-spec-WORK-123",
+      tmuxSession: "devtask-test-orchestrate-WORK-123",
       startedAt: "2026-01-01T00:00:00.000Z",
       promptPath: path.join(paths.localDir, "current.prompt.md"),
       outputPath: path.join(paths.localDir, "current.output.md"),
@@ -291,7 +298,7 @@ describe("work phase feedback", () => {
       },
       session: {
         provider: "codex",
-        transportId: "devtask-test-spec-WORK-123",
+        transportId: "devtask-test-orchestrate-WORK-123",
         resumeContext: {
           providerSessionId: null,
           conversationId: null,
@@ -304,10 +311,10 @@ describe("work phase feedback", () => {
       }
     });
 
-    await runManagedPhaseHookFinalizer(paths, "spec", item.id, "run-old", null);
+    await runManagedPhaseHookFinalizer(paths, "orchestrate", item.id, "run-old", null);
 
-    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.status).toBe("running");
-    expect(getLatestWorkPhaseRun(paths, item.id, "spec")).toBeNull();
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.status).toBe("running");
+    expect(getLatestWorkPhaseRun(paths, item.id, "orchestrate")).toBeNull();
     expect(tmux.killTmuxSession).not.toHaveBeenCalled();
   });
 });

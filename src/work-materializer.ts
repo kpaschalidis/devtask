@@ -9,8 +9,10 @@ import {
   taskMetaPath,
   taskStoragePaths,
   workItemDir,
+  workItemGraphPath,
   workItemGraphSnapshotPath,
-  workItemMaterializationPath
+  workItemMaterializationPath,
+  workItemPlanPath
 } from "./infra/paths.js";
 import { assertValidTaskId } from "./task-id.js";
 import { createTask, initializeStore } from "./storage/task-store.js";
@@ -18,7 +20,6 @@ import { writeTaskMeta } from "./storage/meta.js";
 import type { TaskMeta } from "./types.js";
 import { getWorkspaceRepo, type WorkspaceRepo } from "./storage/workspace-repos.js";
 import type { WorkItem } from "./storage/work-store.js";
-import { workGraphPath, workPlanPath } from "./global-plan.js";
 import { resolvePaths } from "./infra/paths.js";
 
 export const WORK_DEPENDENCY_TYPES = ["run", "review", "validation"] as const;
@@ -130,7 +131,7 @@ export function readWorkMaterialization(paths: DevtaskPaths, workId: string): Wo
 }
 
 function readAndValidateWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
-  const graphPath = workGraphPath(paths, workId);
+  const graphPath = workItemGraphPath(paths, workId);
   if (!fs.existsSync(graphPath)) {
     throw new DevtaskError(`Work graph does not exist: ${graphPath}. Run devtask work plan ${workId} first.`);
   }
@@ -138,9 +139,9 @@ function readAndValidateWorkGraph(paths: DevtaskPaths, workId: string): WorkGrap
 }
 
 function assertPlanArtifactExists(paths: DevtaskPaths, workId: string): void {
-  const planPath = workPlanPath(paths, workId);
+  const planPath = workItemPlanPath(paths, workId);
   if (!fs.existsSync(planPath) || fs.readFileSync(planPath, "utf8").trim().length === 0) {
-    throw new DevtaskError(`Work plan does not exist: ${planPath}. Run devtask work plan ${workId} first.`);
+    throw new DevtaskError(`Work plan does not exist: ${planPath}. Run devtask work orchestrate ${workId} first.`);
   }
 }
 
@@ -273,8 +274,8 @@ function buildRepoTaskGoal(
     `Implement work item ${workItem.id}: ${workItem.source.title}`,
     "",
     `Work source artifact: ${workItem.source.artifact}`,
-    `Work plan artifact: ${workPlanPath(paths, workItem.id)}`,
-    `Work graph artifact: ${workGraphPath(paths, workItem.id)}`,
+    `Work plan artifact: ${workItemPlanPath(paths, workItem.id)}`,
+    `Work graph artifact: ${workItemGraphPath(paths, workItem.id)}`,
     `Graph task: ${task.id}`,
     `Repo: ${task.repoId}`,
     `Repo path: ${repo.repoPath}`,

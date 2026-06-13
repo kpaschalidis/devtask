@@ -16,21 +16,20 @@ import {
   listWork,
   materializeWork,
   executeWork,
-  readWorkPlanRecord,
   runManagedPhaseHookFinalizer,
   sendWorkPhaseFeedback,
   attachWorkPhase,
-  startPlanWork,
-  startRepoPlanWork,
-  startRepoPlanScope,
+  startOrchestrateWork,
+  runRepoPlanWorker,
   startReviewWork,
   startReviewScope,
-  startSpecWork,
+  getWorkMaterializationState,
   verifyWork
 } from "../services/work-service.js";
 import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/phase-run-service.js";
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
+import { recommendWorkNextAction } from "../board/next-actions.js";
 import { printError, printTable } from "./common.js";
 
 export function registerWorkCommands(program: Command): void {
@@ -299,149 +298,68 @@ export function registerWorkCommands(program: Command): void {
     .action((workId: string) => {
       try {
         const paths = resolveWorkspacePaths();
-        const specPath = `${paths.workDir}/${workId}/spec.md`;
-        if (!fs.existsSync(specPath)) {
-          console.log(`Next: devtask work spec ${workId}`);
-          return;
-        }
-        const record = readWorkPlanRecord(resolveWorkspacePaths(), workId);
-        if (!record) {
-          console.log(`Next: devtask work plan ${workId}`);
-          return;
-        }
-        const repoPlansDir = `${paths.workDir}/${workId}/repo-plans`;
-        const hasRepoPlans = fs.existsSync(repoPlansDir) && fs.readdirSync(repoPlansDir).some((entry) => entry.endsWith(".md"));
-        console.log(
-          record.status === "planned"
-            ? hasRepoPlans
-              ? `Next: devtask work materialize ${workId}`
-              : `Next: devtask work repo-plan ${workId}`
-            : `Next: devtask work plan ${workId}`
-        );
+        const item = getWork(paths, workId);
+        const materialization = getWorkMaterializationState(paths, workId);
+        const workDir = `${paths.workDir}/${workId}`;
+        const repoPlansDir = `${workDir}/repo-plans`;
+        const hasOrchestratedPlan =
+          fs.existsSync(`${workDir}/plan.md`) &&
+          fs.existsSync(`${workDir}/graph.json`) &&
+          fs.existsSync(repoPlansDir) &&
+          fs.readdirSync(repoPlansDir).some((e) => e.endsWith(".md"));
+        console.log(`Next: ${recommendWorkNextAction(item, {
+          hasOrchestratedPlan,
+          isMaterialized: materialization !== null,
+          hasActiveSession: false
+        })}`);
       } catch (error) {
         printError(error);
       }
     });
 
-  const plan = work
-    .command("plan")
-    .description("Start the global work planner in a background tmux session.");
-  plan
+  const orchestrate = work
+    .command("orchestrate")
+    .description("Start the orchestrator in a background tmux session to produce spec, plan, and repo plans.");
+  orchestrate
     .argument("<work-id>")
     .action(async (workId: string) => {
       try {
-        const result = await startPlanWork(resolveWorkspacePaths(), workId);
-        console.log(`Started plan session: ${result.tmuxSession}`);
+        const result = await startOrchestrateWork(resolveWorkspacePaths(), workId);
+        console.log(`Started orchestrate session: ${result.tmuxSession}`);
         console.log(`Prompt: ${result.promptPath}`);
         console.log(`Output: ${result.outputPath}`);
-        console.log(`Attach: devtask work plan attach ${workId}`);
+        console.log(`Attach: devtask work orchestrate attach ${workId}`);
       } catch (error) {
         printError(error);
       }
     });
-  plan.command("attach").argument("<work-id>").action(async (workId: string) => {
+  orchestrate.command("attach").argument("<work-id>").action(async (workId: string) => {
     try {
-      await attachWorkPhase(resolveWorkspacePaths(), "plan", workId);
+      await attachWorkPhase(resolveWorkspacePaths(), "orchestrate", workId);
     } catch (error) {
       printError(error);
     }
   });
-  plan.command("feedback").argument("<work-id>").argument("<message...>").action(async (workId: string, messageParts: string[]) => {
+  orchestrate.command("feedback").argument("<work-id>").argument("<message...>").action(async (workId: string, messageParts: string[]) => {
     try {
-      const result = await sendWorkPhaseFeedback(resolveWorkspacePaths(), "plan", workId, messageParts.join(" "));
-      console.log(`Started plan feedback session: ${result.tmuxSession}`);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  plan.command("fresh").argument("<work-id>").action(async (workId: string) => {
-    try {
-      const result = await startPlanWork(resolveWorkspacePaths(), workId);
-      console.log(`Started fresh plan session: ${result.tmuxSession}`);
+      const result = await sendWorkPhaseFeedback(resolveWorkspacePaths(), "orchestrate", workId, messageParts.join(" "));
+      console.log(`Started orchestrate feedback session: ${result.tmuxSession}`);
     } catch (error) {
       printError(error);
     }
   });
 
-  const spec = work
-    .command("spec")
-    .description("Start spec refinement in a background tmux session.");
-  spec
-    .argument("<work-id>")
-    .action(async (workId: string) => {
+  work.command("_repo-plan-worker", { hidden: true })
+    .requiredOption("--work-id <id>")
+    .requiredOption("--repo-id <id>")
+    .action(async (options: { workId: string; repoId: string }) => {
       try {
-        const result = await startSpecWork(resolveWorkspacePaths(), workId);
-        console.log(`Started spec session: ${result.tmuxSession}`);
-        console.log(`Prompt: ${result.promptPath}`);
-        console.log(`Output: ${result.outputPath}`);
-        console.log(`Attach: devtask work spec attach ${workId}`);
+        await runRepoPlanWorker(resolveWorkspacePaths(), options.workId, options.repoId);
       } catch (error) {
         printError(error);
+        process.exit(1);
       }
     });
-  spec.command("attach").argument("<work-id>").action(async (workId: string) => {
-    try {
-      await attachWorkPhase(resolveWorkspacePaths(), "spec", workId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  spec.command("feedback").argument("<work-id>").argument("<message...>").action(async (workId: string, messageParts: string[]) => {
-    try {
-      const result = await sendWorkPhaseFeedback(resolveWorkspacePaths(), "spec", workId, messageParts.join(" "));
-      console.log(`Started spec feedback session: ${result.tmuxSession}`);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  spec.command("fresh").argument("<work-id>").action(async (workId: string) => {
-    try {
-      const result = await startSpecWork(resolveWorkspacePaths(), workId);
-      console.log(`Started fresh spec session: ${result.tmuxSession}`);
-    } catch (error) {
-      printError(error);
-    }
-  });
-
-  const repoPlan = work
-    .command("repo-plan")
-    .description("Start repo-local implementation planning in background tmux sessions.");
-  repoPlan
-    .argument("<work-id>")
-    .action(async (workId: string) => {
-      try {
-        const launches = await startRepoPlanWork(resolveWorkspacePaths(), workId);
-        printTable(
-          ["REPO", "TASK", "SESSION", "PROMPT"],
-          launches.map((entry) => [entry.repoId ?? "-", entry.taskId ?? "-", entry.tmuxSession, entry.promptPath])
-        );
-      } catch (error) {
-        printError(error);
-      }
-    });
-  repoPlan.command("attach").argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
-    try {
-      await attachWorkPhase(resolveWorkspacePaths(), "repo-plan", workId, repoId);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  repoPlan.command("feedback").argument("<work-id>").argument("<repo-id>").argument("<message...>").action(async (workId: string, repoId: string, messageParts: string[]) => {
-    try {
-      const result = await sendWorkPhaseFeedback(resolveWorkspacePaths(), "repo-plan", workId, repoId, messageParts.join(" "));
-      console.log(`Started repo-plan feedback session: ${result.tmuxSession}`);
-    } catch (error) {
-      printError(error);
-    }
-  });
-  repoPlan.command("fresh").argument("<work-id>").argument("<repo-id>").action(async (workId: string, repoId: string) => {
-    try {
-      const launch = await startRepoPlanScope(resolveWorkspacePaths(), workId, repoId);
-      console.log(`Started fresh repo-plan session: ${launch.tmuxSession}`);
-    } catch (error) {
-      printError(error);
-    }
-  });
 
   const execute = work
     .command("execute")
@@ -558,10 +476,11 @@ export function registerWorkCommands(program: Command): void {
       printError(error);
     }
   });
+
   work.command("_phase-finalize-hook", { hidden: true }).argument("<phase>").argument("<work-id>").argument("<run-id>").argument("[repo-id]").action(async (phase: string, workId: string, runId: string, repoId?: string) => {
     try {
       const normalized = normalizeRequiredPhase(phase);
-      if (normalized === "execute" || normalized === "compound") {
+      if (normalized !== "orchestrate" && normalized !== "review") {
         throw new DevtaskError(`Unsupported interactive phase finalizer: ${phase}`);
       }
       await runManagedPhaseHookFinalizer(
@@ -705,17 +624,17 @@ export function registerWorkCommands(program: Command): void {
     });
 }
 
-function normalizePhaseOption(value: string | undefined): "spec" | "plan" | "repo-plan" | "review" | "execute" | "compound" | undefined {
+function normalizePhaseOption(value: string | undefined): "orchestrate" | "repo-plan" | "review" | "execute" | "compound" | undefined {
   if (value === undefined) {
     return undefined;
   }
-  if (value === "spec" || value === "plan" || value === "repo-plan" || value === "review" || value === "execute" || value === "compound") {
+  if (value === "orchestrate" || value === "repo-plan" || value === "review" || value === "execute" || value === "compound") {
     return value;
   }
   throw new DevtaskError(`Invalid phase ${value}`);
 }
 
-function normalizeRequiredPhase(value: string): "spec" | "plan" | "repo-plan" | "review" | "execute" | "compound" {
+function normalizeRequiredPhase(value: string): "orchestrate" | "repo-plan" | "review" | "execute" | "compound" {
   return normalizePhaseOption(value) ?? failMissingPhase();
 }
 

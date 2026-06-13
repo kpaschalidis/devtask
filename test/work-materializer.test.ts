@@ -12,7 +12,7 @@ import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan, readWorkGraph } from "../src/work-materializer.js";
-import { workGraphPath } from "../src/global-plan.js";
+import { workItemGraphPath } from "../src/infra/paths.js";
 import { readTaskMeta } from "../src/storage/meta.js";
 import { makeTempRepo } from "./helpers.js";
 
@@ -34,7 +34,7 @@ describe("work materializer", () => {
     });
     fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
     fs.writeFileSync(
-      workGraphPath(paths, item.id),
+      workItemGraphPath(paths, item.id),
       JSON.stringify(
         {
           schemaVersion: 1,
@@ -84,7 +84,7 @@ describe("work materializer", () => {
       title: "Add API behavior"
     });
     fs.writeFileSync(
-      workGraphPath(paths, item.id),
+      workItemGraphPath(paths, item.id),
       JSON.stringify(
         {
           schemaVersion: 1,
@@ -118,7 +118,7 @@ describe("work materializer", () => {
       title: "Add API behavior"
     });
     fs.writeFileSync(
-      workGraphPath(paths, item.id),
+      workItemGraphPath(paths, item.id),
       JSON.stringify(
         {
           schemaVersion: 1,
@@ -183,7 +183,7 @@ describe("work materializer", () => {
       title: "Add API behavior"
     });
     fs.writeFileSync(
-      workGraphPath(paths, item.id),
+      workItemGraphPath(paths, item.id),
       JSON.stringify(
         {
           schemaVersion: 1,
@@ -223,7 +223,7 @@ describe("work materializer", () => {
     });
     fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
     fs.writeFileSync(
-      workGraphPath(paths, item.id),
+      workItemGraphPath(paths, item.id),
       JSON.stringify(
         {
           schemaVersion: 1,
@@ -263,7 +263,7 @@ describe("work materializer", () => {
       kind: "api"
     });
     fs.writeFileSync(
-      workGraphPath(paths, item.id),
+      workItemGraphPath(paths, item.id),
       JSON.stringify(
         {
           schemaVersion: 1,
@@ -285,7 +285,7 @@ describe("work materializer", () => {
       )
     );
 
-    await expect(materializeWorkPlan(paths, item)).rejects.toThrow("Run devtask work plan WORK-123 first");
+    await expect(materializeWorkPlan(paths, item)).rejects.toThrow("Run devtask work orchestrate WORK-123 first");
   });
 
   it("reports existing materialization before repo task preflight errors", async () => {
@@ -304,7 +304,7 @@ describe("work materializer", () => {
     });
     fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
     fs.writeFileSync(
-      workGraphPath(paths, item.id),
+      workItemGraphPath(paths, item.id),
       JSON.stringify(
         {
           schemaVersion: 1,

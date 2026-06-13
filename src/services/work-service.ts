@@ -10,17 +10,15 @@ import {
   workItemDir,
   workItemResultsDir,
   workItemReviewDir,
-  phaseRunDir,
-  workItemSpecPath
+  workItemRepoPlanPath,
+  workItemRepoPlansDir,
+  phaseRunDir
 } from "../infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
 import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun, type PhaseRun } from "../infra/phase-run.js";
 import { newRunId } from "../infra/run-record.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
-import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
-import { readWorkGraph } from "../work-materializer.js";
-import type { PlanRecord } from "../repo-plan.js";
-import { readLatestWorkPlanRecord, type WorkPlanRecord } from "../global-plan.js";
+import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization, readWorkGraph, type WorkGraphTask } from "../work-materializer.js";
 import {
   createJiraWorkItem,
   createManualWorkItem,
@@ -38,10 +36,12 @@ import { killTmuxSession, tmuxSessionExists } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
 import { launchPhaseFresh } from "../phases/runner.js";
 import type { PhaseConfig } from "../phases/types.js";
-import { specPhase } from "../phases/spec.js";
-import { planPhase } from "../phases/plan.js";
-import { repoPlanPhase } from "../phases/repo-plan.js";
+import { orchestratorPhase } from "../phases/orchestrator.js";
 import { reviewPhase } from "../phases/review.js";
+import { collectPhaseMemory } from "../improvement-memory.js";
+import { buildRepoPlanPrompt } from "../prompts/repo-plan.js";
+import { getWorkspaceRepo } from "../storage/workspace-repos.js";
+import type { WorkspaceRepo } from "../storage/workspace-repos.js";
 import {
   executePhase,
   freshExecuteWork,
@@ -113,26 +113,6 @@ export interface CiWorkResult {
   generatedAt: string;
 }
 
-export interface RepoPlanTaskResult {
-  repoId: string;
-  taskId: string;
-  status: PlanRecord["status"];
-  planPath: string;
-  outputPath: string;
-  worktreeChanged: boolean;
-}
-
-export interface WorkSpecResult {
-  runId: string;
-  workId: string;
-  status: "spec-ready" | "failed";
-  specPath: string;
-  promptPath: string;
-  outputPath: string;
-  exitCode: number | null;
-  generatedAt: string;
-  session: AgentSessionRef;
-}
 
 export interface ReviewTaskResult {
   repoId: string;
@@ -165,13 +145,6 @@ export interface PhaseLaunchResult {
   tmuxSession: string;
   promptPath: string;
   outputPath: string;
-}
-
-export interface RepoPlanWorkResult {
-  workId: string;
-  repoPlans: RepoPlanTaskResult[];
-  materialized: boolean;
-  generatedAt: string;
 }
 
 export type { ExecuteTaskResult, ExecuteWorkResult };
@@ -221,19 +194,17 @@ export function getWork(paths: DevtaskPaths, workId: string): WorkItem {
   return getWorkItem(paths, workId);
 }
 
-export function attachWorkPhase(paths: DevtaskPaths, phase: "spec" | "plan", workId: string): Promise<void>;
-export function attachWorkPhase(paths: DevtaskPaths, phase: "repo-plan" | "review" | "execute", workId: string, repoId: string): Promise<void>;
+export function attachWorkPhase(paths: DevtaskPaths, phase: "orchestrate", workId: string): Promise<void>;
+export function attachWorkPhase(paths: DevtaskPaths, phase: "review" | "execute", workId: string, repoId: string): Promise<void>;
 export async function attachWorkPhase(
   paths: DevtaskPaths,
-  phase: "spec" | "plan" | "repo-plan" | "review" | "execute",
+  phase: "orchestrate" | "review" | "execute",
   workId: string,
   repoId?: string
 ): Promise<void> {
   const scopeRepoId = repoId ?? null;
   switch (phase) {
-    case "spec": return specPhase.attach(paths, workId, null);
-    case "plan": return planPhase.attach(paths, workId, null);
-    case "repo-plan": return repoPlanPhase.attach(paths, workId, scopeRepoId);
+    case "orchestrate": return orchestratorPhase.attach(paths, workId, null);
     case "review": return reviewPhase.attach(paths, workId, scopeRepoId);
     case "execute": return executePhase.attach(paths, workId, scopeRepoId);
   }
@@ -241,13 +212,13 @@ export async function attachWorkPhase(
 
 export function sendWorkPhaseFeedback(
   paths: DevtaskPaths,
-  phase: "spec" | "plan",
+  phase: "orchestrate",
   workId: string,
   message: string
 ): Promise<PhaseLaunchResult>;
 export function sendWorkPhaseFeedback(
   paths: DevtaskPaths,
-  phase: "repo-plan" | "review",
+  phase: "review",
   workId: string,
   repoId: string,
   message: string
@@ -261,7 +232,7 @@ export function sendWorkPhaseFeedback(
 ): { confirmed: boolean; output: string };
 export function sendWorkPhaseFeedback(
   paths: DevtaskPaths,
-  phase: "spec" | "plan" | "repo-plan" | "review" | "execute",
+  phase: "orchestrate" | "review" | "execute",
   workId: string,
   repoOrMessage: string,
   maybeMessage?: string
@@ -272,9 +243,7 @@ export function sendWorkPhaseFeedback(
     return sendRawExecuteFeedback(paths, workId, repoId!, message);
   }
   switch (phase) {
-    case "spec": return specPhase.sendFeedback(paths, workId, null, message);
-    case "plan": return planPhase.sendFeedback(paths, workId, null, message);
-    case "repo-plan": return repoPlanPhase.sendFeedback(paths, workId, repoId, message);
+    case "orchestrate": return orchestratorPhase.sendFeedback(paths, workId, null, message);
     case "review": return reviewPhase.sendFeedback(paths, workId, repoId, message);
   }
 }
@@ -289,36 +258,91 @@ export async function executeWork(paths: DevtaskPaths, workId: string): Promise<
   return result;
 }
 
-type InteractivePhase = "spec" | "plan" | "repo-plan" | "review";
+type InteractivePhase = "orchestrate" | "review";
 
 const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
-  spec: specPhase,
-  plan: planPhase,
-  "repo-plan": repoPlanPhase,
+  orchestrate: orchestratorPhase,
   review: reviewPhase
 };
 
-export async function startSpecWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
-  return launchPhaseFresh(specPhase, paths, workId, "spec", null);
+export async function startOrchestrateWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
+  return launchPhaseFresh(orchestratorPhase, paths, workId, "orchestrate", null);
 }
 
-export async function startPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
-  return launchPhaseFresh(planPhase, paths, workId, "plan", null);
-}
-
-export async function startRepoPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult[]> {
-  const item = getWorkItem(paths, workId);
-  const planRecord = readLatestWorkPlanRecord(paths, workId);
-  if (!planRecord || planRecord.status !== "planned") {
-    throw new DevtaskError(`Global work plan is not ready for ${workId}. Run devtask work plan ${workId} first.`);
-  }
+export async function runRepoPlanWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
+  const config = readConfig(paths);
   const graph = readWorkGraph(paths, workId);
-  const launches: PhaseLaunchResult[] = [];
-  for (const graphTask of graph.tasks) {
-    launches.push(await startRepoPlanScope(paths, workId, graphTask.repoId));
+  const graphTask = graph.tasks.find((t) => t.repoId === repoId);
+  if (!graphTask) {
+    throw new DevtaskError(`No task found in graph for repo ${repoId} in work item ${workId}`);
   }
-  await updateRecentWork(paths, item);
-  return launches;
+  const repo = getWorkspaceRepo(paths, repoId);
+  const runId = newRunId();
+  const phaseDir = phaseRunDir(paths, workId, "repo-plan", repoId);
+  fs.mkdirSync(phaseDir, { recursive: true });
+  const promptPath = path.join(phaseDir, `${runId}.prompt.md`);
+  const outputPath = path.join(phaseDir, `${runId}.md`);
+  const runtimePrefix = path.join(repo.repoPath, `.devtask_repo_plan_${runId}`);
+  const runtimePlanPath = `${runtimePrefix}.md`;
+  const runtimeStatePath = `${runtimePrefix}.state.md`;
+  const resultPath = `${runtimePrefix}.result.json`;
+  const finalPlanPath = workItemRepoPlanPath(paths, workId, repoId);
+  const task = buildWorkerTaskDescription(workId, graphTask, repo);
+  const state = `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${workId}\n`;
+  const prompt = buildRepoPlanPrompt(
+    { id: graphTask.id },
+    runtimePlanPath,
+    finalPlanPath,
+    task,
+    state,
+    collectPhaseMemory(paths, "planning", { repoId })
+  );
+  fs.writeFileSync(promptPath, `${prompt}\n`);
+  const runner = createDefaultAgentRunner(config);
+  const startOptions = {
+    workspacePath: repo.repoPath,
+    model: config.codex.model,
+    fullAuto: config.codex.fullAuto,
+    skipGitRepoCheck: true,
+    addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
+    env: {
+      ...process.env,
+      DEVTASK_TASK_DIR: workItemDir(paths, workId),
+      DEVTASK_TASK_PATH: promptPath,
+      DEVTASK_PLAN_PATH: runtimePlanPath,
+      DEVTASK_STATE_PATH: runtimeStatePath,
+      DEVTASK_RESULT_PATH: resultPath
+    }
+  } as const;
+  const startedAt = new Date().toISOString();
+  const result = await runAgentPrompt(runner, startOptions, prompt, { outputPath });
+  const finishedAt = new Date().toISOString();
+  persistSharedRepoPlan(runtimePlanPath, finalPlanPath);
+  const blocked = readResultStatus(resultPath) === "blocked";
+  removeIfExists(runtimePlanPath);
+  removeIfExists(runtimeStatePath);
+  removeIfExists(resultPath);
+  const planExists = fs.existsSync(finalPlanPath) && fs.readFileSync(finalPlanPath, "utf8").trim().length > 0;
+  const status = planExists ? (blocked ? "blocked" : "planned") : "failed";
+  writePhaseRunRecord(phaseDir, {
+    schemaVersion: 1,
+    phase: "repo-plan",
+    runId,
+    workId,
+    repoId,
+    taskId: graphTask.id,
+    status,
+    promptPath,
+    outputPath,
+    startedAt,
+    finishedAt,
+    session: result.session,
+    artifacts: { planPath: finalPlanPath },
+    exitCode: status !== "failed" ? 0 : null
+  });
+  if (status === "failed") {
+    throw new DevtaskError(`Repo-plan worker failed for ${repoId}`);
+  }
 }
 
 export async function startReviewWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult[]> {
@@ -328,10 +352,6 @@ export async function startReviewWork(paths: DevtaskPaths, workId: string): Prom
     launches.push(await startReviewScope(paths, workId, task.repoId));
   }
   return launches;
-}
-
-export async function startRepoPlanScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
-  return launchPhaseFresh(repoPlanPhase, paths, workId, "repo-plan", repoId);
 }
 
 export async function startReviewScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
@@ -364,7 +384,8 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
   const sharedReviewPath = path.join(archiveDir, "review.md");
   const sharedPatternsPath = path.join(archiveDir, "patterns.md");
   const localNotesPath = path.join(localArchiveDir, "notes.md");
-  const specPath = fs.existsSync(workItemSpecPath(paths, workId)) ? workItemSpecPath(paths, workId) : null;
+  const specFile = path.join(paths.workDir, workId, "spec.md");
+  const specPath = fs.existsSync(specFile) ? specFile : null;
   const planPath = fs.existsSync(path.join(paths.workDir, workId, "plan.md")) ? path.join(paths.workDir, workId, "plan.md") : null;
   const graphPath = fs.existsSync(path.join(paths.workDir, workId, "graph.json")) ? path.join(paths.workDir, workId, "graph.json") : null;
   const prompt = buildCompoundPrompt({
@@ -447,8 +468,34 @@ export function getWorkMaterializationState(paths: DevtaskPaths, workId: string)
   return readWorkMaterialization(paths, workId);
 }
 
-export function readWorkPlanRecord(paths: DevtaskPaths, workId: string): WorkPlanRecord | null {
-  return readLatestWorkPlanRecord(paths, workId);
+export interface OrchestrateRecord {
+  runId: string;
+  workId: string;
+  status: "planned" | "failed";
+  finishedAt: string;
+}
+
+export function readOrchestrateRecord(paths: DevtaskPaths, workId: string): OrchestrateRecord | null {
+  const runsDir = phaseRunDir(paths, workId, "orchestrate", null);
+  if (!fs.existsSync(runsDir)) return null;
+  const latest = fs
+    .readdirSync(runsDir)
+    .filter((f) => f.endsWith(".json") && f !== "running.json")
+    .sort()
+    .at(-1);
+  if (!latest) return null;
+  const run = JSON.parse(fs.readFileSync(path.join(runsDir, latest), "utf8")) as {
+    runId: string;
+    workId: string;
+    status: string;
+    finishedAt: string;
+  };
+  return {
+    runId: run.runId,
+    workId: run.workId,
+    status: run.status === "planned" ? "planned" : "failed",
+    finishedAt: run.finishedAt
+  };
 }
 
 export async function cleanupWork(paths: DevtaskPaths, workId: string, options: WorkCleanupOptions = {}): Promise<WorkCleanupResult> {
@@ -559,9 +606,7 @@ async function hydratePhaseSession(
 
 function phaseWorkItemStatus(phase: InteractivePhase, status: string): WorkItemStatus | null {
   switch (phase) {
-    case "spec": return status === "spec-ready" ? "spec-ready" : "failed";
-    case "plan": return status === "planned" ? "planned" : "failed";
-    case "repo-plan": return status === "failed" ? "failed" : "planned";
+    case "orchestrate": return status === "planned" ? "planned" : "failed";
     case "review": return null;
   }
 }
@@ -820,5 +865,56 @@ function buildPullRequestBody(item: WorkItem, repoId: string): string {
     "",
     "Created by devtask."
   ].join("\n");
+}
+
+function buildWorkerTaskDescription(workId: string, graphTask: WorkGraphTask, repo: WorkspaceRepo): string {
+  return [
+    `# Task ${graphTask.id}`,
+    "",
+    "## Goal",
+    graphTask.goal,
+    "",
+    "## Work Item",
+    `- id: ${workId}`,
+    `- repo id: ${repo.id}`,
+    `- repo path: ${repo.repoPath}`,
+    `- repo scope: ${repo.scope ?? "."}`,
+    "",
+    "## Ownership",
+    ...(graphTask.owns.length > 0 ? graphTask.owns.map((e) => `- ${e}`) : ["- none"]),
+    "",
+    "## Dependencies",
+    ...(graphTask.dependencies.length > 0
+      ? graphTask.dependencies.map((d) => `- ${d.task} (${d.type})${d.reason != null ? `: ${d.reason}` : ""}`)
+      : ["- none"])
+  ].join("\n");
+}
+
+function persistSharedRepoPlan(runtimePlanPath: string, finalPlanPath: string): void {
+  try {
+    const plan = fs.readFileSync(runtimePlanPath, "utf8").trim();
+    if (!plan) return;
+    fs.mkdirSync(path.dirname(finalPlanPath), { recursive: true });
+    fs.writeFileSync(finalPlanPath, `${plan}\n`);
+  } catch {
+    // no runtime plan to persist
+  }
+}
+
+function readResultStatus(resultPath: string): string {
+  try {
+    const value = JSON.parse(fs.readFileSync(resultPath, "utf8")) as { status?: unknown };
+    return typeof value.status === "string" ? value.status : "pending";
+  } catch {
+    return "pending";
+  }
+}
+
+function removeIfExists(filePath: string): void {
+  try {
+    fs.unlinkSync(filePath);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
 }
 

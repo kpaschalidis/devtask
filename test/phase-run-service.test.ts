@@ -13,26 +13,26 @@ describe("phase run service", () => {
     const paths = resolveWorkspacePathsForInit(workspace);
     initializeWorkspace(paths);
 
-    writePhaseRunRecord(phaseRunDir(paths, "WORK-1", "spec", null), {
+    writePhaseRunRecord(phaseRunDir(paths, "WORK-1", "orchestrate", null), {
       schemaVersion: 1,
-      phase: "spec",
+      phase: "orchestrate",
       runId: "2026-01-01T00-00-00-000Z",
       workId: "WORK-1",
       repoId: null,
       taskId: null,
-      status: "spec-ready",
-      promptPath: "/tmp/spec.prompt.md",
-      outputPath: "/tmp/spec.output.md",
+      status: "planned",
+      promptPath: "/tmp/orchestrate.prompt.md",
+      outputPath: "/tmp/orchestrate.output.md",
       startedAt: "2026-01-01T00:00:00.000Z",
       finishedAt: "2026-01-01T00:00:02.000Z",
       session: {
         provider: "codex",
-        transportId: "tmux-spec",
-        resumeContext: { providerSessionId: "agent-spec", conversationId: "thread-spec", resumeTarget: "agent-spec", storageRoot: null, transcriptPath: null },
-        summary: "spec complete",
+        transportId: "tmux-orchestrate",
+        resumeContext: { providerSessionId: "agent-orchestrate", conversationId: "thread-orchestrate", resumeTarget: "agent-orchestrate", storageRoot: null, transcriptPath: null },
+        summary: "orchestrate complete",
         summaryIsFallback: false
       },
-      artifacts: { specPath: "/tmp/spec.md" },
+      artifacts: { planPath: "/tmp/plan.md", graphPath: "/tmp/graph.json" },
       exitCode: 0
     });
     writePhaseRunRecord(phaseRunDir(paths, "WORK-1", "repo-plan", "backend"), {
@@ -90,7 +90,7 @@ describe("phase run service", () => {
     ]);
     expect(runs[0]?.repoId).toBe("frontend");
     expect(runs[1]?.taskId).toBe("work-1-backend");
-    expect(runs[2]?.artifacts.specPath).toBe("/tmp/spec.md");
+    expect(runs[2]?.artifacts.planPath).toBe("/tmp/plan.md");
   });
 
   it("filters latest runs by phase and repo", () => {

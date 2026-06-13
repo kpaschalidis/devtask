@@ -12,7 +12,7 @@ import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan } from "../src/work-materializer.js";
-import { workGraphPath } from "../src/global-plan.js";
+import { workItemGraphPath } from "../src/infra/paths.js";
 import { readTaskMeta, writeTaskMeta } from "../src/storage/meta.js";
 import { inspectWork } from "../src/services/work-inspection-service.js";
 import { makeTempRepo } from "./helpers.js";
@@ -35,7 +35,7 @@ describe("work inspection service", () => {
     fs.writeFileSync(path.join(paths.workDir, item.id, "spec.md"), "# Spec\n");
     fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
     fs.writeFileSync(
-      workGraphPath(paths, item.id),
+      workItemGraphPath(paths, item.id),
       JSON.stringify(
         {
           schemaVersion: 1,

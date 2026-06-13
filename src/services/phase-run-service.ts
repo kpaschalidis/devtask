@@ -33,7 +33,7 @@ export function listWorkPhaseSessions(paths: DevtaskPaths, workId: string): Phas
   }
 
   const entries: PhaseSessionSummary[] = [];
-  const managedPhases: PhaseRunPhase[] = ["spec", "plan", "repo-plan", "review", "execute"];
+  const managedPhases: PhaseRunPhase[] = ["orchestrate", "repo-plan", "review", "execute"];
   for (const phase of managedPhases) {
     const phaseDir = path.join(base, phase);
     if (!fs.existsSync(phaseDir)) {
@@ -78,7 +78,7 @@ export interface ListWorkPhaseRunsOptions {
   latest?: boolean;
 }
 
-const PHASES: PhaseRunPhase[] = ["spec", "plan", "repo-plan", "execute", "review", "compound"];
+const PHASES: PhaseRunPhase[] = ["orchestrate", "repo-plan", "execute", "review", "compound"];
 
 export function listWorkPhaseRuns(
   paths: DevtaskPaths,
