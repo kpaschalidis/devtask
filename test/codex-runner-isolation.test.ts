@@ -142,7 +142,7 @@ describe("codex runner isolation", () => {
       "Plan work item WORK-123."
     );
 
-    expect(fs.existsSync(path.join(start.session.storageRoot!, "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(start.session.resumeContext.storageRoot!, "hooks.json"))).toBe(true);
     expect(start.command).toContain("--dangerously-bypass-hook-trust");
   });
 
@@ -153,15 +153,18 @@ describe("codex runner isolation", () => {
     const session = {
       provider: "codex" as const,
       transportId: null,
-      providerSessionId: "thread-123",
-      conversationId: "thread-123",
-      resumeTarget: "thread-123",
-      storageRoot: codexHome,
-      transcriptPath: null,
+      resumeContext: {
+        providerSessionId: "thread-123",
+        conversationId: "thread-123",
+        resumeTarget: "thread-123",
+        storageRoot: codexHome,
+        transcriptPath: null
+      },
       summary: null,
       summaryIsFallback: null
     };
 
+    runner.installCompletionHook(session, "devtask work _phase-finalize-hook plan WORK-123 run-2");
     const managed = runner.buildInteractiveResumeCommand(session, {
       workspacePath: taskDir,
       model: "gpt-5",
@@ -171,6 +174,7 @@ describe("codex runner isolation", () => {
     expect(managed).toContain("codex resume --dangerously-bypass-hook-trust");
     expect(fs.readFileSync(path.join(codexHome, "hooks.json"), "utf8")).toContain("_phase-finalize-hook plan WORK-123 run-2");
 
+    runner.installCompletionHook(session, null);
     const unmanaged = runner.buildInteractiveResumeCommand(session, {
       workspacePath: taskDir,
       model: "gpt-5",

@@ -61,6 +61,7 @@ export interface AgentRunner {
   buildInteractiveStartCommand?(options: AgentStartOptions, prompt: string): Promise<{ command: string; session: AgentSessionRef }> | { command: string; session: AgentSessionRef };
   buildResumeCommand?(session: AgentSessionRef, options: AgentResumeOptions): string | null;
   buildInteractiveResumeCommand?(session: AgentSessionRef, options: AgentResumeOptions): string | null;
+  installCompletionHook?(session: AgentSessionRef, command: string | null): void;
   hydrateSessionRef?(session: AgentSessionRef, workspacePath: string): Promise<AgentSessionRef>;
 }
 
@@ -153,11 +154,13 @@ export async function runAgentPrompt(
       session: {
         provider: session.provider,
         transportId: session.id ?? null,
-        providerSessionId: session.providerSessionId ?? null,
-        conversationId: session.conversationId ?? null,
-        resumeTarget: session.resumeTarget ?? null,
-        storageRoot: session.storageRoot ?? null,
-        transcriptPath: session.transcriptPath ?? null,
+        resumeContext: {
+          providerSessionId: session.providerSessionId ?? null,
+          conversationId: session.conversationId ?? null,
+          resumeTarget: session.resumeTarget ?? null,
+          storageRoot: session.storageRoot ?? null,
+          transcriptPath: session.transcriptPath ?? null
+        },
         summary: sessionInfo?.summary ?? null,
         summaryIsFallback: sessionInfo?.summaryIsFallback ?? null
       }
@@ -257,14 +260,15 @@ export async function resumeAgentPrompt(
   clearInterval(stallTimer);
 
   try {
+    const ctx = session.resumeContext;
     const pseudoHandle: SessionHandle = {
-      id: session.transportId ?? session.resumeTarget ?? session.providerSessionId ?? session.conversationId ?? "resume",
+      id: session.transportId ?? ctx.resumeTarget ?? ctx.providerSessionId ?? ctx.conversationId ?? "resume",
       provider: session.provider,
-      providerSessionId: session.providerSessionId,
-      conversationId: session.conversationId,
-      resumeTarget: session.resumeTarget,
-      storageRoot: session.storageRoot,
-      transcriptPath: session.transcriptPath
+      providerSessionId: ctx.providerSessionId,
+      conversationId: ctx.conversationId,
+      resumeTarget: ctx.resumeTarget,
+      storageRoot: ctx.storageRoot,
+      transcriptPath: ctx.transcriptPath
     };
     const sessionInfo = await runner.getSessionInfo?.(pseudoHandle);
     await closeStream(output);

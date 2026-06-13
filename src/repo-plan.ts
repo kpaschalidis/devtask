@@ -1,10 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { planMarkdownPath, taskDir, taskMetaPath, workItemRepoPhaseRunsDir, workItemSessionRegistryDir } from "./infra/paths.js";
+import { planMarkdownPath, taskDir, taskMetaPath, workItemRepoPhaseRunsDir } from "./infra/paths.js";
 import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "./agent.js";
 import type { AgentSessionRef } from "./agent-session.js";
-import { writeAgentSessionRegistryEntry } from "./infra/agent-session-registry.js";
 import { writePhaseRunRecord, type PhaseRunSessionMetadata } from "./infra/phase-run.js";
 import { collectPhaseMemory } from "./improvement-memory.js";
 import { newRunId } from "./infra/run-record.js";
@@ -192,18 +191,6 @@ export async function runPlanAgent(
       planPath
     },
     exitCode: result.status === "completed" ? 0 : null
-  });
-  writeAgentSessionRegistryEntry(workItemSessionRegistryDir(context.workspacePaths, context.workId), {
-    schemaVersion: 1,
-    runId: planId,
-    workId: context.workId,
-    phase: "repo-plan",
-    repoId: context.repoId,
-    taskId: meta.id,
-    status,
-    startedAt,
-    finishedAt,
-    session: result.session
   });
   writeTaskMeta(taskMetaPath(paths, meta.id), {
     ...readTaskMeta(taskMetaPath(paths, meta.id)),

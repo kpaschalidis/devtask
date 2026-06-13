@@ -14,23 +14,29 @@ vi.mock("../src/agent.js", async (importOriginal) => {
         session: {
           provider: "codex",
           transportId: null,
-          providerSessionId: null,
-          conversationId: null,
-          resumeTarget: null,
-          storageRoot: "/tmp/codex-home",
-          transcriptPath: null,
+          resumeContext: {
+            providerSessionId: null,
+            conversationId: null,
+            resumeTarget: null,
+            storageRoot: "/tmp/codex-home",
+            transcriptPath: null
+          },
           summary: null,
           summaryIsFallback: null
         }
       })),
       buildResumeCommand: () => "fake-agent-resume",
       buildInteractiveResumeCommand: vi.fn(() => "fake-agent-interactive-resume"),
+      installCompletionHook: vi.fn(),
       hydrateSessionRef: vi.fn(async (session) => ({
         ...session,
-        providerSessionId: session.providerSessionId ?? "agent-123",
-        conversationId: session.conversationId ?? "thread-123",
-        resumeTarget: session.resumeTarget ?? "agent-123",
-        transcriptPath: session.transcriptPath ?? "/tmp/codex-home/sessions/spec.jsonl",
+        resumeContext: {
+          ...session.resumeContext,
+          providerSessionId: session.resumeContext?.providerSessionId ?? "agent-123",
+          conversationId: session.resumeContext?.conversationId ?? "thread-123",
+          resumeTarget: session.resumeContext?.resumeTarget ?? "agent-123",
+          transcriptPath: session.resumeContext?.transcriptPath ?? "/tmp/codex-home/sessions/spec.jsonl"
+        },
         summary: "hydrated session",
         summaryIsFallback: false
       }))
@@ -111,11 +117,13 @@ describe("work phase feedback", () => {
       session: {
         provider: "codex",
         transportId: "old-session",
-        providerSessionId: "agent-123",
-        conversationId: "thread-123",
-        resumeTarget: "agent-123",
-        storageRoot: "/tmp/codex-home",
-        transcriptPath: "/tmp/codex-home/sessions/spec.jsonl",
+        resumeContext: {
+          providerSessionId: "agent-123",
+          conversationId: "thread-123",
+          resumeTarget: "agent-123",
+          storageRoot: "/tmp/codex-home",
+          transcriptPath: "/tmp/codex-home/sessions/spec.jsonl"
+        },
         summary: "spec complete",
         summaryIsFallback: false
       }
@@ -171,11 +179,13 @@ describe("work phase feedback", () => {
       session: {
         provider: "codex",
         transportId: "still-there",
-        providerSessionId: "agent-123",
-        conversationId: "thread-123",
-        resumeTarget: "agent-123",
-        storageRoot: null,
-        transcriptPath: null,
+        resumeContext: {
+          providerSessionId: "agent-123",
+          conversationId: "thread-123",
+          resumeTarget: "agent-123",
+          storageRoot: null,
+          transcriptPath: null
+        },
         summary: "done",
         summaryIsFallback: false
       }
@@ -215,11 +225,13 @@ describe("work phase feedback", () => {
       session: {
         provider: "codex",
         transportId: "old-session",
-        providerSessionId: "agent-123",
-        conversationId: "thread-123",
-        resumeTarget: "agent-123",
-        storageRoot: "/tmp/codex-home",
-        transcriptPath: "/tmp/codex-home/sessions/spec.jsonl",
+        resumeContext: {
+          providerSessionId: "agent-123",
+          conversationId: "thread-123",
+          resumeTarget: "agent-123",
+          storageRoot: "/tmp/codex-home",
+          transcriptPath: "/tmp/codex-home/sessions/spec.jsonl"
+        },
         summary: "spec complete",
         summaryIsFallback: false
       }
@@ -295,11 +307,13 @@ describe("work phase feedback", () => {
       session: {
         provider: "codex",
         transportId: "devtask-test-spec-WORK-123",
-        providerSessionId: null,
-        conversationId: null,
-        resumeTarget: null,
-        storageRoot: "/tmp/codex-home",
-        transcriptPath: null,
+        resumeContext: {
+          providerSessionId: null,
+          conversationId: null,
+          resumeTarget: null,
+          storageRoot: "/tmp/codex-home",
+          transcriptPath: null
+        },
         summary: null,
         summaryIsFallback: null
       }
@@ -310,7 +324,7 @@ describe("work phase feedback", () => {
 
     expect(getLatestWorkPhaseRun(paths, item.id, "spec")?.status).toBe("spec-ready");
     expect(readScopedPhaseSession(paths, item.id, "spec")?.status).toBe("completed");
-    expect(readScopedPhaseSession(paths, item.id, "spec")?.session.providerSessionId).toBe("agent-123");
+    expect(readScopedPhaseSession(paths, item.id, "spec")?.session.resumeContext.providerSessionId).toBe("agent-123");
     expect(tmux.killTmuxSession).toHaveBeenCalledWith("devtask-test-spec-WORK-123");
   });
 
@@ -339,11 +353,13 @@ describe("work phase feedback", () => {
       session: {
         provider: "codex",
         transportId: "devtask-test-spec-WORK-123",
-        providerSessionId: null,
-        conversationId: null,
-        resumeTarget: null,
-        storageRoot: "/tmp/codex-home",
-        transcriptPath: null,
+        resumeContext: {
+          providerSessionId: null,
+          conversationId: null,
+          resumeTarget: null,
+          storageRoot: "/tmp/codex-home",
+          transcriptPath: null
+        },
         summary: null,
         summaryIsFallback: null
       }

@@ -239,8 +239,20 @@ export function workItemLocalDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.localDir, "work", id);
 }
 
+export const GLOBAL_PHASES = new Set(["spec", "plan"]);
+
+export function phaseRunDir(
+  paths: DevtaskPaths,
+  workId: string,
+  phase: string,
+  repoId: string | null
+): string {
+  const base = path.join(workItemLocalDir(paths, workId), "phases", phase);
+  return GLOBAL_PHASES.has(phase) || !repoId ? base : path.join(base, repoId);
+}
+
 export function workItemPhaseSessionsDir(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemLocalDir(paths, id), "phase-sessions");
+  return path.join(workItemLocalDir(paths, id), "phases");
 }
 
 export function workItemScopedPhaseSessionDir(
@@ -249,11 +261,7 @@ export function workItemScopedPhaseSessionDir(
   phase: "spec" | "plan" | "repo-plan" | "review" | "execute",
   repoId?: string | null
 ): string {
-  const base = path.join(workItemPhaseSessionsDir(paths, workId), phase);
-  if (phase === "spec" || phase === "plan") {
-    return base;
-  }
-  return path.join(base, repoId ?? "-");
+  return phaseRunDir(paths, workId, phase, repoId ?? null);
 }
 
 export function workItemLocalStatePath(paths: DevtaskPaths, id: string): string {
@@ -273,15 +281,15 @@ export function workItemPlanRunsDir(paths: DevtaskPaths, id: string): string {
 }
 
 export function workItemPhaseRunsDir(paths: DevtaskPaths, id: string, phase: string): string {
-  return path.join(workItemLocalDir(paths, id), "phase-runs", phase);
+  return phaseRunDir(paths, id, phase, null);
 }
 
 export function workItemRepoPhaseRunsDir(paths: DevtaskPaths, id: string, phase: string, repoId: string): string {
-  return path.join(workItemPhaseRunsDir(paths, id, phase), repoId);
+  return phaseRunDir(paths, id, phase, repoId);
 }
 
 export function workItemSessionRegistryDir(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemLocalDir(paths, id), "sessions");
+  return path.join(workItemLocalDir(paths, id), "phases");
 }
 
 export function readWorkspaceMarker(root: string): WorkspaceMarker {

@@ -80,13 +80,15 @@ vi.mock("../src/agent.js", async (importOriginal) => {
         session: {
           provider: "codex",
           transportId: `session-${phaseLabel}`,
-          providerSessionId: `agent-${phaseLabel}`,
-          conversationId: `thread-${phaseLabel}`,
-          resumeTarget: `agent-${phaseLabel}`,
+          resumeContext: {
+            providerSessionId: `agent-${phaseLabel}`,
+            conversationId: `thread-${phaseLabel}`,
+            resumeTarget: `agent-${phaseLabel}`,
+            storageRoot: `/tmp/codex-home-${phaseLabel}`,
+            transcriptPath: `/tmp/codex-home-${phaseLabel}/sessions/${phaseLabel}.jsonl`
+          },
           summary: `${phaseLabel} complete`,
-          summaryIsFallback: false,
-          storageRoot: `/tmp/codex-home-${phaseLabel}`,
-          transcriptPath: `/tmp/codex-home-${phaseLabel}/sessions/${phaseLabel}.jsonl`
+          summaryIsFallback: false
         }
       };
     })
@@ -143,20 +145,20 @@ describe("agent phase session metadata", () => {
     const reviewRun = getLatestWorkPhaseRun(paths, item.id, "review", "backend");
     const sessionEntries = listWorkAgentSessions(paths, item.id, { latest: true });
 
-    expect(specRun?.session.storageRoot).toBe("/tmp/codex-home-spec");
-    expect(specRun?.session.transcriptPath).toBe("/tmp/codex-home-spec/sessions/spec.jsonl");
-    expect(planRun?.session.storageRoot).toBe("/tmp/codex-home-plan");
-    expect(planRun?.session.transcriptPath).toBe("/tmp/codex-home-plan/sessions/plan.jsonl");
-    expect(repoPlanRun?.session.storageRoot).toBe("/tmp/codex-home-repo-plan");
-    expect(repoPlanRun?.session.transcriptPath).toBe("/tmp/codex-home-repo-plan/sessions/repo-plan.jsonl");
-    expect(reviewRun?.session.storageRoot).toBe("/tmp/codex-home-review");
-    expect(reviewRun?.session.transcriptPath).toBe("/tmp/codex-home-review/sessions/review.jsonl");
+    expect(specRun?.session.resumeContext.storageRoot).toBe("/tmp/codex-home-spec");
+    expect(specRun?.session.resumeContext.transcriptPath).toBe("/tmp/codex-home-spec/sessions/spec.jsonl");
+    expect(planRun?.session.resumeContext.storageRoot).toBe("/tmp/codex-home-plan");
+    expect(planRun?.session.resumeContext.transcriptPath).toBe("/tmp/codex-home-plan/sessions/plan.jsonl");
+    expect(repoPlanRun?.session.resumeContext.storageRoot).toBe("/tmp/codex-home-repo-plan");
+    expect(repoPlanRun?.session.resumeContext.transcriptPath).toBe("/tmp/codex-home-repo-plan/sessions/repo-plan.jsonl");
+    expect(reviewRun?.session.resumeContext.storageRoot).toBe("/tmp/codex-home-review");
+    expect(reviewRun?.session.resumeContext.transcriptPath).toBe("/tmp/codex-home-review/sessions/review.jsonl");
 
-    expect(specRun?.session.conversationId).toBe("thread-spec");
-    expect(planRun?.session.conversationId).toBe("thread-plan");
-    expect(repoPlanRun?.session.conversationId).toBe("thread-repo-plan");
-    expect(reviewRun?.session.conversationId).toBe("thread-review");
+    expect(specRun?.session.resumeContext.conversationId).toBe("thread-spec");
+    expect(planRun?.session.resumeContext.conversationId).toBe("thread-plan");
+    expect(repoPlanRun?.session.resumeContext.conversationId).toBe("thread-repo-plan");
+    expect(reviewRun?.session.resumeContext.conversationId).toBe("thread-review");
     expect(sessionEntries).toHaveLength(4);
-    expect(sessionEntries.find((entry) => entry.phase === "repo-plan")?.session.resumeTarget).toBe("agent-repo-plan");
+    expect(sessionEntries.find((entry) => entry.phase === "repo-plan")?.session.resumeContext.resumeTarget).toBe("agent-repo-plan");
   });
 });

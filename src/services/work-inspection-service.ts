@@ -74,7 +74,7 @@ export function inspectWork(paths: DevtaskPaths, workId: string): WorkInspection
     artifact("materialization", workItemMaterializationPath(paths, workId)),
     artifact("results", workItemResultsDir(paths, workId)),
     artifact("reviews", workItemReviewDir(paths, workId)),
-    artifact("phase-runs", path.join(workItemLocalDir(paths, workId), "phase-runs"))
+    artifact("phases", path.join(workItemLocalDir(paths, workId), "phases"))
   ];
 
   const latestPhaseRuns = listWorkPhaseRuns(paths, workId, { latest: true }).map((run) => ({
@@ -87,12 +87,12 @@ export function inspectWork(paths: DevtaskPaths, workId: string): WorkInspection
     filePath: run.filePath,
     provider: run.session.provider,
     transportId: run.session.transportId,
-    conversationId: run.session.conversationId,
-    providerSessionId: run.session.providerSessionId,
-    resumeTarget: run.session.resumeTarget,
+    conversationId: run.session.resumeContext.conversationId ?? null,
+    providerSessionId: run.session.resumeContext.providerSessionId ?? null,
+    resumeTarget: run.session.resumeContext.resumeTarget ?? null,
     summary: run.session.summary,
-    storageRoot: run.session.storageRoot ?? null,
-    transcriptPath: run.session.transcriptPath ?? null,
+    storageRoot: run.session.resumeContext.storageRoot ?? null,
+    transcriptPath: run.session.resumeContext.transcriptPath ?? null,
     artifacts: run.artifacts
   }));
   const livePhaseSessions = listWorkPhaseSessions(paths, workId)

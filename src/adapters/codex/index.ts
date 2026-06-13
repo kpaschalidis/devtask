@@ -90,34 +90,39 @@ export class CodexAgentRunner implements AgentRunner {
   }
 
   buildResumeCommand(session: AgentSessionRef, options: { workspacePath: string; model?: string | null; prompt?: string | null }): string | null {
-    const sessionId = session.resumeTarget ?? session.providerSessionId ?? session.conversationId;
+    const ctx = session.resumeContext;
+    const sessionId = ctx.resumeTarget ?? ctx.providerSessionId ?? ctx.conversationId;
     if (!sessionId) {
       return null;
     }
 
     return buildCodexResumeCommand(sessionId, {
-      codexHome: session.storageRoot,
+      codexHome: ctx.storageRoot ?? null,
       model: options.model ?? this.config.model ?? null,
       prompt: options.prompt ?? null
     });
   }
 
   buildInteractiveResumeCommand(session: AgentSessionRef, options: AgentResumeOptions): string | null {
-    const sessionId = session.resumeTarget ?? session.providerSessionId ?? session.conversationId;
+    const ctx = session.resumeContext;
+    const sessionId = ctx.resumeTarget ?? ctx.providerSessionId ?? ctx.conversationId;
     if (!sessionId) {
       return null;
     }
-    if (options.managedCompletionCommand?.trim() && !session.storageRoot?.trim()) {
+    if (options.managedCompletionCommand?.trim() && !ctx.storageRoot?.trim()) {
       return null;
     }
-    configureManagedHooks(session.storageRoot ?? null, options.managedCompletionCommand ?? null);
 
     return buildCodexInteractiveResumeCommand(sessionId, {
-      codexHome: session.storageRoot,
+      codexHome: ctx.storageRoot ?? null,
       model: options.model ?? this.config.model ?? DEFAULT_INTERACTIVE_MODEL,
       prompt: options.prompt ?? null,
       bypassHookTrust: Boolean(options.managedCompletionCommand?.trim())
     });
+  }
+
+  installCompletionHook(session: AgentSessionRef, command: string | null): void {
+    configureManagedHooks(session.resumeContext.storageRoot ?? null, command);
   }
 
   buildInteractiveStartCommand(options: AgentStartOptions, prompt: string): { command: string; session: AgentSessionRef } {
@@ -136,11 +141,13 @@ export class CodexAgentRunner implements AgentRunner {
       session: {
         provider: "codex",
         transportId: null,
-        providerSessionId: null,
-        conversationId: null,
-        resumeTarget: null,
-        storageRoot: codexHomePath,
-        transcriptPath: null,
+        resumeContext: {
+          providerSessionId: null,
+          conversationId: null,
+          resumeTarget: null,
+          storageRoot: codexHomePath,
+          transcriptPath: null
+        },
         summary: null,
         summaryIsFallback: null
       }
@@ -148,12 +155,13 @@ export class CodexAgentRunner implements AgentRunner {
   }
 
   async hydrateSessionRef(session: AgentSessionRef, workspacePath: string): Promise<AgentSessionRef> {
-    if (!session.storageRoot?.trim()) {
+    const ctx = session.resumeContext;
+    if (!ctx.storageRoot?.trim()) {
       return session;
     }
 
-    const sessionsDir = join(session.storageRoot, "sessions");
-    const transcriptPath = session.transcriptPath ?? await findSessionFileCached(sessionsDir, workspacePath);
+    const sessionsDir = join(ctx.storageRoot, "sessions");
+    const transcriptPath = ctx.transcriptPath ?? await findSessionFileCached(sessionsDir, workspacePath);
     if (!transcriptPath) {
       return session;
     }
@@ -162,12 +170,15 @@ export class CodexAgentRunner implements AgentRunner {
     const summary = await extractAssistantSummary(transcriptPath);
     return {
       ...session,
-      transcriptPath,
-      providerSessionId: session.providerSessionId ?? threadId,
-      conversationId: session.conversationId ?? threadId,
-      resumeTarget: session.resumeTarget ?? threadId,
       summary: summary ?? session.summary ?? (threadId ? "Codex session completed" : null),
-      summaryIsFallback: summary ? false : session.summaryIsFallback ?? (threadId ? true : null)
+      summaryIsFallback: summary ? false : session.summaryIsFallback ?? (threadId ? true : null),
+      resumeContext: {
+        ...ctx,
+        transcriptPath,
+        providerSessionId: ctx.providerSessionId ?? threadId,
+        conversationId: ctx.conversationId ?? threadId,
+        resumeTarget: ctx.resumeTarget ?? threadId
+      }
     };
   }
 

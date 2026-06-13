@@ -80,7 +80,7 @@ function readRunFiles(dir: string): PhaseRunSummary[] {
 
   return fs
     .readdirSync(dir)
-    .filter((entry) => entry.endsWith(".json"))
+    .filter((entry) => entry.endsWith(".json") && entry !== "running.json")
     .sort()
     .map((entry) => {
       const filePath = path.join(dir, entry);
@@ -96,5 +96,5 @@ function compareRunsDesc(left: PhaseRunSummary, right: PhaseRunSummary): number 
 }
 
 export function hasWorkPhaseRuns(paths: DevtaskPaths, workId: string): boolean {
-  return fs.existsSync(path.join(workItemLocalDir(paths, workId), "phase-runs"));
+  return fs.existsSync(path.join(workItemLocalDir(paths, workId), "phases"));
 }

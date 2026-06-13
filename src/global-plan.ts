@@ -3,9 +3,8 @@ import path from "node:path";
 import type { DevtaskConfig } from "./infra/config.js";
 import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "./agent.js";
 import type { AgentSessionRef } from "./agent-session.js";
-import { writeAgentSessionRegistryEntry } from "./infra/agent-session-registry.js";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { workItemDir, workItemPhaseRunsDir, workItemPlanRunsDir, workItemSessionRegistryDir, workItemSpecPath } from "./infra/paths.js";
+import { workItemDir, workItemPhaseRunsDir, workItemPlanRunsDir, workItemSpecPath } from "./infra/paths.js";
 import { emptyPhaseRunSessionMetadata, writePhaseRunRecord } from "./infra/phase-run.js";
 import { collectPhaseMemory } from "./improvement-memory.js";
 import { newRunId } from "./infra/run-record.js";
@@ -167,18 +166,6 @@ export async function runWorkPlanner(
       graphPath
     },
     exitCode: result.status === "completed" ? 0 : null
-  });
-  writeAgentSessionRegistryEntry(workItemSessionRegistryDir(paths, workItem.id), {
-    schemaVersion: 1,
-    runId: planId,
-    workId: workItem.id,
-    phase: "plan",
-    repoId: null,
-    taskId: null,
-    status,
-    startedAt,
-    finishedAt,
-    session: result.session
   });
   return record;
 }

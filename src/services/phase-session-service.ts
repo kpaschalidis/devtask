@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { emptyAgentSessionRef, type AgentSessionRef } from "../agent-session.js";
+import type { AgentSessionRef } from "../agent-session.js";
 import { DevtaskError } from "../infra/errors.js";
-import { readPhaseSessionRecord, type PhaseSessionRecord, writePhaseSessionRecord } from "../infra/phase-session.js";
+import { readRunningPhaseRun, updateRunningPhaseRun, writeRunningPhaseRun, type PhaseRun } from "../infra/phase-run.js";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { taskStoragePaths, taskMetaPath, workItemScopedPhaseSessionDir } from "../infra/paths.js";
+import { GLOBAL_PHASES, phaseRunDir, taskStoragePaths, taskMetaPath } from "../infra/paths.js";
 import { attachTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionExists } from "../infra/tmux.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { readWorkMaterialization } from "../work-materializer.js";
@@ -18,7 +18,7 @@ export interface PhaseSessionSummary {
   taskId: string | null;
   runId: string;
   tmuxSession: string;
-  status: "running" | "completed" | "failed" | "blocked";
+  status: string;
   live: boolean;
   startedAt: string;
   updatedAt: string;
@@ -28,8 +28,27 @@ export interface PhaseSessionSummary {
   session: AgentSessionRef;
 }
 
+function toSummary(run: PhaseRun): PhaseSessionSummary {
+  return {
+    phase: run.phase as ManagedPhase,
+    workId: run.workId,
+    repoId: run.repoId,
+    taskId: run.taskId,
+    runId: run.runId,
+    tmuxSession: run.tmuxSession ?? "",
+    status: run.status,
+    live: run.status === "running" && tmuxSessionExists(run.tmuxSession ?? ""),
+    startedAt: run.startedAt,
+    updatedAt: run.updatedAt,
+    promptPath: run.promptPath,
+    outputPath: run.outputPath,
+    artifacts: run.artifacts,
+    session: run.session
+  };
+}
+
 export function listWorkPhaseSessions(paths: DevtaskPaths, workId: string): PhaseSessionSummary[] {
-  const base = path.join(paths.localDir, "work", workId, "phase-sessions");
+  const base = path.join(paths.localDir, "work", workId, "phases");
   if (!pathExists(base)) {
     return [];
   }
@@ -40,7 +59,7 @@ export function listWorkPhaseSessions(paths: DevtaskPaths, workId: string): Phas
     if (!pathExists(phaseDir)) {
       continue;
     }
-    if (phase === "spec" || phase === "plan") {
+    if (GLOBAL_PHASES.has(phase)) {
       const session = readScopedPhaseSession(paths, workId, phase);
       if (session) {
         entries.push(session);
@@ -64,14 +83,11 @@ export function readScopedPhaseSession(
   phase: ManagedPhase,
   repoId?: string | null
 ): PhaseSessionSummary | null {
-  const record = readPhaseSessionRecord(workItemScopedPhaseSessionDir(paths, workId, phase, repoId ?? null));
-  if (!record) {
+  const run = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId ?? null));
+  if (!run) {
     return null;
   }
-  return {
-    ...record,
-    live: record.status === "running" && tmuxSessionExists(record.tmuxSession)
-  };
+  return toSummary(run);
 }
 
 export function ensureNoLiveScopedPhaseSession(
@@ -88,19 +104,18 @@ export function ensureNoLiveScopedPhaseSession(
 
 export function writeRunningScopedPhaseSession(
   paths: DevtaskPaths,
-  input: Omit<PhaseSessionRecord, "schemaVersion" | "status" | "updatedAt">
+  input: Omit<PhaseRun, "schemaVersion" | "status" | "updatedAt" | "finishedAt" | "exitCode"> & { tmuxSession: string }
 ): PhaseSessionSummary {
-  const record: PhaseSessionRecord = {
-    ...input,
+  const dir = phaseRunDir(paths, input.workId, input.phase, input.repoId);
+  writeRunningPhaseRun(dir, input);
+  return toSummary({
     schemaVersion: 1,
     status: "running",
-    updatedAt: input.startedAt
-  };
-  writePhaseSessionRecord(workItemScopedPhaseSessionDir(paths, input.workId, input.phase, input.repoId), record);
-  return {
-    ...record,
-    live: true
-  };
+    updatedAt: input.startedAt,
+    finishedAt: null,
+    exitCode: null,
+    ...input
+  });
 }
 
 export function updateScopedPhaseSession(
@@ -108,23 +123,14 @@ export function updateScopedPhaseSession(
   workId: string,
   phase: ManagedPhase,
   repoId: string | null,
-  update: Partial<Pick<PhaseSessionRecord, "status" | "updatedAt" | "promptPath" | "outputPath" | "artifacts" | "session" | "taskId" | "runId">>
+  update: Partial<Pick<PhaseRun, "status" | "updatedAt" | "promptPath" | "outputPath" | "artifacts" | "session" | "taskId" | "runId">>
 ): PhaseSessionSummary | null {
-  const current = readPhaseSessionRecord(workItemScopedPhaseSessionDir(paths, workId, phase, repoId));
-  if (!current) {
+  const dir = phaseRunDir(paths, workId, phase, repoId);
+  const next = updateRunningPhaseRun(dir, update);
+  if (!next) {
     return null;
   }
-  const next: PhaseSessionRecord = {
-    ...current,
-    ...update,
-    session: update.session ?? current.session,
-    artifacts: update.artifacts ?? current.artifacts
-  };
-  writePhaseSessionRecord(workItemScopedPhaseSessionDir(paths, workId, phase, repoId), next);
-  return {
-    ...next,
-    live: next.status === "running" && tmuxSessionExists(next.tmuxSession)
-  };
+  return toSummary(next);
 }
 
 export function attachScopedPhaseSession(
@@ -154,68 +160,70 @@ export function markExecutePhaseSession(
   repoId: string,
   taskId: string,
   tmuxSession: string,
-  meta: { promptPath: string; outputPath: string; resultPath: string; updatedAt: string; summary: string | null; provider: AgentSessionRef["provider"]; providerSessionId: string | null; conversationId: string | null }
+  meta: {
+    promptPath: string;
+    outputPath: string;
+    resultPath: string;
+    updatedAt: string;
+    summary: string | null;
+    provider: AgentSessionRef["provider"];
+    providerSessionId: string | null;
+    conversationId: string | null;
+  }
 ): void {
-  const dir = workItemScopedPhaseSessionDir(paths, workId, "execute", repoId);
-  const current = readPhaseSessionRecord(dir);
+  const dir = phaseRunDir(paths, workId, "execute", repoId);
+  const current = readRunningPhaseRun(dir);
   const sessionRef: AgentSessionRef = {
     provider: meta.provider,
     transportId: tmuxSession,
-    providerSessionId: meta.providerSessionId,
-    conversationId: meta.conversationId,
-    resumeTarget: meta.providerSessionId,
-    storageRoot: null,
-    transcriptPath: null,
+    resumeContext: {
+      providerSessionId: meta.providerSessionId,
+      conversationId: meta.conversationId,
+      resumeTarget: meta.providerSessionId,
+      storageRoot: null,
+      transcriptPath: null
+    },
     summary: meta.summary,
     summaryIsFallback: true
   };
-
-  const record: PhaseSessionRecord = current ?? {
-    schemaVersion: 1,
-    phase: "execute",
-    workId,
-    repoId,
+  const now = meta.updatedAt;
+  const artifacts = {
+    taskPath: meta.promptPath,
+    statePath: meta.outputPath,
+    resultPath: meta.resultPath
+  };
+  const updated: PhaseRun = {
+    ...(current ?? {
+      schemaVersion: 1 as const,
+      phase: "execute" as const,
+      workId,
+      repoId,
+      runId: now,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null
+    }),
     taskId,
-    runId: meta.updatedAt,
     tmuxSession,
     status: "running",
-    startedAt: meta.updatedAt,
-    updatedAt: meta.updatedAt,
+    updatedAt: now,
     promptPath: meta.promptPath,
     outputPath: meta.outputPath,
-    artifacts: {
-      taskPath: meta.promptPath,
-      statePath: meta.outputPath,
-      resultPath: meta.resultPath
-    },
+    artifacts,
     session: sessionRef
   };
-
-  writePhaseSessionRecord(dir, {
-    ...record,
-    taskId,
-    tmuxSession,
-    updatedAt: meta.updatedAt,
-    promptPath: meta.promptPath,
-    outputPath: meta.outputPath,
-    artifacts: {
-      taskPath: meta.promptPath,
-      statePath: meta.outputPath,
-      resultPath: meta.resultPath
-    },
-    session: sessionRef,
-    status: "running"
-  });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "running.json"), `${JSON.stringify(updated, null, 2)}\n`);
 }
 
 export function clearExecutePhaseSessionIfInactive(paths: DevtaskPaths, workId: string, repoId: string): void {
-  const current = readPhaseSessionRecord(workItemScopedPhaseSessionDir(paths, workId, "execute", repoId));
+  const dir = phaseRunDir(paths, workId, "execute", repoId);
+  const current = readRunningPhaseRun(dir);
   if (!current) {
     return;
   }
-  if (!tmuxSessionExists(current.tmuxSession)) {
-    writePhaseSessionRecord(workItemScopedPhaseSessionDir(paths, workId, "execute", repoId), {
-      ...current,
+  if (!tmuxSessionExists(current.tmuxSession ?? "")) {
+    updateRunningPhaseRun(dir, {
       status: current.status === "running" ? "failed" : current.status,
       updatedAt: new Date().toISOString()
     });
@@ -283,11 +291,11 @@ function formatScope(workId: string, repoId: string | null): string {
 
 function buildAlreadyRunningMessage(phase: ManagedPhase, workId: string, repoId: string | null): string {
   const attach = repoId ? `devtask work ${phase} attach ${workId} ${repoId}` : `devtask work ${phase} attach ${workId}`;
-  const feedback = repoId ? `devtask work ${phase} feedback ${workId} ${repoId} "<message>"` : `devtask work ${phase} feedback ${workId} "<message>"`;
+  const feedback = repoId
+    ? `devtask work ${phase} feedback ${workId} ${repoId} "<message>"`
+    : `devtask work ${phase} feedback ${workId} "<message>"`;
   return `${phase} is already running for ${formatScope(workId, repoId)}. Use ${attach} or ${feedback}.`;
 }
-
-
 
 export function phaseWorkerCommand(args: string[]): string {
   const escaped = args.map((value) => shellEscape(value)).join(" ");

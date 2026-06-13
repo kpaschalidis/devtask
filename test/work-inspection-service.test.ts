@@ -88,13 +88,15 @@ describe("work inspection service", () => {
       session: {
         provider: "codex",
         transportId: "devtask-backend",
-        providerSessionId: "agent-123",
-        conversationId: "thread-123",
-        resumeTarget: "agent-123",
+        resumeContext: {
+          providerSessionId: "agent-123",
+          conversationId: "thread-123",
+          resumeTarget: "agent-123",
+          storageRoot: null,
+          transcriptPath: null
+        },
         summary: "waiting for API contract",
-        summaryIsFallback: false,
-        storageRoot: null,
-        transcriptPath: null
+        summaryIsFallback: false
       },
       artifacts: {
         resultPath: "/tmp/result.json"
@@ -117,11 +119,13 @@ describe("work inspection service", () => {
       session: {
         provider: "codex",
         transportId: "devtask-review",
-        providerSessionId: null,
-        conversationId: null,
-        resumeTarget: null,
-        storageRoot: null,
-        transcriptPath: null,
+        resumeContext: {
+          providerSessionId: null,
+          conversationId: null,
+          resumeTarget: null,
+          storageRoot: null,
+          transcriptPath: null
+        },
         summary: "review session started",
         summaryIsFallback: true
       }
