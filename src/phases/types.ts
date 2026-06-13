@@ -23,6 +23,17 @@ export interface PhaseFreshScope {
   startOptions: AgentStartOptions;
 }
 
+export interface PhaseLaunchResult {
+  phase: string;
+  workId: string;
+  repoId: string | null;
+  taskId: string | null;
+  status: "started" | "running";
+  tmuxSession: string;
+  promptPath: string;
+  outputPath: string;
+}
+
 export interface PhaseConfig {
   freshScope(paths: DevtaskPaths, workId: string, repoId: string | null, runId: string): Promise<PhaseFreshScope>;
   resumeScope(paths: DevtaskPaths, workId: string, repoId: string | null, runId: string): PhaseScope;
@@ -36,6 +47,6 @@ export interface PhaseConfig {
     finishedAt: string
   ): Promise<PhaseResult>;
   attach(paths: DevtaskPaths, workId: string, repoId: string | null): Promise<void>;
-  sendFeedback(paths: DevtaskPaths, workId: string, repoId: string | null, message: string): Promise<void>;
+  sendFeedback(paths: DevtaskPaths, workId: string, repoId: string | null, message: string): Promise<PhaseLaunchResult>;
   reset(paths: DevtaskPaths, workId: string, repoId: string | null): void;
 }

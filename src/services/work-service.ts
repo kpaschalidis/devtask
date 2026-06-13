@@ -54,8 +54,9 @@ import {
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
 import { getLatestWorkPhaseRun } from "./phase-run-service.js";
+import { launchPhaseFresh } from "../phases/runner.js";
+import { specPhase } from "../phases/spec.js";
 import { buildReviewPrompt } from "../prompts/review.js";
-import { buildSpecPrompt } from "../prompts/spec-plan.js";
 import { buildCompoundPrompt } from "../prompts/compound.js";
 import { buildRepoPlanPrompt } from "../prompts/repo-plan.js";
 import { buildGlobalPlanPrompt } from "../prompts/global-plan.js";
@@ -167,7 +168,7 @@ export interface ReviewWorkResult {
 }
 
 export interface PhaseLaunchResult {
-  phase: "spec" | "plan" | "repo-plan" | "review" | "execute";
+  phase: string;
   workId: string;
   repoId: string | null;
   taskId: string | null;
@@ -240,6 +241,10 @@ export async function attachWorkPhase(
   repoId?: string
 ): Promise<void> {
   const scopeRepoId = repoId ?? null;
+  if (phase === "spec") {
+    await specPhase.attach(paths, workId, null);
+    return;
+  }
   const dir = phaseRunDir(paths, workId, phase, scopeRepoId);
   const current = readRunningPhaseRun(dir);
   const isLive = current?.status === "running" && tmuxSessionExists(current.tmuxSession ?? "");
@@ -293,6 +298,9 @@ export function sendWorkPhaseFeedback(
       throw new DevtaskError(`No running execute session for ${scope}`);
     }
     return sendToTmuxSessionWithConfirmation(run.tmuxSession!, message, { lines: 60 });
+  }
+  if (phase === "spec") {
+    return specPhase.sendFeedback(paths, workId, null, message);
   }
   return startPhaseFeedbackSession(paths, phase, workId, message, repoId);
 }
@@ -543,65 +551,7 @@ interface PhaseConfig {
 }
 
 const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
-  spec: {
-    resumeScope(paths, workId, _repoId, runId) {
-      return {
-        tmuxSession: tmuxSessionName(paths, `spec-${workId}`),
-        cwd: paths.root,
-        promptPath: path.join(phaseRunDir(paths, workId, "spec", null), `${runId}.prompt.md`),
-        outputPath: path.join(phaseRunDir(paths, workId, "spec", null), `${runId}.md`),
-        taskId: null,
-        artifacts: { specPath: workItemSpecPath(paths, workId) }
-      };
-    },
-    async freshScope(paths, workId, _repoId, runId) {
-      const item = getWorkItem(paths, workId);
-      const config = readConfig(paths);
-      const runsDir = phaseRunDir(paths, workId, "spec", null);
-      const promptPath = `${runsDir}/${runId}.prompt.md`;
-      const outputPath = `${runsDir}/${runId}.md`;
-      const specPath = workItemSpecPath(paths, workId);
-      return {
-        scope: {
-          tmuxSession: tmuxSessionName(paths, `spec-${workId}`),
-          cwd: paths.root,
-          promptPath,
-          outputPath,
-          taskId: null,
-          artifacts: { specPath }
-        },
-        prompt: buildSpecPrompt(item, specPath),
-        startOptions: {
-          workspacePath: paths.root,
-          model: config.codex.model,
-          fullAuto: config.codex.fullAuto,
-          skipGitRepoCheck: true,
-          addDirs: [path.dirname(item.source.artifact)],
-          managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "spec", workId, null, runId),
-          env: { ...process.env, DEVTASK_TASK_DIR: workItemDir(paths, workId), DEVTASK_TASK_PATH: promptPath, DEVTASK_WORK_SPEC_PATH: specPath }
-        }
-      };
-    },
-    workspacePath(paths) { return paths.root; },
-    async finalize(paths, workId, _repoId, sessionRecord, session, finishedAt) {
-      const specPath = sessionRecord.artifacts.specPath ?? workItemSpecPath(paths, workId);
-      const status = isFreshArtifactSince(specPath, sessionRecord.startedAt) ? "spec-ready" : "failed";
-      writeWorkResult(paths, workId, "spec", {
-        runId: sessionRecord.runId,
-        workId,
-        status,
-        specPath,
-        promptPath: sessionRecord.promptPath,
-        outputPath: sessionRecord.outputPath,
-        exitCode: status === "spec-ready" ? 0 : null,
-        generatedAt: finishedAt,
-        session
-      } satisfies WorkSpecResult);
-      updateWorkItemStatus(paths, workId, status === "spec-ready" ? "spec-ready" : "failed");
-      await updateRecentWork(paths, getWorkItem(paths, workId));
-      return { status, artifacts: { specPath } };
-    }
-  },
+  spec: specPhase,
   plan: {
     resumeScope(paths, workId, _repoId, runId) {
       return {
@@ -834,7 +784,7 @@ async function startInteractivePhaseWork(paths: DevtaskPaths, phase: Interactive
 }
 
 export async function startSpecWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
-  return startInteractivePhaseWork(paths, "spec", workId, null);
+  return launchPhaseFresh(specPhase, paths, workId, "spec", null);
 }
 
 export async function startPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
