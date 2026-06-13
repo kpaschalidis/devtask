@@ -661,7 +661,8 @@ function phaseCwd(
 
 export async function startSpecWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
   const item = getWorkItem(paths, workId);
-  const runId = Date.now().toString();
+  const runId = newRunId();
+  const config = readConfig(paths);
   const runsDir = workItemSpecRunsDir(paths, item.id);
   const promptPath = `${runsDir}/${runId}.prompt.md`;
   const outputPath = `${runsDir}/${runId}.md`;
@@ -678,8 +679,8 @@ export async function startSpecWork(paths: DevtaskPaths, workId: string): Promis
     prompt: buildSpecPrompt(item, workItemSpecPath(paths, item.id)),
     startOptions: {
       workspacePath: paths.root,
-      model: readConfig(paths).codex.model,
-      fullAuto: readConfig(paths).codex.fullAuto,
+      model: config.codex.model,
+      fullAuto: config.codex.fullAuto,
       skipGitRepoCheck: true,
       addDirs: [path.dirname(item.source.artifact)],
       managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "spec", workId, null, runId),
@@ -696,6 +697,7 @@ export async function startSpecWork(paths: DevtaskPaths, workId: string): Promis
 export async function startPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
   requireWorkSpec(paths, workId);
   const runId = newRunId();
+  const config = readConfig(paths);
   const runsDir = workItemPlanRunsDir(paths, workId);
   const promptPath = path.join(runsDir, `${runId}.prompt.md`);
   const outputPath = path.join(runsDir, `${runId}.md`);
@@ -717,8 +719,8 @@ export async function startPlanWork(paths: DevtaskPaths, workId: string): Promis
     prompt: buildGlobalPlanPrompt(paths, item, repos, planPath, graphPath, workItemSpecPath(paths, workId), collectPhaseMemory(paths, "planning")),
     startOptions: {
       workspacePath: paths.root,
-      model: readConfig(paths).codex.model,
-      fullAuto: readConfig(paths).codex.fullAuto,
+      model: config.codex.model,
+      fullAuto: config.codex.fullAuto,
       skipGitRepoCheck: true,
       addDirs: workPlanAddDirsForTest(item, repos),
       managedCompletionCommand: buildManagedPhaseCompletionCommand(paths, "plan", workId, null, runId),
@@ -1849,7 +1851,7 @@ async function executeMaterializedTask(
       },
       updatedAt: new Date().toISOString()
     });
-    await writeExecutePhaseRun(workspacePaths, workId, task, meta, current.status);
+    writeExecutePhaseRun(workspacePaths, workId, task, meta, current.status);
     const existingSession = readScopedPhaseSession(workspacePaths, workId, "execute", task.repoId);
     if (existingSession) {
       updateScopedPhaseSession(workspacePaths, workId, "execute", task.repoId, {
@@ -1883,7 +1885,7 @@ async function executeMaterializedTask(
         lastObservedAt: new Date().toISOString()
       }
     });
-    await writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
+    writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
     markExecutePhaseSession(workspacePaths, workId, task.repoId, task.taskId, meta.tmuxSession!, {
       promptPath: meta.taskPath,
       outputPath: meta.statePath,
@@ -1925,7 +1927,7 @@ async function executeMaterializedTask(
     },
     updatedAt: new Date().toISOString()
   });
-  await writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
+  writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
   markExecutePhaseSession(workspacePaths, workId, task.repoId, task.taskId, sessionName, {
     promptPath: meta.taskPath,
     outputPath: meta.statePath,
@@ -2035,16 +2037,16 @@ function summarizeReviewWorkStatus(tasks: ReviewTaskResult[]): import("../storag
 
 function persistExecutionMeta(metaPath: string, meta: TaskMeta): TaskMeta {
   writeTaskMeta(metaPath, meta);
-  return readTaskMeta(metaPath);
+  return meta;
 }
 
-async function writeExecutePhaseRun(
+function writeExecutePhaseRun(
   workspacePaths: DevtaskPaths,
   workId: string,
   task: WorkMaterialization["tasks"][number],
   meta: TaskMeta,
   status: string
-): Promise<void> {
+): void {
   const provider = readConfig(workspacePaths).agent.provider;
   const runId = newRunId();
   writePhaseRunRecord(workItemRepoPhaseRunsDir(workspacePaths, workId, "execute", task.repoId), {
@@ -2558,7 +2560,7 @@ async function runSpecAgent(
   const specPath = workItemSpecPath(paths, item.id);
   const runsDir = workItemSpecRunsDir(paths, item.id);
   fs.mkdirSync(runsDir, { recursive: true });
-  const runId = Date.now().toString();
+  const runId = newRunId();
   const promptPath = `${runsDir}/${runId}.prompt.md`;
   const outputPath = `${runsDir}/${runId}.md`;
   const prompt = options.promptOverride?.trim() ? options.promptOverride.trim() : buildSpecPrompt(item, specPath);

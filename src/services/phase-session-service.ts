@@ -287,9 +287,7 @@ function buildAlreadyRunningMessage(phase: ManagedPhase, workId: string, repoId:
   return `${phase} is already running for ${formatScope(workId, repoId)}. Use ${attach} or ${feedback}.`;
 }
 
-export function emptyPhaseSessionRef(provider: AgentSessionRef["provider"] = "codex"): AgentSessionRef {
-  return emptyAgentSessionRef(provider);
-}
+
 
 export function phaseWorkerCommand(args: string[]): string {
   const escaped = args.map((value) => shellEscape(value)).join(" ");

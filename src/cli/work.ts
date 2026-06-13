@@ -124,16 +124,18 @@ export function registerWorkCommands(program: Command): void {
     .option("--latest", "Show the latest run per phase/repo scope")
     .action((workId: string, options: { phase?: string; repo?: string; latest?: boolean }) => {
       try {
-        const rows = listWorkPhaseRuns(resolveWorkspacePaths(), workId, {
-          phase: normalizePhaseOption(options.phase),
+        const phase = normalizePhaseOption(options.phase);
+        const paths = resolveWorkspacePaths();
+        const rows = listWorkPhaseRuns(paths, workId, {
+          phase,
           repoId: options.repo,
           latest: options.latest === true
         });
-        const liveSessions = listWorkPhaseSessions(resolveWorkspacePaths(), workId)
-          .filter((session) => normalizePhaseOption(options.phase) ? session.phase === normalizePhaseOption(options.phase) : true)
+        const liveSessions = listWorkPhaseSessions(paths, workId)
+          .filter((session) => phase ? session.phase === phase : true)
           .filter((session) => options.repo ? session.repoId === options.repo : true);
         if (rows.length === 0 && liveSessions.length === 0) {
-          console.log(hasWorkPhaseRuns(resolveWorkspacePaths(), workId) ? "No matching phase runs" : "No phase runs");
+          console.log(hasWorkPhaseRuns(paths, workId) ? "No matching phase runs" : "No phase runs");
           return;
         }
         printTable(

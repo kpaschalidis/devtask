@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ActivityState, AgentRunner, AgentStartOptions, RunEvent, RunOptions, SessionHandle } from "../../agent.js";
+import { emptyAgentSessionRef, type AgentSessionRef } from "../../agent-session.js";
 import { captureOutputAsync, createBareSession, getForegroundCommand, isSessionAliveAsync, killTmuxSession, sendLaunchCommand, sendMessageAsync, writeLaunchScript } from "../../infra/tmux.js";
 import { buildCursorCommand } from "./command.js";
 
@@ -44,10 +45,10 @@ export class CursorAgentRunner implements AgentRunner {
     });
   }
 
-  buildInteractiveStartCommand(options: AgentStartOptions, _prompt: string): { command: string; session: ReturnType<typeof emptyCursorSessionRef> } {
+  buildInteractiveStartCommand(options: AgentStartOptions, _prompt: string): { command: string; session: AgentSessionRef } {
     return {
       command: buildCursorLaunchCommand(options, this.config.model),
-      session: emptyCursorSessionRef()
+      session: emptyAgentSessionRef("cursor")
     };
   }
 
@@ -223,19 +224,6 @@ function buildCursorLaunchCommand(options: AgentStartOptions, fallbackModel?: st
   return parts.join(" ");
 }
 
-function emptyCursorSessionRef() {
-  return {
-    provider: "cursor" as const,
-    transportId: null,
-    providerSessionId: null,
-    conversationId: null,
-    resumeTarget: null,
-    storageRoot: null,
-    transcriptPath: null,
-    summary: null,
-    summaryIsFallback: null
-  };
-}
 
 function buildAgentEnvResetCommand(): string {
   return "unset CODEX_THREAD_ID CODEX_INTERNAL_ORIGINATOR_OVERRIDE CODEX_CI CODEX_SHELL";
