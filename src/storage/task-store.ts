@@ -20,8 +20,7 @@ import { createTaskWorktree } from "../infra/git.js";
 import { DevtaskError } from "../infra/errors.js";
 import { reconcileTaskRuntime } from "../task-runtime.js";
 import type { TaskMeta, TaskSummary } from "../types.js";
-import { readConfig, writeConfig, DEFAULT_CONFIG } from "../infra/config.js";
-import { buildAgentBootstrapCommand } from "../agent.js";
+import { writeConfig, DEFAULT_CONFIG } from "../infra/config.js";
 
 export interface CreateTaskOptions {
   goal?: string;
@@ -113,13 +112,7 @@ export async function createTask(
   const resultPath = resultJsonPath(paths, id);
   const targetWorktreePath = options.worktreePath ?? worktreePath(paths, id);
   const now = new Date().toISOString();
-  const config = readConfig(paths);
-  const model = options.model ?? config.codex.model;
-  const defaultCommand = buildAgentBootstrapCommand(config, {
-    workspacePath: targetWorktreePath,
-    model,
-    fullAuto: config.codex.fullAuto
-  });
+  const model = options.model ?? null;
 
   fs.writeFileSync(
     taskPath,
@@ -143,7 +136,7 @@ export async function createTask(
     statePath,
     resultPath,
     model,
-    command: options.command ?? defaultCommand,
+    command: options.command ?? "",
     supervisorPid: null,
     childPid: null,
     tmuxSession: null,
