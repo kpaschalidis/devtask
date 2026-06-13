@@ -73,11 +73,11 @@ vi.mock("../src/infra/tmux.js", () => ({
   writeLaunchScript: vi.fn(() => "/tmp/devtask-launch.sh")
 }));
 
-import { resolveWorkspacePathsForInit, workItemSpecPath } from "../src/infra/paths.js";
+import { resolveWorkspacePathsForInit, workItemSpecPath, phaseRunDir } from "../src/infra/paths.js";
+import { readRunningPhaseRun, writeRunningPhaseRun, updateRunningPhaseRun } from "../src/infra/phase-run.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { getLatestWorkPhaseRun } from "../src/services/phase-run-service.js";
-import { readScopedPhaseSession, updateScopedPhaseSession, writeRunningScopedPhaseSession } from "../src/services/phase-session-service.js";
 import { attachWorkPhase, runManagedPhaseHookFinalizer, sendWorkPhaseFeedback, startSpecWork } from "../src/services/work-service.js";
 
 const agent = await import("../src/agent.js");
@@ -100,7 +100,7 @@ describe("work phase feedback", () => {
       title: "Completed session visibility"
     });
 
-    writeRunningScopedPhaseSession(paths, {
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
       phase: "spec",
       workId: item.id,
       repoId: null,
@@ -128,12 +128,14 @@ describe("work phase feedback", () => {
       }
     });
     vi.mocked(tmux.tmuxSessionExists).mockReturnValue(true);
-    updateScopedPhaseSession(paths, item.id, "spec", null, {
+    updateRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
       status: "completed",
       updatedAt: "2026-01-01T00:01:00.000Z"
     });
 
-    expect(readScopedPhaseSession(paths, item.id, "spec")?.live).toBe(false);
+    const run = readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null));
+    const live = run?.status === "running" && tmux.tmuxSessionExists(run.tmuxSession ?? "");
+    expect(live).toBe(false);
   });
 
   it("resumes and attaches when the latest spec session is finished without managed completion tracking", async () => {
@@ -146,7 +148,7 @@ describe("work phase feedback", () => {
     });
     fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nOriginal.\n");
 
-    writeRunningScopedPhaseSession(paths, {
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
       phase: "spec",
       workId: item.id,
       repoId: null,
@@ -173,7 +175,7 @@ describe("work phase feedback", () => {
         summaryIsFallback: false
       }
     });
-    updateScopedPhaseSession(paths, item.id, "spec", null, {
+    updateRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
       status: "completed",
       updatedAt: "2026-01-01T00:01:00.000Z"
     });
@@ -183,7 +185,7 @@ describe("work phase feedback", () => {
 
     expect(tmux.startTmuxSession).toHaveBeenCalledTimes(1);
     expect(tmux.attachTmuxSession).toHaveBeenCalledWith("devtask-test-spec-WORK-123");
-    expect(readScopedPhaseSession(paths, item.id, "spec")?.status).toBe("running");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.status).toBe("running");
     const runner = vi.mocked(agent.createDefaultAgentRunner).mock.results.at(-1)?.value;
     expect(runner?.buildInteractiveResumeCommand).toHaveBeenCalledWith(
       expect.anything(),
@@ -209,7 +211,7 @@ describe("work phase feedback", () => {
     expect(launch.tmuxSession).toBe("devtask-test-spec-WORK-123");
     expect(tmux.startTmuxSession).toHaveBeenCalledTimes(1);
     expect(tmux.startPipePane).toHaveBeenCalledWith("devtask-test-spec-WORK-123", launch.outputPath);
-    expect(readScopedPhaseSession(paths, item.id, "spec")?.status).toBe("running");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.status).toBe("running");
     const runner = vi.mocked(agent.createDefaultAgentRunner).mock.results.at(-1)?.value;
     expect(runner?.buildInteractiveStartCommand).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -228,7 +230,7 @@ describe("work phase feedback", () => {
       title: "Hook finalize spec"
     });
     fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nFresh interactive spec updated.\n");
-    writeRunningScopedPhaseSession(paths, {
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
       phase: "spec",
       workId: item.id,
       repoId: null,
@@ -260,8 +262,8 @@ describe("work phase feedback", () => {
     await runManagedPhaseHookFinalizer(paths, "spec", item.id, "run-2", null);
 
     expect(getLatestWorkPhaseRun(paths, item.id, "spec")?.status).toBe("spec-ready");
-    expect(readScopedPhaseSession(paths, item.id, "spec")?.status).toBe("completed");
-    expect(readScopedPhaseSession(paths, item.id, "spec")?.session.resumeContext.providerSessionId).toBe("agent-123");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.status).toBe("completed");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.session.resumeContext.providerSessionId).toBe("agent-123");
     expect(tmux.killTmuxSession).toHaveBeenCalledWith("devtask-test-spec-WORK-123");
   });
 
@@ -274,7 +276,7 @@ describe("work phase feedback", () => {
       title: "Ignore stale hook"
     });
     fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nOriginal.\n");
-    writeRunningScopedPhaseSession(paths, {
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
       phase: "spec",
       workId: item.id,
       repoId: null,
@@ -304,7 +306,7 @@ describe("work phase feedback", () => {
 
     await runManagedPhaseHookFinalizer(paths, "spec", item.id, "run-old", null);
 
-    expect(readScopedPhaseSession(paths, item.id, "spec")?.status).toBe("running");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null))?.status).toBe("running");
     expect(getLatestWorkPhaseRun(paths, item.id, "spec")).toBeNull();
     expect(tmux.killTmuxSession).not.toHaveBeenCalled();
   });

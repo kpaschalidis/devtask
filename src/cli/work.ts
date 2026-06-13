@@ -28,8 +28,7 @@ import {
   startSpecWork,
   verifyWork
 } from "../services/work-service.js";
-import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns } from "../services/phase-run-service.js";
-import { listWorkPhaseSessions } from "../services/phase-session-service.js";
+import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/phase-run-service.js";
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
 import { printError, printTable } from "./common.js";

@@ -13,13 +13,12 @@ import {
   workItemRepoPlanPath,
   workItemResultsDir,
   workItemReviewDir,
-  workItemPhaseRunsDir,
-  workItemRepoPhaseRunsDir,
+  phaseRunDir,
   workItemSpecPath,
   workItemSpecRunsDir
 } from "../infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
-import { writePhaseRunRecord } from "../infra/phase-run.js";
+import { writePhaseRunRecord, readRunningPhaseRun, writeRunningPhaseRun, updateRunningPhaseRun, type PhaseRun } from "../infra/phase-run.js";
 import { newRunId } from "../infra/run-record.js";
 import { collectPhaseMemory } from "../improvement-memory.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
@@ -45,9 +44,11 @@ import { updateRecentWork } from "../storage/global-index.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { runCommand } from "../infra/process-runner.js";
 import {
+  attachTmuxSession,
   createBareSession,
   killTmuxSession,
   sendLaunchCommand,
+  sendToTmuxSessionWithConfirmation,
   startPipePane,
   startTmuxSession,
   tmuxSessionExists,
@@ -62,18 +63,6 @@ import { buildSpecPrompt } from "../prompts/spec-plan.js";
 import { buildCompoundPrompt } from "../prompts/compound.js";
 import { buildRepoPlanPrompt } from "../prompts/repo-plan.js";
 import { buildGlobalPlanPrompt } from "../prompts/global-plan.js";
-import {
-  attachScopedPhaseSession,
-  ensureNoLiveScopedPhaseSession,
-  freshExecuteSession,
-  phaseWorkerCommand,
-  readScopedPhaseSession,
-  sendScopedPhaseFeedback,
-  updateScopedPhaseSession,
-  writeRunningScopedPhaseSession,
-  markExecutePhaseSession,
-  type PhaseSessionSummary
-} from "./phase-session-service.js";
 import {
   checkProviderCi,
   countBranchCommits,
@@ -269,17 +258,20 @@ export async function attachWorkPhase(
   repoId?: string
 ): Promise<void> {
   const scopeRepoId = repoId ?? null;
-  const current = readScopedPhaseSession(paths, workId, phase, scopeRepoId);
-  if (current?.live) {
-    attachScopedPhaseSession(paths, workId, phase, scopeRepoId);
+  const dir = phaseRunDir(paths, workId, phase, scopeRepoId);
+  const current = readRunningPhaseRun(dir);
+  const isLive = current?.status === "running" && tmuxSessionExists(current.tmuxSession ?? "");
+  if (isLive) {
+    attachTmuxSession(current!.tmuxSession!);
     return;
   }
   if (phase === "execute") {
-    attachScopedPhaseSession(paths, workId, phase, scopeRepoId);
-    return;
+    const scope = scopeRepoId ? `${workId}/${scopeRepoId}` : workId;
+    if (!current) throw new DevtaskError(`No execute session exists for ${scope}`);
+    throw new DevtaskError(`The latest execute session for ${scope} is not running`);
   }
-  await startInteractivePhaseResumeSession(paths, phase, workId, scopeRepoId);
-  attachScopedPhaseSession(paths, workId, phase, scopeRepoId);
+  const launched = await startInteractivePhaseResumeSession(paths, phase, workId, scopeRepoId);
+  attachTmuxSession(launched.tmuxSession);
 }
 
 export function sendWorkPhaseFeedback(
@@ -312,13 +304,19 @@ export function sendWorkPhaseFeedback(
   const repoId = maybeMessage === undefined ? null : repoOrMessage;
   const message = maybeMessage === undefined ? repoOrMessage : maybeMessage;
   if (phase === "execute") {
-    return sendScopedPhaseFeedback(paths, workId, phase, message, repoId);
+    const dir = phaseRunDir(paths, workId, "execute", repoId);
+    const run = readRunningPhaseRun(dir);
+    const scope = repoId ? `${workId}/${repoId}` : workId;
+    if (!run || run.status !== "running" || !tmuxSessionExists(run.tmuxSession ?? "")) {
+      throw new DevtaskError(`No running execute session for ${scope}`);
+    }
+    return sendToTmuxSessionWithConfirmation(run.tmuxSession!, message, { lines: 60 });
   }
   return startPhaseFeedbackSession(paths, phase, workId, message, repoId);
 }
 
 export function freshExecuteWork(paths: DevtaskPaths, workId: string, repoId: string): void {
-  freshExecuteSession(paths, workId, repoId);
+  freshInteractiveExecuteSession(paths, workId, repoId);
 }
 
 function launchInteractiveResume(cwd: string, tmuxSession: string, command: string): void {
@@ -348,7 +346,7 @@ function buildManagedPhaseCompletionCommand(
     : ["work", "_phase-finalize-hook", phase, workId, runId];
   return [
     `export DEVTASK_WORKSPACE_ROOT=${shellEscape(paths.root)}`,
-    `exec ${phaseWorkerCommand(args)}`
+    `exec ${buildDevtaskCommand(args)}`
   ].join("\n");
 }
 
@@ -368,7 +366,7 @@ async function startInteractivePhaseFreshSession(
     startOptions: Parameters<NonNullable<ReturnType<typeof createDefaultAgentRunner>["buildInteractiveStartCommand"]>>[0];
   }
 ): Promise<PhaseLaunchResult> {
-  ensureNoLiveScopedPhaseSession(paths, workId, phase, repoId);
+  ensureNoLivePhaseSession(paths, workId, phase, repoId);
   const config = readConfig(paths);
   const runner = createDefaultAgentRunner(config);
   const start = await runner.buildInteractiveStartCommand?.(scope.startOptions, scope.prompt);
@@ -381,7 +379,7 @@ async function startInteractivePhaseFreshSession(
   launchInteractiveResume(scope.cwd, scope.tmuxSession, start.command);
   await startPipePane(scope.tmuxSession, scope.outputPath);
   const startedAt = new Date().toISOString();
-  writeRunningScopedPhaseSession(paths, {
+  writeRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
     phase,
     workId,
     repoId,
@@ -436,7 +434,7 @@ async function startInteractivePhaseResumeSession(
   prompt?: string,
   trackCompletion = false
 ): Promise<PhaseLaunchResult> {
-  ensureNoLiveScopedPhaseSession(paths, workId, phase, repoId);
+  ensureNoLivePhaseSession(paths, workId, phase, repoId);
   const previous = readResumeSession(paths, workId, phase, repoId);
   const runId = newRunId();
   const config = readConfig(paths);
@@ -458,7 +456,7 @@ async function startInteractivePhaseResumeSession(
   fs.writeFileSync(scope.promptPath, `${prompt ?? buildPhaseResumePrompt(phase, previous.session)}\n`);
   launchInteractiveResume(scope.cwd, scope.tmuxSession, command);
   await startPipePane(scope.tmuxSession, scope.outputPath);
-  writeRunningScopedPhaseSession(paths, {
+  writeRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
     phase,
     workId,
     repoId,
@@ -514,7 +512,7 @@ function readResumeSession(
   phase: "spec" | "plan" | "repo-plan" | "review",
   repoId: string | null
 ): { session: AgentSessionRef; taskId: string | null } {
-  const current = readScopedPhaseSession(paths, workId, phase, repoId);
+  const current = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId));
   if (current && hasResumeContext(current.session)) {
     return {
       session: current.session,
@@ -558,7 +556,7 @@ interface PhaseConfig {
     paths: DevtaskPaths,
     workId: string,
     repoId: string | null,
-    sessionRecord: PhaseSessionSummary,
+    sessionRecord: PhaseRun,
     session: AgentSessionRef,
     finishedAt: string
   ): Promise<{ status: string; artifacts: Record<string, string> }>;
@@ -707,7 +705,7 @@ const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
       const graphTask = graph.tasks.find((t) => t.repoId === repoId);
       if (!graphTask) throw new DevtaskError(`No repo-plan task exists for ${workId}/${repoId}`);
       const repo = getWorkspaceRepo(paths, repoId);
-      const phaseDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId);
+      const phaseDir = phaseRunDir(paths, workId, "repo-plan", repoId);
       return {
         tmuxSession: tmuxSessionName(paths, `repo-plan-${workId}-${repoId}`),
         cwd: repo.repoPath,
@@ -725,7 +723,7 @@ const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
       const repo = getWorkspaceRepo(paths, repoId);
       const config = readConfig(paths);
       const repoPaths = resolvePaths(repo.repoPath);
-      const phaseDir = workItemRepoPhaseRunsDir(paths, workId, "repo-plan", repoId);
+      const phaseDir = phaseRunDir(paths, workId, "repo-plan", repoId);
       const promptPath = path.join(phaseDir, `${runId}.prompt.md`);
       const outputPath = path.join(phaseDir, `${runId}.md`);
       const runtimePrefix = path.join(repoPaths.root, `.devtask_repo_plan_${runId}`);
@@ -948,7 +946,7 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
   const localArchiveDir = path.join(paths.localDir, "improvement", "archive", workId);
   fs.mkdirSync(archiveDir, { recursive: true });
   fs.mkdirSync(localArchiveDir, { recursive: true });
-  const runsDir = workItemPhaseRunsDir(paths, workId, "compound");
+  const runsDir = phaseRunDir(paths, workId, "compound", null);
   fs.mkdirSync(runsDir, { recursive: true });
   const runId = newRunId();
   const promptPath = path.join(runsDir, `${runId}.prompt.md`);
@@ -995,7 +993,7 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
   const result = await runAgentPrompt(runner, startOptions, prompt, { outputPath });
   const finishedAt = new Date().toISOString();
   const status: CompoundWorkResult["status"] = result.status === "completed" ? "completed" : "failed";
-  writePhaseRunRecord(workItemPhaseRunsDir(paths, workId, "compound"), {
+  writePhaseRunRecord(phaseRunDir(paths, workId, "compound", null), {
     schemaVersion: 1,
     phase: "compound",
     runId,
@@ -1068,12 +1066,12 @@ export async function runManagedPhaseHookFinalizer(
   runId: string,
   repoId: string | null
 ): Promise<void> {
-  const current = readScopedPhaseSession(paths, workId, phase, repoId);
+  const current = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId));
   if (!current || current.runId !== runId || current.status !== "running") {
     return;
   }
   await finalizeInteractivePhase(paths, phase, workId, repoId, current);
-  if (tmuxSessionExists(current.tmuxSession)) {
+  if (current.tmuxSession && tmuxSessionExists(current.tmuxSession)) {
     killTmuxSession(current.tmuxSession);
   }
 }
@@ -1179,18 +1177,14 @@ async function finalizeInteractivePhase(
   phase: InteractivePhase,
   workId: string,
   repoId: string | null,
-  sessionRecord: PhaseSessionSummary
+  sessionRecord: PhaseRun
 ): Promise<void> {
   const cfg = PHASE_CONFIGS[phase];
   const workspacePath = cfg.workspacePath(paths, workId, repoId);
-  const session = await hydratePhaseSession(paths, sessionRecord.session, workspacePath, sessionRecord.tmuxSession);
+  const session = await hydratePhaseSession(paths, sessionRecord.session, workspacePath, sessionRecord.tmuxSession ?? "");
   const finishedAt = new Date().toISOString();
   const { status, artifacts } = await cfg.finalize(paths, workId, repoId, sessionRecord, session, finishedAt);
-  const phaseRunsDir =
-    phase === "spec" || phase === "plan"
-      ? workItemPhaseRunsDir(paths, workId, phase)
-      : workItemRepoPhaseRunsDir(paths, workId, phase, repoId!);
-  writePhaseRunRecord(phaseRunsDir, {
+  writePhaseRunRecord(phaseRunDir(paths, workId, phase, repoId), {
     schemaVersion: 1,
     phase,
     runId: sessionRecord.runId,
@@ -1206,7 +1200,7 @@ async function finalizeInteractivePhase(
     artifacts,
     exitCode: status === "failed" ? null : 0
   });
-  updateScopedPhaseSession(paths, workId, phase, repoId, {
+  updateRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
     status: status === "blocked" ? "blocked" : status === "failed" ? "failed" : "completed",
     updatedAt: finishedAt,
     promptPath: sessionRecord.promptPath,
@@ -1242,13 +1236,13 @@ async function executeMaterializedTask(
       updatedAt: new Date().toISOString()
     });
     writeExecutePhaseRun(workspacePaths, workId, task, meta, current.status);
-    const existingSession = readScopedPhaseSession(workspacePaths, workId, "execute", task.repoId);
-    if (existingSession) {
-      updateScopedPhaseSession(workspacePaths, workId, "execute", task.repoId, {
+    const existingRun = readRunningPhaseRun(phaseRunDir(workspacePaths, workId, "execute", task.repoId));
+    if (existingRun) {
+      updateRunningPhaseRun(phaseRunDir(workspacePaths, workId, "execute", task.repoId), {
         status: current.status === "blocked" ? "blocked" : current.status === "failed" ? "failed" : "completed",
         updatedAt: meta.updatedAt,
         session: {
-          ...existingSession.session,
+          ...existingRun.session,
           summary: meta.resultSummary,
           summaryIsFallback: true
         }
@@ -1276,7 +1270,7 @@ async function executeMaterializedTask(
       }
     });
     writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
-    markExecutePhaseSession(workspacePaths, workId, task.repoId, task.taskId, meta.tmuxSession!, {
+    recordExecutePhaseSession(workspacePaths, workId, task.repoId, task.taskId, meta.tmuxSession!, {
       promptPath: meta.taskPath,
       outputPath: meta.statePath,
       resultPath: meta.resultPath,
@@ -1318,7 +1312,7 @@ async function executeMaterializedTask(
     updatedAt: new Date().toISOString()
   });
   writeExecutePhaseRun(workspacePaths, workId, task, meta, "running");
-  markExecutePhaseSession(workspacePaths, workId, task.repoId, task.taskId, sessionName, {
+  recordExecutePhaseSession(workspacePaths, workId, task.repoId, task.taskId, sessionName, {
     promptPath: meta.taskPath,
     outputPath: meta.statePath,
     resultPath: meta.resultPath,
@@ -1432,7 +1426,7 @@ function writeExecutePhaseRun(
 ): void {
   const provider = readConfig(workspacePaths).agent.provider;
   const runId = newRunId();
-  writePhaseRunRecord(workItemRepoPhaseRunsDir(workspacePaths, workId, "execute", task.repoId), {
+  writePhaseRunRecord(phaseRunDir(workspacePaths, workId, "execute", task.repoId), {
     schemaVersion: 1,
     phase: "execute",
     runId,
@@ -1471,6 +1465,113 @@ function shellEscape(value: string): string {
     return value;
   }
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function buildDevtaskCommand(args: string[]): string {
+  const escaped = args.map((v) => shellEscape(v)).join(" ");
+  const entry = shellEscape(path.resolve(process.cwd(), "dist/bin/devtask.js"));
+  return `node ${entry} ${escaped}`;
+}
+
+function ensureNoLivePhaseSession(
+  paths: DevtaskPaths,
+  workId: string,
+  phase: string,
+  repoId: string | null
+): void {
+  const run = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId));
+  if (run?.status === "running" && tmuxSessionExists(run.tmuxSession ?? "")) {
+    const scope = repoId ? `${workId}/${repoId}` : workId;
+    const attach = repoId ? `devtask work ${phase} attach ${workId} ${repoId}` : `devtask work ${phase} attach ${workId}`;
+    const feedback = repoId
+      ? `devtask work ${phase} feedback ${workId} ${repoId} "<message>"`
+      : `devtask work ${phase} feedback ${workId} "<message>"`;
+    throw new DevtaskError(`${phase} is already running for ${scope}. Use ${attach} or ${feedback}.`);
+  }
+}
+
+function freshInteractiveExecuteSession(
+  paths: DevtaskPaths,
+  workId: string,
+  repoId: string
+): { taskId: string; repoPath: string; metaPath: string } {
+  const materialization = readWorkMaterialization(paths, workId);
+  const task = materialization?.tasks.find((entry) => entry.repoId === repoId);
+  if (!task) {
+    throw new DevtaskError(`No repo task ${repoId} exists for work ${workId}`);
+  }
+  const storagePaths = taskStoragePaths(paths, task.repoPath);
+  const metaPath = taskMetaPath(storagePaths, task.taskId);
+  const meta = readTaskMeta(metaPath);
+  if (meta.tmuxSession && tmuxSessionExists(meta.tmuxSession)) {
+    throw new DevtaskError(`Execution is already running for ${workId}/${repoId}. Attach instead of starting fresh.`);
+  }
+  writeTaskMeta(metaPath, {
+    ...meta,
+    tmuxSession: null,
+    status: "ready",
+    resultSummary: null,
+    runtime: null,
+    updatedAt: new Date().toISOString()
+  });
+  return { taskId: task.taskId, repoPath: task.repoPath, metaPath };
+}
+
+function recordExecutePhaseSession(
+  paths: DevtaskPaths,
+  workId: string,
+  repoId: string,
+  taskId: string,
+  tmuxSession: string,
+  meta: {
+    promptPath: string;
+    outputPath: string;
+    resultPath: string;
+    updatedAt: string;
+    summary: string | null;
+    provider: AgentSessionRef["provider"];
+    providerSessionId: string | null;
+    conversationId: string | null;
+  }
+): void {
+  const dir = phaseRunDir(paths, workId, "execute", repoId);
+  const current = readRunningPhaseRun(dir);
+  const sessionRef: AgentSessionRef = {
+    provider: meta.provider,
+    transportId: tmuxSession,
+    resumeContext: {
+      providerSessionId: meta.providerSessionId,
+      conversationId: meta.conversationId,
+      resumeTarget: meta.providerSessionId,
+      storageRoot: null,
+      transcriptPath: null
+    },
+    summary: meta.summary,
+    summaryIsFallback: true
+  };
+  const now = meta.updatedAt;
+  const updated: PhaseRun = {
+    ...(current ?? {
+      schemaVersion: 1 as const,
+      phase: "execute" as const,
+      workId,
+      repoId,
+      runId: now,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null
+    }),
+    taskId,
+    tmuxSession,
+    status: "running",
+    updatedAt: now,
+    promptPath: meta.promptPath,
+    outputPath: meta.outputPath,
+    artifacts: { taskPath: meta.promptPath, statePath: meta.outputPath, resultPath: meta.resultPath },
+    session: sessionRef
+  };
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "running.json"), `${JSON.stringify(updated, null, 2)}\n`);
 }
 
 export async function createWorkPullRequests(

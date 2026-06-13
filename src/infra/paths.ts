@@ -239,7 +239,7 @@ export function workItemLocalDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.localDir, "work", id);
 }
 
-export const GLOBAL_PHASES = new Set(["spec", "plan"]);
+export const GLOBAL_PHASES = new Set(["spec", "plan", "compound"]);
 
 export function phaseRunDir(
   paths: DevtaskPaths,
@@ -249,19 +249,6 @@ export function phaseRunDir(
 ): string {
   const base = path.join(workItemLocalDir(paths, workId), "phases", phase);
   return GLOBAL_PHASES.has(phase) || !repoId ? base : path.join(base, repoId);
-}
-
-export function workItemPhaseSessionsDir(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemLocalDir(paths, id), "phases");
-}
-
-export function workItemScopedPhaseSessionDir(
-  paths: DevtaskPaths,
-  workId: string,
-  phase: "spec" | "plan" | "repo-plan" | "review" | "execute",
-  repoId?: string | null
-): string {
-  return phaseRunDir(paths, workId, phase, repoId ?? null);
 }
 
 export function workItemLocalStatePath(paths: DevtaskPaths, id: string): string {
@@ -286,10 +273,6 @@ export function workItemPhaseRunsDir(paths: DevtaskPaths, id: string, phase: str
 
 export function workItemRepoPhaseRunsDir(paths: DevtaskPaths, id: string, phase: string, repoId: string): string {
   return phaseRunDir(paths, id, phase, repoId);
-}
-
-export function workItemSessionRegistryDir(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemLocalDir(paths, id), "phases");
 }
 
 export function readWorkspaceMarker(root: string): WorkspaceMarker {

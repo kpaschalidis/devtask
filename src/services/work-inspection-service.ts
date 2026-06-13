@@ -13,7 +13,7 @@ import {
   workItemSpecPath
 } from "../infra/paths.js";
 import { listWorkPhaseRuns } from "./phase-run-service.js";
-import { listWorkPhaseSessions } from "./phase-session-service.js";
+import { listWorkPhaseSessions } from "./phase-run-service.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { getTask } from "../storage/task-store.js";
 import { getWorkItem } from "../storage/work-store.js";

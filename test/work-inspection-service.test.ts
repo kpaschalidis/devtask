@@ -6,15 +6,14 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../src/infra/tmux.js", () => ({
   tmuxSessionExists: vi.fn((session: string) => session === "devtask-review")
 }));
-import { resolveWorkspacePathsForInit, taskMetaPath, workItemRepoPhaseRunsDir } from "../src/infra/paths.js";
-import { writePhaseRunRecord } from "../src/infra/phase-run.js";
+import { resolveWorkspacePathsForInit, taskMetaPath, phaseRunDir } from "../src/infra/paths.js";
+import { writePhaseRunRecord, writeRunningPhaseRun } from "../src/infra/phase-run.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan } from "../src/work-materializer.js";
 import { workGraphPath } from "../src/global-plan.js";
 import { readTaskMeta, writeTaskMeta } from "../src/storage/meta.js";
-import { writeRunningScopedPhaseSession } from "../src/services/phase-session-service.js";
 import { inspectWork } from "../src/services/work-inspection-service.js";
 import { makeTempRepo } from "./helpers.js";
 
@@ -73,7 +72,7 @@ describe("work inspection service", () => {
       },
       updatedAt: "2026-01-01T00:00:11.000Z"
     });
-    writePhaseRunRecord(workItemRepoPhaseRunsDir(paths, item.id, "execute", "backend"), {
+    writePhaseRunRecord(phaseRunDir(paths, item.id, "execute", "backend"), {
       schemaVersion: 1,
       phase: "execute",
       runId: "2026-01-01T00-00-01-000Z",
@@ -103,7 +102,7 @@ describe("work inspection service", () => {
       },
       exitCode: null
     });
-    writeRunningScopedPhaseSession(paths, {
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "review", "backend"), {
       phase: "review",
       workId: item.id,
       repoId: "backend",

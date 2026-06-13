@@ -8,8 +8,8 @@ vi.mock("../src/infra/tmux.js", () => ({
 }));
 import { buildWorkspaceBoardRow } from "../src/board/workspace-board.js";
 import { buildWorkBoard } from "../src/board/work-board.js";
-import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
-import { writeRunningScopedPhaseSession } from "../src/services/phase-session-service.js";
+import { resolveWorkspacePathsForInit, phaseRunDir } from "../src/infra/paths.js";
+import { writeRunningPhaseRun } from "../src/infra/phase-run.js";
 import { initializeWorkspace, createTask } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { writeTaskMeta } from "../src/storage/meta.js";
@@ -84,7 +84,7 @@ describe("board status", () => {
       title: "Add API behavior"
     });
     vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-spec");
-    writeRunningScopedPhaseSession(paths, {
+    writeRunningPhaseRun(phaseRunDir(paths, item.id, "spec", null), {
       phase: "spec",
       workId: item.id,
       repoId: null,
@@ -100,11 +100,13 @@ describe("board status", () => {
       session: {
         provider: "codex",
         transportId: "devtask-spec",
-        providerSessionId: null,
-        conversationId: null,
-        resumeTarget: null,
-        storageRoot: null,
-        transcriptPath: null,
+        resumeContext: {
+          providerSessionId: null,
+          conversationId: null,
+          resumeTarget: null,
+          storageRoot: null,
+          transcriptPath: null
+        },
         summary: "spec session started",
         summaryIsFallback: true
       }

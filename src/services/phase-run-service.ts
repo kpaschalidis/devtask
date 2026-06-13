@@ -1,11 +1,75 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { workItemPhaseRunsDir, workItemLocalDir } from "../infra/paths.js";
-import type { PhaseRunPhase, PhaseRunRecord } from "../infra/phase-run.js";
+import { GLOBAL_PHASES, phaseRunDir, workItemPhaseRunsDir, workItemLocalDir } from "../infra/paths.js";
+import { readRunningPhaseRun, type PhaseRun, type PhaseRunPhase, type PhaseRunRecord } from "../infra/phase-run.js";
+import { tmuxSessionExists } from "../infra/tmux.js";
 
 export interface PhaseRunSummary extends PhaseRunRecord {
   filePath: string;
+}
+
+export interface PhaseSessionSummary {
+  phase: PhaseRunPhase;
+  workId: string;
+  repoId: string | null;
+  taskId: string | null;
+  runId: string;
+  tmuxSession: string;
+  status: string;
+  live: boolean;
+  startedAt: string;
+  updatedAt: string;
+  promptPath: string;
+  outputPath: string;
+  artifacts: Record<string, string>;
+  session: PhaseRun["session"];
+}
+
+export function listWorkPhaseSessions(paths: DevtaskPaths, workId: string): PhaseSessionSummary[] {
+  const base = path.join(paths.localDir, "work", workId, "phases");
+  if (!fs.existsSync(base)) {
+    return [];
+  }
+
+  const entries: PhaseSessionSummary[] = [];
+  const managedPhases: PhaseRunPhase[] = ["spec", "plan", "repo-plan", "review", "execute"];
+  for (const phase of managedPhases) {
+    const phaseDir = path.join(base, phase);
+    if (!fs.existsSync(phaseDir)) {
+      continue;
+    }
+    if (GLOBAL_PHASES.has(phase)) {
+      const run = readRunningPhaseRun(phaseRunDir(paths, workId, phase, null));
+      if (run) entries.push(toPhaseSessionSummary(run));
+      continue;
+    }
+    for (const repoDir of fs.readdirSync(phaseDir)) {
+      const run = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoDir));
+      if (run) entries.push(toPhaseSessionSummary(run));
+    }
+  }
+
+  return entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function toPhaseSessionSummary(run: PhaseRun): PhaseSessionSummary {
+  return {
+    phase: run.phase,
+    workId: run.workId,
+    repoId: run.repoId,
+    taskId: run.taskId,
+    runId: run.runId,
+    tmuxSession: run.tmuxSession ?? "",
+    status: run.status,
+    live: run.status === "running" && tmuxSessionExists(run.tmuxSession ?? ""),
+    startedAt: run.startedAt,
+    updatedAt: run.updatedAt,
+    promptPath: run.promptPath,
+    outputPath: run.outputPath,
+    artifacts: run.artifacts,
+    session: run.session
+  };
 }
 
 export interface ListWorkPhaseRunsOptions {
@@ -58,7 +122,7 @@ function listPhaseRuns(
     return [];
   }
 
-  if (phase === "spec" || phase === "plan" || phase === "compound") {
+  if (GLOBAL_PHASES.has(phase)) {
     return readRunFiles(phaseDir);
   }
 
