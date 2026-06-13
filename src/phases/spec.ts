@@ -11,8 +11,7 @@ import {
 import { readRunningPhaseRun, updateRunningPhaseRun } from "../infra/phase-run.js";
 import { tmuxSessionExists, tmuxSessionName } from "../infra/tmux.js";
 import { buildSpecPrompt } from "../prompts/spec-plan.js";
-import { getWorkItem, updateWorkItemStatus } from "../storage/work-store.js";
-import { updateRecentWork } from "../storage/global-index.js";
+import { getWorkItem } from "../storage/work-item.js";
 import {
   launchPhaseFresh,
   launchPhaseResume,
@@ -97,8 +96,6 @@ export const specPhase: PhaseConfig = {
         2
       )}\n`
     );
-    updateWorkItemStatus(paths, workId, status === "spec-ready" ? "spec-ready" : "failed");
-    await updateRecentWork(paths, getWorkItem(paths, workId));
     return { status, artifacts: { specPath } };
   },
 

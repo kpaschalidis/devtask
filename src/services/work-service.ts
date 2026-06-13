@@ -56,6 +56,18 @@ import { DevtaskError } from "../infra/errors.js";
 import { getLatestWorkPhaseRun } from "./phase-run-service.js";
 import { launchPhaseFresh } from "../phases/runner.js";
 import { specPhase } from "../phases/spec.js";
+import { planPhase } from "../phases/plan.js";
+import { repoPlanPhase } from "../phases/repo-plan.js";
+import { reviewPhase } from "../phases/review.js";
+import {
+  executePhase,
+  freshExecuteWork,
+  runExecuteWork,
+  summarizeExecuteWorkStatus,
+  sendRawExecuteFeedback,
+  type ExecuteTaskResult,
+  type ExecuteWorkResult
+} from "../phases/execute.js";
 import { buildReviewPrompt } from "../prompts/review.js";
 import { buildCompoundPrompt } from "../prompts/compound.js";
 import { buildRepoPlanPrompt } from "../prompts/repo-plan.js";
@@ -185,7 +197,7 @@ export interface RepoPlanWorkResult {
   generatedAt: string;
 }
 
-export type { ExecuteTaskResult, ExecuteWorkResult } from "./execute-service.js";
+export type { ExecuteTaskResult, ExecuteWorkResult };
 
 export interface CompoundWorkResult {
   workId: string;
@@ -241,24 +253,13 @@ export async function attachWorkPhase(
   repoId?: string
 ): Promise<void> {
   const scopeRepoId = repoId ?? null;
-  if (phase === "spec") {
-    await specPhase.attach(paths, workId, null);
-    return;
+  switch (phase) {
+    case "spec": return specPhase.attach(paths, workId, null);
+    case "plan": return planPhase.attach(paths, workId, null);
+    case "repo-plan": return repoPlanPhase.attach(paths, workId, scopeRepoId);
+    case "review": return reviewPhase.attach(paths, workId, scopeRepoId);
+    case "execute": return executePhase.attach(paths, workId, scopeRepoId);
   }
-  const dir = phaseRunDir(paths, workId, phase, scopeRepoId);
-  const current = readRunningPhaseRun(dir);
-  const isLive = current?.status === "running" && tmuxSessionExists(current.tmuxSession ?? "");
-  if (isLive) {
-    attachTmuxSession(current!.tmuxSession!);
-    return;
-  }
-  if (phase === "execute") {
-    const scope = scopeRepoId ? `${workId}/${scopeRepoId}` : workId;
-    if (!current) throw new DevtaskError(`No execute session exists for ${scope}`);
-    throw new DevtaskError(`The latest execute session for ${scope} is not running`);
-  }
-  const launched = await startInteractivePhaseResumeSession(paths, phase, workId, scopeRepoId);
-  attachTmuxSession(launched.tmuxSession);
 }
 
 export function sendWorkPhaseFeedback(
@@ -291,21 +292,25 @@ export function sendWorkPhaseFeedback(
   const repoId = maybeMessage === undefined ? null : repoOrMessage;
   const message = maybeMessage === undefined ? repoOrMessage : maybeMessage;
   if (phase === "execute") {
-    const dir = phaseRunDir(paths, workId, "execute", repoId);
-    const run = readRunningPhaseRun(dir);
-    const scope = repoId ? `${workId}/${repoId}` : workId;
-    if (!run || run.status !== "running" || !tmuxSessionExists(run.tmuxSession ?? "")) {
-      throw new DevtaskError(`No running execute session for ${scope}`);
-    }
-    return sendToTmuxSessionWithConfirmation(run.tmuxSession!, message, { lines: 60 });
+    return sendRawExecuteFeedback(paths, workId, repoId!, message);
   }
-  if (phase === "spec") {
-    return specPhase.sendFeedback(paths, workId, null, message);
+  switch (phase) {
+    case "spec": return specPhase.sendFeedback(paths, workId, null, message);
+    case "plan": return planPhase.sendFeedback(paths, workId, null, message);
+    case "repo-plan": return repoPlanPhase.sendFeedback(paths, workId, repoId, message);
+    case "review": return reviewPhase.sendFeedback(paths, workId, repoId, message);
   }
-  return startPhaseFeedbackSession(paths, phase, workId, message, repoId);
 }
 
-export { freshExecuteWork, executeWork } from "./execute-service.js";
+export { freshExecuteWork };
+
+export async function executeWork(paths: DevtaskPaths, workId: string): Promise<ExecuteWorkResult> {
+  const item = getWorkItem(paths, workId);
+  const result = await runExecuteWork(paths, workId);
+  updateWorkItemStatus(paths, workId, summarizeExecuteWorkStatus(result.tasks));
+  await updateRecentWork(paths, item);
+  return result;
+}
 
 function launchInteractiveResume(cwd: string, tmuxSession: string, command: string): void {
   if (tmuxSessionExists(tmuxSession)) {
@@ -788,7 +793,7 @@ export async function startSpecWork(paths: DevtaskPaths, workId: string): Promis
 }
 
 export async function startPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
-  return startInteractivePhaseWork(paths, "plan", workId, null);
+  return launchPhaseFresh(planPhase, paths, workId, "plan", null);
 }
 
 export async function startRepoPlanWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult[]> {
@@ -816,11 +821,11 @@ export async function startReviewWork(paths: DevtaskPaths, workId: string): Prom
 }
 
 export async function startRepoPlanScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
-  return startInteractivePhaseWork(paths, "repo-plan", workId, repoId);
+  return launchPhaseFresh(repoPlanPhase, paths, workId, "repo-plan", repoId);
 }
 
 export async function startReviewScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
-  return startInteractivePhaseWork(paths, "review", workId, repoId);
+  return launchPhaseFresh(reviewPhase, paths, workId, "review", repoId);
 }
 
 export async function materializeWork(paths: DevtaskPaths, workId: string): Promise<WorkMaterialization> {

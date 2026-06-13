@@ -14,12 +14,12 @@ import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun, type P
 import { newRunId } from "../infra/run-record.js";
 import { collectPhaseMemory } from "../improvement-memory.js";
 import { readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
-import { getWorkItem, updateWorkItemStatus, type WorkItemStatus } from "../storage/work-store.js";
-import { updateRecentWork } from "../storage/global-index.js";
+import { getWorkItem } from "../storage/work-item.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import {
   createBareSession,
   sendLaunchCommand,
+  sendToTmuxSessionWithConfirmation,
   tmuxSessionExists,
   tmuxSessionName,
   waitForTmuxSession,
@@ -27,6 +27,7 @@ import {
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
 import type { TaskMeta } from "../types.js";
+import type { PhaseConfig, PhaseFreshScope, PhaseResult, PhaseScope } from "./types.js";
 
 export interface ExecuteTaskResult {
   repoId: string;
@@ -44,12 +45,95 @@ export interface ExecuteWorkResult {
   generatedAt: string;
 }
 
+export const executePhase: PhaseConfig = {
+  freshScope(_paths, _workId, _repoId, _runId): Promise<PhaseFreshScope> {
+    throw new DevtaskError("execute phase uses launchExecuteTask, not freshScope");
+  },
+
+  resumeScope(_paths, _workId, _repoId, _runId): PhaseScope {
+    throw new DevtaskError("execute phase uses launchExecuteTask, not resumeScope");
+  },
+
+  workspacePath(paths, workId, repoId) {
+    if (!repoId) throw new DevtaskError("execute requires a repo id");
+    const materialization = readWorkMaterialization(paths, workId);
+    const task = materialization?.tasks.find((t) => t.repoId === repoId);
+    if (!task) throw new DevtaskError(`No execute task exists for ${workId}/${repoId}`);
+    return task.worktreePath;
+  },
+
+  async finalize(_paths, workId, repoId, sessionRecord): Promise<PhaseResult> {
+    if (!repoId) throw new DevtaskError("execute finalizer requires a repo id");
+    const resultPath = sessionRecord.artifacts.resultPath;
+    if (!resultPath) throw new DevtaskError(`execute phase artifacts are incomplete for ${workId}/${repoId}`);
+    const result = readTaskResult(resultPath);
+    const known = result.status === "done" || result.status === "blocked" || result.status === "failed";
+    return { status: known ? result.status : "failed", artifacts: { resultPath } };
+  },
+
+  async attach(paths, workId, repoId) {
+    if (!repoId) throw new DevtaskError("execute attach requires a repo id");
+    const dir = phaseRunDir(paths, workId, "execute", repoId);
+    const run = readRunningPhaseRun(dir);
+    const scope = `${workId}/${repoId}`;
+    if (run?.status === "running" && tmuxSessionExists(run.tmuxSession ?? "")) {
+      throw new DevtaskError(`Execute session for ${scope} is running as ${run.tmuxSession!}. Use 'tmux attach -t ${run.tmuxSession!}' to view it.`);
+    }
+    if (!run) throw new DevtaskError(`No execute session exists for ${scope}`);
+    throw new DevtaskError(`The latest execute session for ${scope} is not running`);
+  },
+
+  sendFeedback(paths, workId, repoId, message) {
+    if (!repoId) throw new DevtaskError("execute feedback requires a repo id");
+    const dir = phaseRunDir(paths, workId, "execute", repoId);
+    const run = readRunningPhaseRun(dir);
+    const scope = `${workId}/${repoId}`;
+    if (!run || run.status !== "running" || !tmuxSessionExists(run.tmuxSession ?? "")) {
+      throw new DevtaskError(`No running execute session for ${scope}`);
+    }
+    sendToTmuxSessionWithConfirmation(run.tmuxSession!, message, { lines: 60 });
+    return Promise.resolve({
+      phase: "execute",
+      workId,
+      repoId,
+      taskId: run.taskId,
+      status: "running" as const,
+      tmuxSession: run.tmuxSession!,
+      promptPath: run.promptPath,
+      outputPath: run.outputPath ?? ""
+    });
+  },
+
+  reset(paths, workId, repoId) {
+    if (!repoId) throw new DevtaskError("execute reset requires a repo id");
+    const dir = phaseRunDir(paths, workId, "execute", repoId);
+    updateRunningPhaseRun(dir, { status: "cancelled", updatedAt: new Date().toISOString() });
+  }
+};
+
 export function freshExecuteWork(paths: DevtaskPaths, workId: string, repoId: string): void {
-  freshInteractiveExecuteSession(paths, workId, repoId);
+  const materialization = readWorkMaterialization(paths, workId);
+  const task = materialization?.tasks.find((entry) => entry.repoId === repoId);
+  if (!task) {
+    throw new DevtaskError(`No repo task ${repoId} exists for work ${workId}`);
+  }
+  const storagePaths = taskStoragePaths(paths, task.repoPath);
+  const metaPath = taskMetaPath(storagePaths, task.taskId);
+  const meta = readTaskMeta(metaPath);
+  if (meta.tmuxSession && tmuxSessionExists(meta.tmuxSession)) {
+    throw new DevtaskError(`Execution is already running for ${workId}/${repoId}. Attach instead of starting fresh.`);
+  }
+  writeTaskMeta(metaPath, {
+    ...meta,
+    tmuxSession: null,
+    status: "ready",
+    resultSummary: null,
+    runtime: null,
+    updatedAt: new Date().toISOString()
+  });
 }
 
-export async function executeWork(paths: DevtaskPaths, workId: string): Promise<ExecuteWorkResult> {
-  const item = getWorkItem(paths, workId);
+export async function runExecuteWork(paths: DevtaskPaths, workId: string): Promise<ExecuteWorkResult> {
   const materialization = readWorkMaterialization(paths, workId);
   if (!materialization) {
     throw new Error(`Work ${workId} is not materialized. Run devtask work materialize ${workId} first.`);
@@ -68,9 +152,31 @@ export async function executeWork(paths: DevtaskPaths, workId: string): Promise<
   const dir = workItemResultsDir(paths, workId);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(`${dir}/execute.json`, `${JSON.stringify(result, null, 2)}\n`);
-  updateWorkItemStatus(paths, workId, summarizeExecuteWorkStatus(result.tasks));
-  await updateRecentWork(paths, item);
   return result;
+}
+
+export function summarizeExecuteWorkStatus(
+  tasks: ExecuteTaskResult[]
+): "failed" | "blocked" | "review-ready" | "executing" {
+  if (tasks.some((task) => task.status === "failed")) return "failed";
+  if (tasks.some((task) => task.status === "blocked")) return "blocked";
+  if (tasks.every((task) => task.status === "done")) return "review-ready";
+  return "executing";
+}
+
+export function sendRawExecuteFeedback(
+  paths: DevtaskPaths,
+  workId: string,
+  repoId: string,
+  message: string
+): { confirmed: boolean; output: string } {
+  const dir = phaseRunDir(paths, workId, "execute", repoId);
+  const run = readRunningPhaseRun(dir);
+  const scope = `${workId}/${repoId}`;
+  if (!run || run.status !== "running" || !tmuxSessionExists(run.tmuxSession ?? "")) {
+    throw new DevtaskError(`No running execute session for ${scope}`);
+  }
+  return sendToTmuxSessionWithConfirmation(run.tmuxSession!, message, { lines: 60 });
 }
 
 async function executeMaterializedTask(
@@ -225,20 +331,11 @@ function deriveExecutionStatus(meta: TaskMeta): {
   summary: string | null;
 } {
   const result = readTaskResult(meta.resultPath);
-  if (result.status === "done") {
-    return { status: "done", terminal: true, summary: result.summary };
-  }
-  if (result.status === "blocked") {
-    return { status: "blocked", terminal: true, summary: result.summary };
-  }
-  if (result.status === "failed") {
-    return { status: "failed", terminal: true, summary: result.summary };
-  }
+  if (result.status === "done") return { status: "done", terminal: true, summary: result.summary };
+  if (result.status === "blocked") return { status: "blocked", terminal: true, summary: result.summary };
+  if (result.status === "failed") return { status: "failed", terminal: true, summary: result.summary };
   if (meta.tmuxSession && tmuxSessionExists(meta.tmuxSession)) {
     return { status: "running", terminal: false, summary: meta.resultSummary };
-  }
-  if (meta.status === "paused") {
-    return { status: "paused", terminal: false, summary: meta.resultSummary };
   }
   return { status: "paused", terminal: false, summary: meta.resultSummary };
 }
@@ -248,29 +345,10 @@ function readTaskResult(resultPath: string): { status: string; summary: string |
     const value = JSON.parse(fs.readFileSync(resultPath, "utf8")) as { status?: unknown; reason?: unknown; summary?: unknown };
     const status = typeof value.status === "string" ? value.status : "pending";
     const summarySource = typeof value.reason === "string" ? value.reason : typeof value.summary === "string" ? value.summary : null;
-    return {
-      status,
-      summary: summarySource?.trim() || null
-    };
+    return { status, summary: summarySource?.trim() || null };
   } catch {
-    return {
-      status: "pending",
-      summary: null
-    };
+    return { status: "pending", summary: null };
   }
-}
-
-function summarizeExecuteWorkStatus(tasks: ExecuteTaskResult[]): WorkItemStatus {
-  if (tasks.some((task) => task.status === "failed")) {
-    return "failed";
-  }
-  if (tasks.some((task) => task.status === "blocked")) {
-    return "blocked";
-  }
-  if (tasks.every((task) => task.status === "done")) {
-    return "review-ready";
-  }
-  return "executing";
 }
 
 function persistExecutionMeta(metaPath: string, meta: TaskMeta): TaskMeta {
@@ -319,33 +397,6 @@ function writeExecutePhaseRun(
     },
     exitCode: null
   });
-}
-
-function freshInteractiveExecuteSession(
-  paths: DevtaskPaths,
-  workId: string,
-  repoId: string
-): { taskId: string; repoPath: string; metaPath: string } {
-  const materialization = readWorkMaterialization(paths, workId);
-  const task = materialization?.tasks.find((entry) => entry.repoId === repoId);
-  if (!task) {
-    throw new DevtaskError(`No repo task ${repoId} exists for work ${workId}`);
-  }
-  const storagePaths = taskStoragePaths(paths, task.repoPath);
-  const metaPath = taskMetaPath(storagePaths, task.taskId);
-  const meta = readTaskMeta(metaPath);
-  if (meta.tmuxSession && tmuxSessionExists(meta.tmuxSession)) {
-    throw new DevtaskError(`Execution is already running for ${workId}/${repoId}. Attach instead of starting fresh.`);
-  }
-  writeTaskMeta(metaPath, {
-    ...meta,
-    tmuxSession: null,
-    status: "ready",
-    resultSummary: null,
-    runtime: null,
-    updatedAt: new Date().toISOString()
-  });
-  return { taskId: task.taskId, repoPath: task.repoPath, metaPath };
 }
 
 function recordExecutePhaseSession(
@@ -406,9 +457,7 @@ function recordExecutePhaseSession(
 }
 
 function shellEscape(value: string): string {
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
-    return value;
-  }
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
