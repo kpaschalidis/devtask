@@ -5,7 +5,6 @@ import { CodexAgentRunner } from "./adapters/codex/index.js";
 import { buildCodexCommand } from "./adapters/codex/command.js";
 import { CursorAgentRunner } from "./adapters/cursor/index.js";
 import type { DevtaskConfig } from "./infra/config.js";
-import { captureOutputAsync, getForegroundCommand, isSessionAliveAsync, sendKeyAsync } from "./infra/tmux.js";
 
 export interface SessionHandle {
   id: string;
@@ -302,79 +301,9 @@ export async function resumeAgentPrompt(
   }
 }
 
-export const CODEX_PROCESS_NAME = "codex";
-export const CURSOR_PROCESS_NAME = "cursor";
-export const CLAUDE_PROCESS_NAME = "claude";
-
-const FOREGROUND_ALIASES: Record<string, string[]> = {
-  codex: ["codex", "node"],
-  cursor: ["agent", "node"],
-  claude: ["claude", "node"]
-};
-
-const UPDATE_PROMPT_RE = /Update available!/;
-
-export async function waitForAgentReady(
-  session: string,
-  processName: string,
-  options: { timeoutMs?: number; pollMs?: number } = {}
-): Promise<boolean> {
-  const timeoutMs = options.timeoutMs ?? 20_000;
-  const pollMs = options.pollMs ?? 500;
-  const deadline = Date.now() + timeoutMs;
-  const validForegrounds = new Set(FOREGROUND_ALIASES[processName] ?? [processName]);
-  let stableCount = 0;
-  let lastOutput = "";
-
-  while (Date.now() < deadline) {
-    const [alive, foreground, output] = await Promise.all([
-      isSessionAliveAsync(session),
-      getForegroundCommand(session),
-      captureOutputAsync(session, 20)
-    ]);
-
-    if (!alive) return false;
-
-    if (UPDATE_PROMPT_RE.test(output)) {
-      await sendKeyAsync(session, "Down");
-      await sleep(200);
-      await sendKeyAsync(session, "Enter");
-      stableCount = 0;
-      lastOutput = "";
-      await sleep(pollMs);
-      continue;
-    }
-
-    const isActive = foreground !== null && validForegrounds.has(foreground);
-    if (!isActive) {
-      stableCount = 0;
-      lastOutput = "";
-      await sleep(pollMs);
-      continue;
-    }
-
-    if (output === lastOutput) {
-      stableCount++;
-    } else {
-      stableCount = 0;
-      lastOutput = output;
-    }
-
-    if (stableCount >= 2) return true;
-
-    await sleep(pollMs);
-  }
-
-  return false;
-}
-
 async function closeStream(stream: fs.WriteStream): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     stream.once("error", reject);
     stream.end(resolve);
   });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
