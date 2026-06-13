@@ -669,26 +669,10 @@ const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
     async finalize(paths, workId, _repoId, sessionRecord, session, finishedAt) {
       const planPath = sessionRecord.artifacts.planPath ?? path.join(workItemDir(paths, workId), "plan.md");
       const graphPath = sessionRecord.artifacts.graphPath ?? path.join(workItemDir(paths, workId), "graph.json");
-      const status: WorkPlanRecord["status"] =
+      const status: "planned" | "failed" =
         isFreshArtifactSince(planPath, sessionRecord.startedAt) && isFreshGraphSince(graphPath, sessionRecord.startedAt)
           ? "planned"
           : "failed";
-      const record: WorkPlanRecord = {
-        schemaVersion: 1,
-        phase: "plan",
-        planId: sessionRecord.runId,
-        workId,
-        status,
-        command: "interactive-session",
-        promptPath: sessionRecord.promptPath,
-        outputPath: sessionRecord.outputPath,
-        planPath,
-        graphPath,
-        startedAt: sessionRecord.startedAt,
-        finishedAt,
-        exitCode: status === "planned" ? 0 : null,
-        session
-      };
       updateWorkItemStatus(paths, workId, status === "planned" ? "planned" : "failed");
       await updateRecentWork(paths, getWorkItem(paths, workId));
       return { status, artifacts: { planPath, graphPath } };
