@@ -525,8 +525,8 @@ export async function runManagedPhaseHookFinalizer(
   if (!current || current.runId !== runId || current.status !== "running") {
     return;
   }
-  await finalizeInteractivePhase(paths, phase, workId, repoId, current);
-  if (current.tmuxSession && tmuxSessionExists(current.tmuxSession)) {
+  const { status } = await finalizeInteractivePhase(paths, phase, workId, repoId, current);
+  if (status !== "failed" && current.tmuxSession && tmuxSessionExists(current.tmuxSession)) {
     killTmuxSession(current.tmuxSession);
   }
 }
@@ -617,7 +617,7 @@ async function finalizeInteractivePhase(
   workId: string,
   repoId: string | null,
   sessionRecord: PhaseRun
-): Promise<void> {
+): Promise<{ status: string }> {
   const cfg = PHASE_CONFIGS[phase];
   const workspacePath = cfg.workspacePath(paths, workId, repoId);
   const session = await hydratePhaseSession(paths, sessionRecord.session, workspacePath, sessionRecord.tmuxSession ?? "");
@@ -654,6 +654,7 @@ async function finalizeInteractivePhase(
     taskId: sessionRecord.taskId,
     runId: sessionRecord.runId
   });
+  return { status };
 }
 
 
