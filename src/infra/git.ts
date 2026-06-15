@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DevtaskError } from "./errors.js";
-import { runCommandOrThrow } from "./process-runner.js";
+import { runCommand, runCommandOrThrow } from "./process-runner.js";
 
 export async function assertGitHasHead(root: string): Promise<void> {
   try {
@@ -21,10 +21,23 @@ export async function createTaskWorktree(root: string, branch: string, targetPat
   try {
     await runCommandOrThrow("git", ["worktree", "add", "-b", branch, targetPath, "HEAD"], { cwd: root });
     await excludeDevtaskRuntimeFiles(targetPath);
+    await installWorktreeDependencies(targetPath);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new DevtaskError(`Failed to create worktree for branch ${branch}: ${detail}`);
   }
+}
+
+async function installWorktreeDependencies(worktreePath: string): Promise<void> {
+  if (!fs.existsSync(path.join(worktreePath, "package.json"))) return;
+  const hasYarnLock = fs.existsSync(path.join(worktreePath, "yarn.lock"));
+  const hasPnpmLock = fs.existsSync(path.join(worktreePath, "pnpm-lock.yaml"));
+  const [cmd, args]: [string, string[]] = hasYarnLock
+    ? ["yarn", ["install", "--prefer-offline"]]
+    : hasPnpmLock
+      ? ["pnpm", ["install", "--prefer-offline"]]
+      : ["npm", ["install", "--prefer-offline"]];
+  await runCommand(cmd, args, { cwd: worktreePath });
 }
 
 export async function excludeDevtaskRuntimeFiles(worktreePath: string): Promise<void> {
