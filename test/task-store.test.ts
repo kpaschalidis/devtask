@@ -5,7 +5,7 @@ import { DevtaskError } from "../src/infra/errors.js";
 import { resolvePaths } from "../src/infra/paths.js";
 import { createTask, getTask, initializeStore, listTasks } from "../src/storage/task-store.js";
 import { makeTempRepo } from "./helpers.js";
-import { readConfig, writeConfig } from "../src/infra/config.js";
+import { readConfig } from "../src/infra/config.js";
 import { runCommandOrThrow } from "../src/infra/process-runner.js";
 
 describe("task store", () => {
@@ -27,6 +27,12 @@ describe("task store", () => {
       },
       agent: {
         provider: "codex"
+      },
+      agentSessions: {
+        roots: {
+          codex: null,
+          cursor: null
+        }
       },
       codex: {
         model: null,
@@ -60,7 +66,7 @@ describe("task store", () => {
       status: "created",
       branch: "task/fix-login",
       model: null,
-      command: 'codex exec --full-auto --add-dir "$DEVTASK_TASK_DIR" - < "$DEVTASK_TASK_PATH"',
+      command: "",
       supervisorPid: null,
       childPid: null,
       failCount: 0,
@@ -80,42 +86,18 @@ describe("task store", () => {
     expect(status.stdout).not.toContain(".devtask_result.json");
   });
 
-  it("uses the repo default model when creating managed Codex commands", async () => {
+  it("stores caller-supplied model and command", async () => {
     const repo = await makeTempRepo({ withCommit: true });
     const paths = resolvePaths(repo);
     initializeStore(paths);
-    writeConfig(paths, {
-      schemaVersion: 1,
-      tracker: {
-        provider: null
-      },
-      scm: {
-        provider: null
-      },
-      agent: {
-        provider: "codex"
-      },
-      codex: {
-        model: "gpt-5.2",
-        fullAuto: true
-      },
-      runtime: {
-        mode: "plain",
-        backend: null
-      },
-      runtimeConfigured: true,
-      jira: {
-        baseUrl: null,
-        email: null,
-        cloudId: null
-      },
-      verify: []
+
+    const meta = await createTask(paths, "model-task", {
+      model: "gpt-5.2",
+      command: 'codex exec --full-auto -m gpt-5.2 - < "$DEVTASK_TASK_PATH"'
     });
 
-    const meta = await createTask(paths, "model-task");
-
     expect(meta.model).toBe("gpt-5.2");
-    expect(meta.command).toBe('codex exec --full-auto --add-dir "$DEVTASK_TASK_DIR" -m gpt-5.2 - < "$DEVTASK_TASK_PATH"');
+    expect(meta.command).toBe('codex exec --full-auto -m gpt-5.2 - < "$DEVTASK_TASK_PATH"');
   });
 
   it("lists task summaries in stable id order", async () => {

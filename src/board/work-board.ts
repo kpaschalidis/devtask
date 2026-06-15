@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { planMarkdownPath, resolvePaths, workItemResultsDir, workItemSpecPath } from "../infra/paths.js";
+import { planMarkdownPath, taskStoragePaths, workItemRepoPlansDir, workItemResultsDir, workItemSpecPath } from "../infra/paths.js";
 import { hasTaskPlan } from "../repo-plan.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { getTask } from "../storage/task-store.js";
@@ -39,9 +39,9 @@ export async function buildWorkBoardRows(
   const ciResults = readWorkResultIndex(paths, item.id, "ci");
 
   return materialization.tasks.map((task) => {
-    const repoPaths = resolvePaths(task.repoPath);
-    const meta = getTask(repoPaths, task.taskId);
-    const hasRepoPlan = hasTaskPlan(repoPaths, task.taskId);
+    const storagePaths = taskStoragePaths(paths, task.repoPath);
+    const meta = getTask(storagePaths, task.taskId);
+    const hasRepoPlan = hasTaskPlan(storagePaths, task.taskId);
     const check = checkResults.get(task.repoId) ?? "-";
     const review = reviewResults.get(task.repoId) ?? "-";
     const verify = verifyResults.get(task.repoId) ?? "-";
@@ -69,6 +69,8 @@ function buildUnmaterializedWorkRow(
 ): RepoTaskBoardRow {
   const hasSpec = fs.existsSync(workItemSpecPath(paths, item.id));
   const hasPlan = fs.existsSync(planMarkdownPath(paths, item.id));
+  const hasRepoPlans = fs.existsSync(workItemRepoPlansDir(paths, item.id))
+    && fs.readdirSync(workItemRepoPlansDir(paths, item.id)).some((entry) => entry.endsWith(".md"));
   return {
     repo: "-",
     task: item.id,
@@ -81,7 +83,9 @@ function buildUnmaterializedWorkRow(
     pr: "-",
     updated: item.updatedAt,
     next: hasPlan
-      ? `devtask work repo-plan ${shellQuote(item.id)}`
+      ? hasRepoPlans
+        ? `devtask work materialize ${shellQuote(item.id)}`
+        : `devtask work repo-plan ${shellQuote(item.id)}`
       : hasSpec
         ? `devtask work plan ${shellQuote(item.id)}`
         : `devtask work spec ${shellQuote(item.id)}`
@@ -92,15 +96,15 @@ function deriveTaskPhase(status: string, hasPr: boolean, ci: string): string {
   switch (status) {
     case "created":
     case "planned":
+    case "ready":
       return "planning";
     case "running":
     case "paused":
-      return "implementation";
+      return "execute";
     case "done":
       return "done";
     case "blocked":
     case "failed":
-    case "cancelled":
       return "blocked";
     default:
       if (ci !== "-" && ci !== "skipped") {
@@ -120,6 +124,7 @@ function simplifyStatus(status: string, hasRepoPlan: boolean, hasPr: boolean, ci
   switch (status) {
     case "created":
     case "planned":
+    case "ready":
       return "ready";
     case "running":
       return "running";
@@ -131,8 +136,6 @@ function simplifyStatus(status: string, hasRepoPlan: boolean, hasPr: boolean, ci
       return "blocked";
     case "failed":
       return "failed";
-    case "cancelled":
-      return "cancelled";
     default:
       if (ci === "passed") {
         return "done";
@@ -161,8 +164,11 @@ function nextCommand(
   if (!hasRepoPlan) {
     return `devtask work repo-plan ${shellQuote(workId)}`;
   }
+  if (status === "created" || status === "planned" || status === "ready") {
+    return `devtask work execute ${shellQuote(workId)}`;
+  }
   if (hasSession && (status === "running" || status === "paused")) {
-    return `devtask session attach ${shellQuote(workId)} ${shellQuote(repoId)}`;
+    return `devtask work execute attach ${shellQuote(workId)} ${shellQuote(repoId)}`;
   }
   if (check === "-") {
     return `devtask work check ${shellQuote(workId)}`;

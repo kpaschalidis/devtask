@@ -1,16 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { planMarkdownPath, taskDir, taskMetaPath } from "./infra/paths.js";
-import { createDefaultAgentRunner, runAgentPrompt } from "./agent.js";
+import { planMarkdownPath, phaseRunDir, taskDir, taskMetaPath } from "./infra/paths.js";
+import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "./agent.js";
+import type { AgentSessionRef } from "./agent-session.js";
+import { writePhaseRunRecord } from "./infra/session-run.js";
+import { collectPhaseMemory } from "./improvement-memory.js";
 import { newRunId } from "./infra/run-record.js";
 import { runCommand } from "./infra/process-runner.js";
 import { readTaskMeta, writeTaskMeta } from "./storage/meta.js";
 import type { TaskMeta } from "./types.js";
-import { buildRepoPlanPrompt } from "./prompts/repo-plan.js";
+import { loadInstruction } from "./instructions/loader.js";
 
 export interface PlanRecord {
   schemaVersion: 1;
+  phase: "repo-plan";
   planId: string;
   taskId: string;
   status: "planned" | "blocked" | "failed";
@@ -22,6 +26,7 @@ export interface PlanRecord {
   finishedAt: string;
   exitCode: number | null;
   worktreeChanged: boolean;
+  session: AgentSessionRef;
 }
 
 export interface PlanAgentStart {
@@ -34,12 +39,19 @@ export interface PlanAgentStart {
 export async function runPlanAgent(
   paths: DevtaskPaths,
   meta: TaskMeta,
+  context: {
+    workspacePaths: DevtaskPaths;
+    workId: string;
+    repoId: string;
+  },
   options: {
     model?: string | null;
     fullAuto?: boolean;
     onStart?: (start: PlanAgentStart) => void;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
+    resumeSession?: AgentSessionRef | null;
+    promptOverride?: string | null;
   }
 ): Promise<PlanRecord> {
   const planId = newRunId();
@@ -57,7 +69,16 @@ export async function runPlanAgent(
   removeIfExists(runtimeResultPath);
   const task = readTextIfExists(meta.taskPath).trim();
   const state = readTextIfExists(meta.statePath).trim();
-  const prompt = buildRepoPlanPrompt(meta, runtimePlanPath, planPath, task || "(task file is empty)", state || "(state file is empty)");
+  const memory = collectPhaseMemory(context.workspacePaths, "planning", { repoId: context.repoId });
+  const prompt = options.promptOverride?.trim()
+    ? options.promptOverride.trim()
+    : loadInstruction("repo-plan", {
+        TASK_ID: meta.id,
+        TASK_CONTENT: task || "(task file is empty)",
+        STATE_CONTENT: state || "(state file is empty)",
+        PLAN_PATH: runtimePlanPath,
+        MEMORY: memory ? `${memory}\n\n` : ""
+      });
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const beforeStatus = await readGitStatus(meta.worktreePath);
@@ -66,6 +87,12 @@ export async function runPlanAgent(
     tracker: { provider: null },
     scm: { provider: null },
     agent: { provider: "codex" },
+    agentSessions: {
+      roots: {
+        codex: null,
+        cursor: null
+      }
+    },
     codex: { model: options.model ?? null, fullAuto: options.fullAuto !== false },
     runtime: { mode: "attachable", backend: "tmux" },
     runtimeConfigured: false,
@@ -85,15 +112,32 @@ export async function runPlanAgent(
       DEVTASK_RESULT_PATH: runtimeResultPath
     }
   } as const;
-  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  const command = options.resumeSession
+    ? (runner.buildResumeCommand?.(options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }) ?? "agent-resume")
+    : (runner.buildStartCommand?.(startOptions) ?? "agent-run");
   options.onStart?.({ command, outputPath, promptPath, planPath });
   const startedAt = new Date().toISOString();
-  const result = await runAgentPrompt(runner, startOptions, prompt, {
-    outputPath,
-    onOutput: (chunk) => {
-      options.onStdout?.(chunk);
-    }
-  });
+  const result = options.resumeSession
+    ? await resumeAgentPrompt(runner, options.resumeSession, {
+        workspacePath: startOptions.workspacePath,
+        model: startOptions.model ?? null,
+        prompt
+      }, prompt, {
+        outputPath,
+        onOutput: (chunk) => {
+          options.onStdout?.(chunk);
+        }
+      })
+    : await runAgentPrompt(runner, startOptions, prompt, {
+        outputPath,
+        onOutput: (chunk) => {
+          options.onStdout?.(chunk);
+        }
+      });
   const finishedAt = new Date().toISOString();
   persistRuntimePlan(runtimePlanPath, planPath);
   persistRuntimeResult(runtimeResultPath, meta.resultPath);
@@ -113,6 +157,7 @@ export async function runPlanAgent(
 
   const record: PlanRecord = {
     schemaVersion: 1,
+    phase: "repo-plan",
     planId,
     taskId: meta.id,
     status,
@@ -123,10 +168,29 @@ export async function runPlanAgent(
     startedAt,
     finishedAt,
     exitCode: result.status === "completed" ? 0 : null,
-    worktreeChanged
+    worktreeChanged,
+    session: result.session
   };
 
   fs.writeFileSync(path.join(plansDir, `${planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
+  writePhaseRunRecord(phaseRunDir(context.workspacePaths, context.workId, "repo-plan", context.repoId), {
+    schemaVersion: 1,
+    phase: "repo-plan",
+    runId: planId,
+    workId: context.workId,
+    repoId: context.repoId,
+    taskId: meta.id,
+    status,
+    promptPath,
+    outputPath,
+    startedAt,
+    finishedAt,
+    session: result.session,
+    artifacts: {
+      planPath
+    },
+    exitCode: result.status === "completed" ? 0 : null
+  });
   writeTaskMeta(taskMetaPath(paths, meta.id), {
     ...readTaskMeta(taskMetaPath(paths, meta.id)),
     status,
@@ -161,11 +225,17 @@ export function hasTaskPlan(paths: DevtaskPaths, id: string): boolean {
 export function buildPlanPromptForTest(
   meta: TaskMeta,
   writablePlanPath: string,
-  finalPlanPath = writablePlanPath
+  _finalPlanPath = writablePlanPath
 ): string {
   const task = readTextIfExists(meta.taskPath).trim();
   const state = readTextIfExists(meta.statePath).trim();
-  return buildRepoPlanPrompt(meta, writablePlanPath, finalPlanPath, task || "(task file is empty)", state || "(state file is empty)");
+  return loadInstruction("repo-plan", {
+    TASK_ID: meta.id,
+    TASK_CONTENT: task || "(task file is empty)",
+    STATE_CONTENT: state || "(state file is empty)",
+    PLAN_PATH: writablePlanPath,
+    MEMORY: ""
+  });
 }
 
 async function readGitStatus(worktreePath: string): Promise<string> {

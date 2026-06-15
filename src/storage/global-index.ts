@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DevtaskError } from "../infra/errors.js";
-import { globalDevtaskDir, resolveWorkspacePaths, type DevtaskPaths } from "../infra/paths.js";
-import { workGraphPath, workPlanPath } from "../global-plan.js";
+import { globalDevtaskDir, resolveWorkspacePaths, workItemGraphPath, workItemPlanPath, type DevtaskPaths } from "../infra/paths.js";
 import { getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
 import { buildWorkspaceBoardRow } from "../board/workspace-board.js";
 
@@ -176,8 +175,8 @@ async function buildRecentWorkEntry(
     sourceType: item.source.type,
     status: boardRow.status,
     updatedAt: boardRow.updatedAt,
-    planPath: workPlanPath(paths, item.id),
-    graphPath: workGraphPath(paths, item.id)
+    planPath: workItemPlanPath(paths, item.id),
+    graphPath: workItemGraphPath(paths, item.id)
   };
 }
 

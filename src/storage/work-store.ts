@@ -4,7 +4,19 @@ import { DevtaskError } from "../infra/errors.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { workItemDir, workItemJsonPath, workItemLocalDir, workItemSourcePath, workItemStatePath } from "../infra/paths.js";
 
-export type WorkItemStatus = "created";
+export const WORK_ITEM_STATUSES = [
+  "created",
+  "planned",
+  "materialized",
+  "executing",
+  "review-ready",
+  "pr-open",
+  "completed",
+  "blocked",
+  "failed"
+] as const;
+
+export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
 
 export type WorkItemSource =
   | {
@@ -85,6 +97,17 @@ export function getWorkItem(paths: DevtaskPaths, id: string): WorkItem {
   return parseWorkItem(JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown);
 }
 
+export function updateWorkItemStatus(paths: DevtaskPaths, id: string, status: WorkItemStatus): WorkItem {
+  const current = getWorkItem(paths, id);
+  const next: WorkItem = {
+    ...current,
+    status,
+    updatedAt: new Date().toISOString()
+  };
+  fs.writeFileSync(workItemJsonPath(paths, id), `${JSON.stringify(next, null, 2)}\n`);
+  return next;
+}
+
 export function listWorkItems(paths: DevtaskPaths): WorkItem[] {
   if (!fs.existsSync(paths.workDir)) {
     return [];
@@ -132,14 +155,14 @@ function parseWorkItem(value: unknown): WorkItem {
   const id = requireString(value, "id");
   assertValidWorkItemId(id);
   const status = requireString(value, "status");
-  if (status !== "created") {
+  if (!WORK_ITEM_STATUSES.includes(status as WorkItemStatus)) {
     throw new DevtaskError(`Invalid work item metadata: unsupported status ${status}`);
   }
 
   return {
     schemaVersion: 1,
     id,
-    status,
+    status: status as WorkItemStatus,
     source: parseWorkItemSource(value.source),
     createdAt: requireString(value, "createdAt"),
     updatedAt: requireString(value, "updatedAt")

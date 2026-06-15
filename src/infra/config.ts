@@ -12,6 +12,12 @@ export interface DevtaskConfig {
   agent: {
     provider: "codex" | "cursor";
   };
+  agentSessions: {
+    roots: {
+      codex: string | null;
+      cursor: string | null;
+    };
+  };
   codex: {
     model: string | null;
     fullAuto: boolean;
@@ -39,6 +45,12 @@ export const DEFAULT_CONFIG: DevtaskConfig = {
   },
   agent: {
     provider: "codex"
+  },
+  agentSessions: {
+    roots: {
+      codex: null,
+      cursor: null
+    }
   },
   codex: {
     model: null,
@@ -69,6 +81,7 @@ export function readConfig(paths: DevtaskPaths): DevtaskConfig {
     tracker: parseTrackerConfig(value.tracker, jira),
     scm: parseScmConfig(value.scm),
     agent: parseAgentConfig(value.agent),
+    agentSessions: parseAgentSessionsConfig(value.agentSessions),
     codex: {
       model: typeof value.codex?.model === "string" ? value.codex.model : null,
       fullAuto: typeof value.codex?.fullAuto === "boolean" ? value.codex.fullAuto : true
@@ -88,6 +101,25 @@ function parseAgentConfig(value: unknown): DevtaskConfig["agent"] {
   const record = value as { provider?: unknown };
   return {
     provider: record.provider === "cursor" ? "cursor" : "codex"
+  };
+}
+
+function parseAgentSessionsConfig(value: unknown): DevtaskConfig["agentSessions"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_CONFIG.agentSessions;
+  }
+
+  const record = value as { roots?: unknown };
+  if (typeof record.roots !== "object" || record.roots === null || Array.isArray(record.roots)) {
+    return DEFAULT_CONFIG.agentSessions;
+  }
+
+  const roots = record.roots as { codex?: unknown; cursor?: unknown };
+  return {
+    roots: {
+      codex: typeof roots.codex === "string" && roots.codex.trim() ? roots.codex.trim() : null,
+      cursor: typeof roots.cursor === "string" && roots.cursor.trim() ? roots.cursor.trim() : null
+    }
   };
 }
 

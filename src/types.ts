@@ -1,12 +1,12 @@
 export const TASK_STATUSES = [
   "created",
   "planned",
+  "ready",
   "running",
   "paused",
   "blocked",
   "done",
-  "failed",
-  "cancelled"
+  "failed"
 ] as const;
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -24,6 +24,8 @@ export interface TaskMeta {
   id: string;
   status: TaskStatus;
   runtime: TaskRuntimeInfo | null;
+  agentThreadId: string | null;
+  agentSessionId: string | null;
   branch: string;
   worktreePath: string;
   taskPath: string;
@@ -36,6 +38,7 @@ export interface TaskMeta {
   tmuxSession: string | null;
   agentSessionMode: "direct" | null;
   prUrl: string | null;
+  resultSummary: string | null;
   failCount: number;
   maxRetries: number;
   createdAt: string;

@@ -8,7 +8,7 @@ This document describes the current storage model implemented by `devtask`.
 - durable workspace artifacts live under `~/.devtask/workspaces/<workspaceId>/`
 - shared artifacts and local operational state are split
 - repo-local state stays minimal
-- worktrees remain repo-local execution surfaces
+- worktrees live under workspace-local global storage as execution surfaces
 
 ## Scope Model
 
@@ -110,15 +110,22 @@ Examples:
 - `work/<workId>/reviews/`
 - `work/<workId>/plans/`
 - `work/<workId>/spec-runs/`
+- `work/<workId>/phase-runs/<phase>/...`
+
+Observability-relevant local artifacts include:
+- task metadata with runtime state, paused/blocked reasons, tmux session name, and execution/runtime identifiers
+- persisted phase-run records that link phase status to prompt path, output path, artifact paths, and provider-neutral session metadata
+- persisted per-work session registry entries that record provider, conversation/session ids, resume target, transcript path, and storage root for the latest runs
+- materialization, result, review, and live phase-session artifacts used by `work diagnose`, `work inspect`, `work runs`, and phase-specific attach/feedback commands
 
 ## Repo-Local State
 
 Repo-local `devtask` state is intentionally minimized.
 
-Current location:
+Current location for workspace flows:
 
 ```text
-<repo-root>/.devtask/worktrees/
+~/.devtask/workspaces/<workspaceId>/local/worktrees/
 ```
 
 Purpose:

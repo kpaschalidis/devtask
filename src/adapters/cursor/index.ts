@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ActivityState, AgentRunner, AgentStartOptions, RunEvent, RunOptions, SessionHandle } from "../../agent.js";
+import { emptyAgentSessionRef, type AgentSessionRef } from "../../agent-session.js";
 import { captureOutputAsync, createBareSession, getForegroundCommand, isSessionAliveAsync, killTmuxSession, sendLaunchCommand, sendMessageAsync, writeLaunchScript } from "../../infra/tmux.js";
 import { buildCursorCommand } from "./command.js";
 
@@ -44,6 +45,13 @@ export class CursorAgentRunner implements AgentRunner {
     });
   }
 
+  buildInteractiveStartCommand(options: AgentStartOptions, _prompt: string): { command: string; session: AgentSessionRef } {
+    return {
+      command: buildCursorLaunchCommand(options, this.config.model),
+      session: emptyAgentSessionRef("cursor")
+    };
+  }
+
   async start(options: AgentStartOptions): Promise<SessionHandle> {
     const sessionName = `devtask-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
@@ -73,7 +81,15 @@ export class CursorAgentRunner implements AgentRunner {
       lastOutput: initialOutput
     });
 
-    return { id: sessionName, threadId: null };
+    return {
+      id: sessionName,
+      provider: "cursor",
+      providerSessionId: null,
+      conversationId: null,
+      resumeTarget: null,
+      storageRoot: null,
+      transcriptPath: null
+    };
   }
 
   async *run(session: SessionHandle, prompt: string, opts?: RunOptions): AsyncIterable<RunEvent> {
@@ -177,7 +193,7 @@ export class CursorAgentRunner implements AgentRunner {
     return (await hasRecentActivitySignal(state.workspacePath)) ? "active" : "idle";
   }
 
-  async getSessionInfo(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean; agentSessionId: null } | null> {
+  async getSessionInfo(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean } | null> {
     const state = this.sessionStates.get(session.id);
     if (!state) {
       return null;
@@ -190,10 +206,10 @@ export class CursorAgentRunner implements AgentRunner {
 
     return {
       summary,
-      summaryIsFallback: true,
-      agentSessionId: null
+      summaryIsFallback: true
     };
   }
+
 }
 
 function buildCursorLaunchCommand(options: AgentStartOptions, fallbackModel?: string): string {
@@ -207,6 +223,7 @@ function buildCursorLaunchCommand(options: AgentStartOptions, fallbackModel?: st
   }
   return parts.join(" ");
 }
+
 
 function buildAgentEnvResetCommand(): string {
   return "unset CODEX_THREAD_ID CODEX_INTERNAL_ORIGINATOR_OVERRIDE CODEX_CI CODEX_SHELL";

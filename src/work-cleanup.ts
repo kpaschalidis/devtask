@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { cleanupTask, planTaskCleanup, type CleanupPlan } from "./cleanup.js";
 import type { DevtaskPaths } from "./infra/paths.js";
-import { resolvePaths, workItemDir } from "./infra/paths.js";
+import { taskStoragePaths, workItemDir } from "./infra/paths.js";
 import { readWorkMaterialization } from "./work-materializer.js";
 import type { WorkItem } from "./storage/work-store.js";
 
@@ -28,8 +28,8 @@ export async function cleanupWorkItem(
 
   if (materialization) {
     for (const task of materialization.tasks) {
-      const repoPaths = resolvePaths(task.repoPath);
-      const plan = await planTaskCleanup(repoPaths, task.taskId, { keepMetadata: true });
+      const storagePaths = taskStoragePaths(paths, task.repoPath);
+      const plan = await planTaskCleanup(storagePaths, task.taskId, { keepMetadata: true });
       taskPlans.push({ repoId: task.repoId, plan });
       blockers.push(...plan.blockers.map((blocker) => `${task.repoId}/${task.taskId}: ${blocker}`));
     }
@@ -48,7 +48,7 @@ export async function cleanupWorkItem(
 
   if (!options.dryRun && materialization) {
     for (const task of materialization.tasks) {
-      await cleanupTask(resolvePaths(task.repoPath), task.taskId, {
+      await cleanupTask(taskStoragePaths(paths, task.repoPath), task.taskId, {
         force: options.force === true,
         keepMetadata: true
       });

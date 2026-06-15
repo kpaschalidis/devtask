@@ -136,6 +136,13 @@ export function resolveWorkspacePathsForInit(start = process.cwd()): DevtaskPath
   return buildWorkspacePaths(root, deriveWorkspaceId(root));
 }
 
+export function taskStoragePaths(paths: DevtaskPaths, repoRoot?: string): DevtaskPaths {
+  if (paths.workspaceId) {
+    return paths;
+  }
+  return repoRoot ? resolvePaths(repoRoot) : paths;
+}
+
 export function taskDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.tasksDir, id);
 }
@@ -208,6 +215,18 @@ export function workItemSpecPath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemDir(paths, id), "spec.md");
 }
 
+export function workItemValidationContractPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "validation-contract.md");
+}
+
+export function workItemPlanPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "plan.md");
+}
+
+export function workItemGraphPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "graph.json");
+}
+
 export function workItemGraphSnapshotPath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "graph.snapshot.json");
 }
@@ -232,6 +251,22 @@ export function workItemLocalDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.localDir, "work", id);
 }
 
+export function workItemGatesDir(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemLocalDir(paths, id), "gates");
+}
+
+export const GLOBAL_PHASES = new Set(["orchestrate", "compound"]);
+
+export function phaseRunDir(
+  paths: DevtaskPaths,
+  workId: string,
+  phase: string,
+  repoId: string | null
+): string {
+  const base = path.join(workItemLocalDir(paths, workId), "phases", phase);
+  return GLOBAL_PHASES.has(phase) || !repoId ? base : path.join(base, repoId);
+}
+
 export function workItemLocalStatePath(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "state.md");
 }
@@ -240,13 +275,6 @@ export function workItemReviewDir(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "reviews");
 }
 
-export function workItemSpecRunsDir(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemLocalDir(paths, id), "spec-runs");
-}
-
-export function workItemPlanRunsDir(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemLocalDir(paths, id), "plans");
-}
 
 export function readWorkspaceMarker(root: string): WorkspaceMarker {
   const markerPath = workspaceMarkerPath(root);

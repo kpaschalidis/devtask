@@ -20,6 +20,7 @@ describe("planner artifacts", () => {
 
     const record = {
       schemaVersion: 1,
+      phase: "repo-plan",
       planId: "2026-01-01T00-00-00-000Z",
       taskId: meta.id,
       status: "planned",
@@ -30,7 +31,18 @@ describe("planner artifacts", () => {
       startedAt: "2026-01-01T00:00:00.000Z",
       finishedAt: "2026-01-01T00:00:01.000Z",
       exitCode: 0,
-      worktreeChanged: false
+      worktreeChanged: false,
+      session: {
+        provider: "codex",
+        transportId: "session-1",
+        providerSessionId: "agent-session-1",
+        conversationId: "thread-1",
+        resumeTarget: "agent-session-1",
+        storageRoot: null,
+        transcriptPath: null,
+        summary: "planned successfully",
+        summaryIsFallback: false
+      }
     };
     fs.writeFileSync(path.join(plansDir, `${record.planId}.json`), `${JSON.stringify(record, null, 2)}\n`);
 
@@ -51,7 +63,8 @@ describe("planner artifacts", () => {
     expect(prompt).toContain("You are in the devtask planning stage.");
     expect(prompt).toContain("The only file you may write is this worktree-local devtask plan artifact");
     expect(prompt).toContain(writablePlanPath);
-    expect(prompt).toContain(finalPlanPath);
+    expect(prompt).not.toContain(finalPlanPath);
+    expect(prompt).toContain("Devtask will persist that plan after the run.");
     expect(prompt).toContain("Do not update task state during planning");
     expect(prompt).toContain("Before writing the plan:");
     expect(prompt).toContain("Relevant Existing Files");
