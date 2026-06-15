@@ -33,6 +33,7 @@ export interface CiCheckResult {
   status: "passed" | "failed" | "running" | "unknown";
   detail: string;
   url: string | null;
+  failureOutput?: string | null;
 }
 
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
@@ -133,6 +134,10 @@ export async function createGitLabMergeRequest(worktreePath: string, options: Pu
 
 export async function pushBranch(worktreePath: string, branch: string): Promise<void> {
   await runCommandOrThrow("git", ["push", "-u", "origin", branch], { cwd: worktreePath });
+}
+
+export async function pushBranchUpdate(worktreePath: string, branch: string): Promise<void> {
+  await runCommandOrThrow("git", ["push", "origin", branch], { cwd: worktreePath });
 }
 
 export async function verifyBitbucketRepositoryAccess(username: string, apiToken: string, remote: RemoteInfo): Promise<void> {

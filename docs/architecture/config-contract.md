@@ -45,6 +45,9 @@ The active config schema is:
     "email": null,
     "cloudId": null
   },
+  "ci": {
+    "maxFixAttempts": 3
+  },
   "verify": []
 }
 ```
@@ -95,6 +98,11 @@ Workspace-level Jira settings:
 - `baseUrl`
 - `email`
 - `cloudId`
+
+### `ci`
+
+- `maxFixAttempts`
+  - maximum number of scoped auto-fix attempts `work ci-watch` should make after CI failures before marking the work item blocked
 
 ### `verify`
 

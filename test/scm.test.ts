@@ -104,7 +104,8 @@ describe("scm", () => {
       provider: "bitbucket",
       status: "passed",
       detail: "pipeline 13: state=completed, result=successful",
-      url: "https://bitbucket.org/studio/backend/pipelines/results/13"
+      url: "https://bitbucket.org/studio/backend/pipelines/results/13",
+      failureOutput: null
     });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.objectContaining({

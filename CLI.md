@@ -90,6 +90,7 @@ devtask work verify <work-id>
 devtask work review <work-id>
 devtask work pr <work-id> [--ready]
 devtask work ci <work-id>
+devtask work ci-watch <work-id>
 devtask work compound <work-id>
 devtask work cleanup <work-id> [--dry-run]
 ```
@@ -105,6 +106,7 @@ Notes:
 - `execute` launches or resumes the attachable execution sessions for those repo tasks
 - `check` and `verify` are deterministic
 - `review` is agent-backed
+- `ci-watch` polls provider CI for existing PRs, captures bounded failure output, runs scoped `ci-fix` agent attempts, reruns deterministic validation, and pushes validated fixes back to the existing PR branch
 - `compound` writes reusable guidance and local notes into file-backed improvement artifacts
 
 ## Board

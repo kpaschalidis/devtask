@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { AgentSessionRef } from "../agent-session.js";
 
-export type SessionPhase = "orchestrate" | "repo-plan" | "review" | "execute" | "compound";
+export type SessionPhase = "orchestrate" | "repo-plan" | "review" | "execute" | "ci-fix" | "compound";
 
 // Unified session run — covers both live sessions and completed records.
 // Live sessions are stored as running.json; completed ones as {runId}.json.
@@ -111,4 +111,3 @@ export function readLatestPhaseRunRecord(dir: string): SessionRunRecord | null {
 
   return JSON.parse(fs.readFileSync(path.join(dir, latest), "utf8")) as SessionRunRecord;
 }
-
