@@ -30,6 +30,7 @@ devtask workspace show
 devtask workspace list
 devtask workspace add [path]
 devtask workspace remove <id-or-path>
+devtask workspace prune
 devtask workspace recent
 devtask workspace where <work-id>
 ```

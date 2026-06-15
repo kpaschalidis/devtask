@@ -118,6 +118,12 @@ devtask work execute attach APP-123 backend
 
 Current observability UX is terminal output plus optional web views. `board serve` starts a local read-only board app that rereads current state on refresh, and `board html` still generates a static snapshot when you want a file artifact.
 
+If your local registry still contains workspaces whose directories were deleted, prune only those stale registrations:
+
+```bash
+devtask workspace prune
+```
+
 ## Team Onboarding
 
 Workspaces are local-first and exportable.

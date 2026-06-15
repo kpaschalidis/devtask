@@ -147,7 +147,13 @@ After all tasks for a feature complete, spawn a validation worker for that featu
   devtask work _validate-worker --work-id {{WORK_ID}} --feature-id FEATURE_ID
 
 Replace FEATURE_ID with the actual feature id from graph.json.
-If validation fails for a feature, address the failures before continuing to the next feature.
+If validation fails for a feature, reopen the affected task for a fix attempt:
+
+  devtask work _execute-fix --work-id {{WORK_ID}} --repo-id REPO_ID
+
+Replace REPO_ID with the repoId from the failed task in graph.json.
+Wait for the execute worker to finish, then re-run the validate worker.
+Repeat until validation passes. If exit code 127 errors persist, the environment is missing a required tool — note this in Gate 2 feedback rather than looping indefinitely.
 
 --- Gate 2: Awaiting approval ---
 
