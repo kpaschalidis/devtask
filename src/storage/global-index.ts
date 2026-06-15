@@ -31,6 +31,11 @@ export interface GlobalIndex {
   updatedAt: string;
 }
 
+export interface PruneGlobalWorkspacesResult {
+  pruned: GlobalWorkspaceEntry[];
+  kept: GlobalWorkspaceEntry[];
+}
+
 export function globalIndexPath(): string {
   return path.join(globalDevtaskDir(), "index.json");
 }
@@ -86,6 +91,27 @@ export function removeWorkspaceFromIndex(idOrPath: string): GlobalWorkspaceEntry
     updatedAt: new Date().toISOString()
   });
   return workspace;
+}
+
+export function pruneMissingWorkspacesFromIndex(): PruneGlobalWorkspacesResult {
+  const index = readGlobalIndex();
+  const pruned = index.workspaces.filter((entry) => !fs.existsSync(entry.path));
+  if (pruned.length === 0) {
+    return {
+      pruned: [],
+      kept: index.workspaces
+    };
+  }
+
+  const prunedPaths = new Set(pruned.map((entry) => entry.path));
+  const kept = index.workspaces.filter((entry) => !prunedPaths.has(entry.path));
+  writeGlobalIndex({
+    schemaVersion: 1,
+    workspaces: kept,
+    recentWork: index.recentWork.filter((entry) => !prunedPaths.has(entry.workspacePath)),
+    updatedAt: new Date().toISOString()
+  });
+  return { pruned, kept };
 }
 
 export async function updateRecentWork(paths: DevtaskPaths, item: WorkItem): Promise<GlobalRecentWorkEntry> {

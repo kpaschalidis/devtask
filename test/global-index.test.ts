@@ -2,7 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { globalIndexPath, readGlobalIndex, registerWorkspace, updateRecentWork } from "../src/storage/global-index.js";
+import {
+  globalIndexPath,
+  pruneMissingWorkspacesFromIndex,
+  readGlobalIndex,
+  registerWorkspace,
+  updateRecentWork
+} from "../src/storage/global-index.js";
 import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
@@ -52,5 +58,38 @@ describe("global index", () => {
       workspacePath: fs.realpathSync(workspace)
     });
     expect(readGlobalIndex().recentWork.map((work) => work.workId)).toEqual(["APP-123"]);
+  });
+
+  it("prunes only stale workspace registrations and their recent work", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-home-"));
+    const liveWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-index-live-"));
+    const staleWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-index-stale-"));
+    process.env.DEVTASK_HOME = home;
+
+    const livePaths = resolveWorkspacePathsForInit(liveWorkspace);
+    initializeWorkspace(livePaths);
+    const liveItem = createManualWorkItem(livePaths, {
+      id: "APP-LIVE",
+      title: "Keep live workspace"
+    });
+    registerWorkspace(livePaths, "live");
+    await updateRecentWork(livePaths, liveItem);
+
+    const stalePaths = resolveWorkspacePathsForInit(staleWorkspace);
+    initializeWorkspace(stalePaths);
+    const staleItem = createManualWorkItem(stalePaths, {
+      id: "APP-STALE",
+      title: "Prune stale workspace"
+    });
+    registerWorkspace(stalePaths, "stale");
+    await updateRecentWork(stalePaths, staleItem);
+    fs.rmSync(staleWorkspace, { recursive: true, force: true });
+
+    const result = pruneMissingWorkspacesFromIndex();
+
+    expect(result.pruned.map((entry) => entry.id)).toEqual(["stale"]);
+    expect(result.kept.map((entry) => entry.id)).toEqual(["live"]);
+    expect(readGlobalIndex().workspaces.map((entry) => entry.id)).toEqual(["live"]);
+    expect(readGlobalIndex().recentWork.map((entry) => entry.workId)).toEqual(["APP-LIVE"]);
   });
 });
