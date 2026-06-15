@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { spawn } from "node:child_process";
 import { Command } from "commander";
 import { DevtaskError } from "../infra/errors.js";
 import { resolveWorkspacePaths } from "../infra/paths.js";
@@ -26,7 +27,8 @@ import {
   getWorkMaterializationState,
   verifyWork,
   approveWorkGate,
-  runValidateWorker
+  runValidateWorker,
+  resetTaskForFix
 } from "../services/work-service.js";
 import { killLiveSession } from "../roles/runner.js";
 import type { GateName } from "../mission/gates.js";
@@ -336,14 +338,16 @@ export function registerWorkCommands(program: Command): void {
         console.log(`Prompt: ${result.promptPath}`);
         console.log(`Output: ${result.outputPath}`);
         if (options.auto) {
-          console.log("Auto-approve mode: gates will be approved automatically.");
-          await watchAndAutoApprove(paths, workId, {
-            onApprove: (gate) => console.log(`Auto-approved ${gate} for ${workId}.`),
-            onComplete: () => console.log(`Orchestrator session for ${workId} completed.`)
-          });
-        } else {
-          console.log(`Attach: devtask work orchestrate attach ${workId}`);
+          const initialOffset = fs.existsSync(result.outputPath) ? fs.statSync(result.outputPath).size : 0;
+          const child = spawn(
+            process.execPath,
+            [process.argv[1], "work", "_auto-approve-worker", "--work-id", workId, "--offset", String(initialOffset)],
+            { detached: true, stdio: "ignore" }
+          );
+          child.unref();
+          console.log("Auto-approve watcher started in background.");
         }
+        console.log(`Attach: devtask work orchestrate attach ${workId}`);
       } catch (error) {
         printError(error);
       }
@@ -382,6 +386,39 @@ export function registerWorkCommands(program: Command): void {
     .action(async (options: { workId: string; featureId: string }) => {
       try {
         await runValidateWorker(resolveWorkspacePaths(), options.workId, options.featureId);
+      } catch (error) {
+        printError(error);
+        process.exit(1);
+      }
+    });
+
+  work.command("_auto-approve-worker", { hidden: true })
+    .requiredOption("--work-id <id>")
+    .option("--offset <n>", "Byte offset into the output file to start scanning from", "0")
+    .option("--message <msg>", "Approval message to send")
+    .action(async (options: { workId: string; offset: string; message?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        await watchAndAutoApprove(paths, options.workId, {
+          initialOutputOffset: parseInt(options.offset, 10),
+          message: options.message,
+          onApprove: (gate) => console.log(`Auto-approved ${gate} for ${options.workId}.`),
+          onComplete: () => console.log(`Orchestrator session for ${options.workId} completed.`)
+        });
+      } catch (error) {
+        printError(error);
+        process.exit(1);
+      }
+    });
+
+  work.command("_execute-fix", { hidden: true })
+    .requiredOption("--work-id <id>")
+    .requiredOption("--repo-id <id>")
+    .action(async (options: { workId: string; repoId: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        resetTaskForFix(paths, options.workId, options.repoId);
+        await executeWork(paths, options.workId);
       } catch (error) {
         printError(error);
         process.exit(1);

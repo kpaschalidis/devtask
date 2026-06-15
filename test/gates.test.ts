@@ -62,7 +62,7 @@ describe("approveWorkGate", () => {
     initializeWorkspace(paths);
 
     await expect(approveWorkGate(paths, "WORK-999", "gate-1")).rejects.toThrow(
-      'No running orchestrator session found for work item "WORK-999"'
+      'No orchestrator session found for work item "WORK-999"'
     );
   });
 });

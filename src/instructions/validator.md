@@ -7,6 +7,17 @@ Worktree: {{WORKTREE_PATH}}
 Validation contract: {{CONTRACT_PATH}}
 Result output: {{RESULT_PATH}}
 
+--- Step 0: Ensure dependencies are installed ---
+
+Before running any build or test commands, install project dependencies so that tools like tsc, vitest, and eslint are available.
+
+Detect the package manager from lock files in the worktree root:
+- yarn.lock present → `yarn install --prefer-offline`
+- pnpm-lock.yaml present → `pnpm install --prefer-offline`
+- otherwise → `npm install --prefer-offline`
+
+If no package.json exists, skip this step. If install exits non-zero, record the command in result.json but continue — build/test commands may still succeed.
+
 --- Step 1: Discover build and test commands ---
 
 Read AGENTS.md in the worktree root. Extract every build, test, and lint command listed there.
@@ -16,6 +27,7 @@ If AGENTS.md does not exist, use common conventions: look for a package.json, Ma
 
 Run each discovered command from the worktree root. Capture the exit code and output for each.
 A non-zero exit code means the command failed.
+If a command exits with code 127 (command not found), record it with exitCode 127 — do not retry. The install step in Step 0 should have made all tools available; a persistent 127 means the tool is genuinely absent from the environment.
 
 --- Step 3: Read the validation contract ---
 
