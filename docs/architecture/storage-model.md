@@ -106,6 +106,7 @@ Examples:
 - `repos.local.json`
 - `tasks/<taskId>/...`
 - `work/<workId>/materialization.json`
+- `work/<workId>/pr-watch-state.json`
 - `work/<workId>/results/*.json`
 - `work/<workId>/reviews/`
 - `work/<workId>/plans/`
@@ -117,6 +118,7 @@ Observability-relevant local artifacts include:
 - persisted phase-run records that link phase status to prompt path, output path, artifact paths, and provider-neutral session metadata
 - persisted per-work session registry entries that record provider, conversation/session ids, resume target, transcript path, and storage root for the latest runs
 - materialization, result, review, and live phase-session artifacts used by `work diagnose`, `work inspect`, `work runs`, and phase-specific attach/feedback commands
+- local PR watch state used by `work pr-watch` to persist processed PR comment ids across restarts
 
 ## Repo-Local State
 

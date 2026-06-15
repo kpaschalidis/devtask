@@ -26,6 +26,7 @@ import {
   getWorkMaterializationState,
   verifyWork,
   approveWorkGate,
+  watchWorkPullRequests,
   runValidateWorker
 } from "../services/work-service.js";
 import { killLiveSession } from "../roles/runner.js";
@@ -403,6 +404,18 @@ export function registerWorkCommands(program: Command): void {
       try {
         await approveWorkGate(resolveWorkspacePaths(), workId, gate, options.message);
         console.log(`Approved ${gate} for work item ${workId}.`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("pr-watch")
+    .description("Poll associated open PR comments and route /devtask instructions to the orchestrator.")
+    .argument("<work-id>")
+    .action(async (workId: string) => {
+      try {
+        await watchWorkPullRequests(resolveWorkspacePaths(), workId);
       } catch (error) {
         printError(error);
       }

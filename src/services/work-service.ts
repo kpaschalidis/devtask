@@ -249,6 +249,7 @@ export function sendWorkPhaseFeedback(
 
 export { approveWorkGate } from "../mission/approve.js";
 export { freshExecuteWork };
+export { watchWorkPullRequests } from "./pr-watch-service.js";
 
 export async function executeWork(paths: DevtaskPaths, workId: string): Promise<ExecuteWorkResult> {
   const item = getWorkItem(paths, workId);
@@ -937,4 +938,3 @@ function removeIfExists(filePath: string): void {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
 }
-
