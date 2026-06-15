@@ -4,7 +4,7 @@ import { readWorkMaterialization } from "../work-materializer.js";
 import { workItemPlanPath, workItemGraphPath, workItemRepoPlansDir } from "../infra/paths.js";
 import { readOrchestrateRecord } from "../services/work-service.js";
 import { listWorkItems, type WorkItem } from "../storage/work-store.js";
-import { listWorkPhaseSessions } from "../services/phase-run-service.js";
+import { listWorkPhaseSessions } from "../services/session-run-service.js";
 import { recommendWorkNextAction } from "./next-actions.js";
 
 export interface WorkspaceBoardRow {

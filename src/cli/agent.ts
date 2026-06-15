@@ -1,10 +1,39 @@
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { Command, InvalidArgumentError } from "commander";
 import { resolveWorkspacePaths } from "../infra/paths.js";
+import { readConfig } from "../infra/config.js";
+import { buildAgentBootstrapCommand } from "../agent.js";
 import { testAgentIntegration } from "../services/agent-service.js";
 import { printError } from "./common.js";
 
 export function registerAgentCommands(program: Command): void {
-  const agent = program.command("agent").description("Inspect and test agent integration.");
+  const agent = program
+    .command("agent")
+    .description("Launch the configured agent interactively, or run agent subcommands.")
+    .option("--context <path>", "File to use as the initial prompt")
+    .action((options: { context?: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const config = readConfig(paths);
+        const prompt = options.context ? fs.readFileSync(options.context, "utf8") : undefined;
+        const command = buildAgentBootstrapCommand(config, {
+          workspacePath: paths.root,
+          model: config.codex.model,
+          fullAuto: config.codex.fullAuto,
+          env: prompt ? { ...process.env, CODEX_INITIAL_PROMPT: prompt } : undefined
+        });
+        const result = spawnSync(command, { shell: true, stdio: "inherit", cwd: paths.root });
+        if (result.error) {
+          throw result.error;
+        }
+        if (result.status !== null && result.status !== 0) {
+          process.exit(result.status);
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
 
   agent
     .command("test")

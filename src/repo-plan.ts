@@ -4,13 +4,13 @@ import type { DevtaskPaths } from "./infra/paths.js";
 import { planMarkdownPath, phaseRunDir, taskDir, taskMetaPath } from "./infra/paths.js";
 import { createDefaultAgentRunner, resumeAgentPrompt, runAgentPrompt } from "./agent.js";
 import type { AgentSessionRef } from "./agent-session.js";
-import { writePhaseRunRecord } from "./infra/phase-run.js";
+import { writePhaseRunRecord } from "./infra/session-run.js";
 import { collectPhaseMemory } from "./improvement-memory.js";
 import { newRunId } from "./infra/run-record.js";
 import { runCommand } from "./infra/process-runner.js";
 import { readTaskMeta, writeTaskMeta } from "./storage/meta.js";
 import type { TaskMeta } from "./types.js";
-import { buildRepoPlanPrompt } from "./prompts/repo-plan.js";
+import { loadInstruction } from "./instructions/loader.js";
 
 export interface PlanRecord {
   schemaVersion: 1;
@@ -72,14 +72,13 @@ export async function runPlanAgent(
   const memory = collectPhaseMemory(context.workspacePaths, "planning", { repoId: context.repoId });
   const prompt = options.promptOverride?.trim()
     ? options.promptOverride.trim()
-    : buildRepoPlanPrompt(
-        meta,
-        runtimePlanPath,
-        planPath,
-        task || "(task file is empty)",
-        state || "(state file is empty)",
-        memory
-      );
+    : loadInstruction("repo-plan", {
+        TASK_ID: meta.id,
+        TASK_CONTENT: task || "(task file is empty)",
+        STATE_CONTENT: state || "(state file is empty)",
+        PLAN_PATH: runtimePlanPath,
+        MEMORY: memory ? `${memory}\n\n` : ""
+      });
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const beforeStatus = await readGitStatus(meta.worktreePath);
@@ -226,11 +225,17 @@ export function hasTaskPlan(paths: DevtaskPaths, id: string): boolean {
 export function buildPlanPromptForTest(
   meta: TaskMeta,
   writablePlanPath: string,
-  finalPlanPath = writablePlanPath
+  _finalPlanPath = writablePlanPath
 ): string {
   const task = readTextIfExists(meta.taskPath).trim();
   const state = readTextIfExists(meta.statePath).trim();
-  return buildRepoPlanPrompt(meta, writablePlanPath, finalPlanPath, task || "(task file is empty)", state || "(state file is empty)");
+  return loadInstruction("repo-plan", {
+    TASK_ID: meta.id,
+    TASK_CONTENT: task || "(task file is empty)",
+    STATE_CONTENT: state || "(state file is empty)",
+    PLAN_PATH: writablePlanPath,
+    MEMORY: ""
+  });
 }
 
 async function readGitStatus(worktreePath: string): Promise<string> {

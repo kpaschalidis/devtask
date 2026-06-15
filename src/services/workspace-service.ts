@@ -67,6 +67,7 @@ export function createWorkspace(start = process.cwd(), options: CreateWorkspaceO
   const root = path.resolve(start);
   const paths = resolveWorkspacePathsForId(root, options.id);
   initializeWorkspace(paths);
+  fs.mkdirSync(path.join(root, ".agents", "skills"), { recursive: true });
   writeWorkspaceMetadata(paths, options.id, options.name);
   if (fs.existsSync(path.join(root, ".git"))) {
     initializeStore(resolvePaths(root));

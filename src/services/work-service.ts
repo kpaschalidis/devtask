@@ -15,7 +15,7 @@ import {
   phaseRunDir
 } from "../infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
-import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun, type PhaseRun } from "../infra/phase-run.js";
+import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun, type SessionRun } from "../infra/session-run.js";
 import { newRunId } from "../infra/run-record.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
 import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization, readWorkGraph, type WorkGraphTask } from "../work-materializer.js";
@@ -34,12 +34,12 @@ import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { runCommand } from "../infra/process-runner.js";
 import { killTmuxSession, tmuxSessionExists } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
-import { launchPhaseFresh } from "../phases/runner.js";
-import type { PhaseConfig } from "../phases/types.js";
-import { orchestratorPhase } from "../phases/orchestrator.js";
-import { reviewPhase } from "../phases/review.js";
+import { launchPhaseFresh } from "../roles/runner.js";
+import type { RoleConfig } from "../roles/types.js";
+import { orchestratorPhase } from "../roles/orchestrator.js";
+import { reviewPhase } from "../roles/validator.js";
 import { collectPhaseMemory } from "../improvement-memory.js";
-import { buildRepoPlanPrompt } from "../prompts/repo-plan.js";
+import { loadInstruction } from "../instructions/loader.js";
 import { getWorkspaceRepo } from "../storage/workspace-repos.js";
 import type { WorkspaceRepo } from "../storage/workspace-repos.js";
 import {
@@ -50,8 +50,7 @@ import {
   sendRawExecuteFeedback,
   type ExecuteTaskResult,
   type ExecuteWorkResult
-} from "../phases/execute.js";
-import { buildCompoundPrompt } from "../prompts/compound.js";
+} from "../roles/execute.js";
 import {
   checkProviderCi,
   createProviderPullRequest,
@@ -248,6 +247,7 @@ export function sendWorkPhaseFeedback(
   }
 }
 
+export { approveWorkGate } from "../mission/approve.js";
 export { freshExecuteWork };
 
 export async function executeWork(paths: DevtaskPaths, workId: string): Promise<ExecuteWorkResult> {
@@ -260,7 +260,7 @@ export async function executeWork(paths: DevtaskPaths, workId: string): Promise<
 
 type InteractivePhase = "orchestrate" | "review";
 
-const PHASE_CONFIGS: Record<InteractivePhase, PhaseConfig> = {
+const PHASE_CONFIGS: Record<InteractivePhase, RoleConfig> = {
   orchestrate: orchestratorPhase,
   review: reviewPhase
 };
@@ -289,14 +289,14 @@ export async function runRepoPlanWorker(paths: DevtaskPaths, workId: string, rep
   const finalPlanPath = workItemRepoPlanPath(paths, workId, repoId);
   const task = buildWorkerTaskDescription(workId, graphTask, repo);
   const state = `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${workId}\n`;
-  const prompt = buildRepoPlanPrompt(
-    { id: graphTask.id },
-    runtimePlanPath,
-    finalPlanPath,
-    task,
-    state,
-    collectPhaseMemory(paths, "planning", { repoId })
-  );
+  const memory = collectPhaseMemory(paths, "planning", { repoId });
+  const prompt = loadInstruction("repo-plan", {
+    TASK_ID: graphTask.id,
+    TASK_CONTENT: task,
+    STATE_CONTENT: state,
+    PLAN_PATH: runtimePlanPath,
+    MEMORY: memory ? `${memory}\n\n` : ""
+  });
   fs.writeFileSync(promptPath, `${prompt}\n`);
   const runner = createDefaultAgentRunner(config);
   const startOptions = {
@@ -358,6 +358,25 @@ export async function startReviewScope(paths: DevtaskPaths, workId: string, repo
   return launchPhaseFresh(reviewPhase, paths, workId, "review", repoId);
 }
 
+export async function runValidateWorker(paths: DevtaskPaths, workId: string, featureId: string): Promise<void> {
+  const graph = readWorkGraph(paths, workId);
+  const feature = graph.features.find((f) => f.id === featureId);
+  if (!feature) {
+    throw new DevtaskError(`No feature "${featureId}" found in graph for work item ${workId}`);
+  }
+  if (!feature.validationRequired) {
+    return;
+  }
+  const featureTasks = graph.tasks.filter((t) => feature.taskIds.includes(t.id));
+  if (featureTasks.length === 0) {
+    throw new DevtaskError(`Feature "${featureId}" has no tasks in graph for work item ${workId}`);
+  }
+  const repoIds = [...new Set(featureTasks.map((t) => t.repoId))];
+  for (const repoId of repoIds) {
+    await startReviewScope(paths, workId, repoId);
+  }
+}
+
 export async function materializeWork(paths: DevtaskPaths, workId: string): Promise<WorkMaterialization> {
   const item = getWorkItem(paths, workId);
   const materialization = await materializeWorkPlan(paths, item);
@@ -388,20 +407,20 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
   const specPath = fs.existsSync(specFile) ? specFile : null;
   const planPath = fs.existsSync(path.join(paths.workDir, workId, "plan.md")) ? path.join(paths.workDir, workId, "plan.md") : null;
   const graphPath = fs.existsSync(path.join(paths.workDir, workId, "graph.json")) ? path.join(paths.workDir, workId, "graph.json") : null;
-  const prompt = buildCompoundPrompt({
-    workId,
-    sourcePath: item.source.artifact,
-    specPath,
-    planPath,
-    graphPath,
-    repoPlansDir: path.join(paths.workDir, workId, "repo-plans"),
-    resultsDir: workItemResultsDir(paths, workId),
-    reviewsDir: workItemReviewDir(paths, workId),
-    sharedPlanningPath,
-    sharedImplementationPath,
-    sharedReviewPath,
-    sharedPatternsPath,
-    localNotesPath
+  const prompt = loadInstruction("compound", {
+    WORK_ID: workId,
+    SOURCE_PATH: item.source.artifact,
+    SPEC_PATH: specPath ?? "-",
+    PLAN_PATH: planPath ?? "-",
+    GRAPH_PATH: graphPath ?? "-",
+    REPO_PLANS_DIR: path.join(paths.workDir, workId, "repo-plans"),
+    RESULTS_DIR: workItemResultsDir(paths, workId),
+    REVIEWS_DIR: workItemReviewDir(paths, workId),
+    SHARED_PLANNING_PATH: sharedPlanningPath,
+    SHARED_IMPLEMENTATION_PATH: sharedImplementationPath,
+    SHARED_REVIEW_PATH: sharedReviewPath,
+    SHARED_PATTERNS_PATH: sharedPatternsPath,
+    LOCAL_NOTES_PATH: localNotesPath
   });
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
@@ -616,7 +635,7 @@ async function finalizeInteractivePhase(
   phase: InteractivePhase,
   workId: string,
   repoId: string | null,
-  sessionRecord: PhaseRun
+  sessionRecord: SessionRun
 ): Promise<{ status: string }> {
   const cfg = PHASE_CONFIGS[phase];
   const workspacePath = cfg.workspacePath(paths, workId, repoId);

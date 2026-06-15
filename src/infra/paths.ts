@@ -251,6 +251,10 @@ export function workItemLocalDir(paths: DevtaskPaths, id: string): string {
   return path.join(paths.localDir, "work", id);
 }
 
+export function workItemGatesDir(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemLocalDir(paths, id), "gates");
+}
+
 export const GLOBAL_PHASES = new Set(["orchestrate", "compound"]);
 
 export function phaseRunDir(

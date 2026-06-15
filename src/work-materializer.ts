@@ -34,15 +34,24 @@ export interface WorkGraphDependency {
 export interface WorkGraphTask {
   id: string;
   repoId: string;
+  featureId: string | null;
   goal: string;
   owns: string[];
   dependencies: WorkGraphDependency[];
+}
+
+export interface WorkGraphFeature {
+  id: string;
+  title: string;
+  taskIds: string[];
+  validationRequired: boolean;
 }
 
 export interface WorkGraph {
   schemaVersion: 1;
   workId: string;
   tasks: WorkGraphTask[];
+  features: WorkGraphFeature[];
   validation: string[];
   openQuestions: string[];
 }
@@ -193,10 +202,12 @@ function parseWorkGraph(value: unknown, expectedWorkId: string): WorkGraph {
   if (!Array.isArray(value.tasks)) {
     throw new DevtaskError("Invalid work graph: tasks must be an array");
   }
+  const rawFeatures = Array.isArray(value.features) ? value.features : [];
   const graph: WorkGraph = {
     schemaVersion: 1,
     workId,
     tasks: value.tasks.map(parseWorkGraphTask),
+    features: rawFeatures.map(parseWorkGraphFeature),
     validation: parseStringArray(value.validation, "validation"),
     openQuestions: parseStringArray(value.openQuestions, "openQuestions")
   };
@@ -213,9 +224,22 @@ function parseWorkGraphTask(value: unknown): WorkGraphTask {
   return {
     id,
     repoId: requireString(value, "repoId", "work graph"),
+    featureId: parseNullableString(value.featureId, "featureId"),
     goal: requireString(value, "goal", "work graph"),
     owns: parseStringArray(value.owns, "owns"),
     dependencies: parseWorkGraphDependencies(value.dependencies)
+  };
+}
+
+function parseWorkGraphFeature(value: unknown): WorkGraphFeature {
+  if (!isRecord(value)) {
+    throw new DevtaskError("Invalid work graph: feature must be an object");
+  }
+  return {
+    id: requireString(value, "id", "work graph feature"),
+    title: requireString(value, "title", "work graph feature"),
+    taskIds: parseStringArray(value.taskIds, "taskIds"),
+    validationRequired: typeof value.validationRequired === "boolean" ? value.validationRequired : true
   };
 }
 

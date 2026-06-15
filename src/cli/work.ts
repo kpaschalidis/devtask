@@ -24,9 +24,13 @@ import {
   startReviewWork,
   startReviewScope,
   getWorkMaterializationState,
-  verifyWork
+  verifyWork,
+  approveWorkGate,
+  runValidateWorker
 } from "../services/work-service.js";
-import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/phase-run-service.js";
+import { killLiveSession } from "../roles/runner.js";
+import type { GateName } from "../mission/gates.js";
+import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/session-run-service.js";
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
 import { recommendWorkNextAction } from "../board/next-actions.js";
@@ -358,6 +362,51 @@ export function registerWorkCommands(program: Command): void {
       } catch (error) {
         printError(error);
         process.exit(1);
+      }
+    });
+
+  work.command("_validate-worker", { hidden: true })
+    .requiredOption("--work-id <id>")
+    .requiredOption("--feature-id <id>")
+    .action(async (options: { workId: string; featureId: string }) => {
+      try {
+        await runValidateWorker(resolveWorkspacePaths(), options.workId, options.featureId);
+      } catch (error) {
+        printError(error);
+        process.exit(1);
+      }
+    });
+
+  work
+    .command("approve")
+    .description("Approve the current gate in a running orchestrator session.")
+    .argument("<work-id>")
+    .option("--gate <gate>", "Gate to approve: gate-1 or gate-2", "gate-1")
+    .option("--message <msg>", "Approval message sent to the orchestrator")
+    .action(async (workId: string, options: { gate: string; message?: string }) => {
+      const gate = options.gate as GateName;
+      if (gate !== "gate-1" && gate !== "gate-2") {
+        console.error(`Invalid gate: ${gate}. Must be gate-1 or gate-2.`);
+        process.exit(1);
+      }
+      try {
+        await approveWorkGate(resolveWorkspacePaths(), workId, gate, options.message);
+        console.log(`Approved ${gate} for work item ${workId}.`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("stop")
+    .description("Kill the running orchestrator session for a work item.")
+    .argument("<work-id>")
+    .action((workId: string) => {
+      try {
+        killLiveSession(resolveWorkspacePaths(), workId, "orchestrate", null);
+        console.log(`Stopped orchestrator session for work item ${workId}.`);
+      } catch (error) {
+        printError(error);
       }
     });
 
