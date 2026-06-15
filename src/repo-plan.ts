@@ -97,6 +97,7 @@ export async function runPlanAgent(
     runtime: { mode: "attachable", backend: "tmux" },
     runtimeConfigured: false,
     jira: { baseUrl: null, email: null, cloudId: null },
+    ci: { maxFixAttempts: 3 },
     verify: []
   });
   const startOptions = {

@@ -171,6 +171,9 @@ function nextCommand(
   if (hasSession && (status === "running" || status === "paused")) {
     return `devtask work execute attach ${shellQuote(workId)} ${shellQuote(repoId)}`;
   }
+  if (ci === "running") {
+    return `devtask work ci-watch ${shellQuote(workId)}`;
+  }
   if (check === "-") {
     return `devtask work check ${shellQuote(workId)}`;
   }
@@ -181,9 +184,6 @@ function nextCommand(
     return `devtask work pr ${shellQuote(workId)}`;
   }
   if (ci === "-" || ci === "skipped") {
-    return `devtask work ci-watch ${shellQuote(workId)}`;
-  }
-  if (ci === "running") {
     return `devtask work ci-watch ${shellQuote(workId)}`;
   }
   return `devtask work board ${shellQuote(workId)}`;

@@ -1,7 +1,8 @@
 import fs from "node:fs";
+import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { readWorkMaterialization } from "../work-materializer.js";
-import { workItemPlanPath, workItemGraphPath, workItemRepoPlansDir } from "../infra/paths.js";
+import { workItemPlanPath, workItemGraphPath, workItemRepoPlansDir, workItemResultsDir } from "../infra/paths.js";
 import { readOrchestrateRecord } from "../services/work-service.js";
 import { listWorkItems, type WorkItem } from "../storage/work-store.js";
 import { listWorkPhaseSessions } from "../services/session-run-service.js";
@@ -32,15 +33,17 @@ export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem
   const activeSession = sessions.find((session) => session.live) ?? null;
   const orchestrateRecord = readOrchestrateRecord(paths, item.id);
   const orchestratedPlan = hasOrchestratedPlan(paths, item.id);
+  const ciWatch = readCiWatchSummary(paths, item.id);
   return {
     workId: item.id,
     title: item.source.title,
     source: item.source.type,
-    status: summarizeStatus(item, orchestrateRecord?.status ?? null, materialization !== null, sessions.some((s) => s.live)),
+    status: summarizeStatus(item, orchestrateRecord?.status ?? null, materialization !== null, sessions.some((s) => s.live), ciWatch.status),
     repos: materialization ? materialization.tasks.map((task) => task.repoId).join(", ") : "-",
     updatedAt: newestUpdatedAt(item.updatedAt, [
       orchestrateRecord?.finishedAt ?? null,
       materialization?.materializedAt ?? null,
+      ciWatch.updatedAt,
       ...sessions.map((session) => session.updatedAt)
     ]),
     next: activeSession
@@ -53,12 +56,38 @@ export async function buildWorkspaceBoardRow(paths: DevtaskPaths, item: WorkItem
   };
 }
 
-function summarizeStatus(item: WorkItem, orchestrateStatus: string | null, isMaterialized: boolean, hasActiveSession: boolean): string {
+function summarizeStatus(
+  item: WorkItem,
+  orchestrateStatus: string | null,
+  isMaterialized: boolean,
+  hasActiveSession: boolean,
+  ciWatchStatus: string | null
+): string {
   if (hasActiveSession) return "executing";
+  if (ciWatchStatus) return `ci-${ciWatchStatus}`;
   if (isMaterialized) return "materialized";
   if (orchestrateStatus === "planned") return "planned";
   if (orchestrateStatus === "failed") return "plan-failed";
   return item.status;
+}
+
+function readCiWatchSummary(paths: DevtaskPaths, workId: string): { status: string | null; updatedAt: string | null } {
+  try {
+    const filePath = path.join(workItemResultsDir(paths, workId), "ci-watch.json");
+    if (!fs.existsSync(filePath)) {
+      return { status: null, updatedAt: null };
+    }
+    const value = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+      status?: unknown;
+      generatedAt?: unknown;
+    };
+    return {
+      status: typeof value.status === "string" ? value.status : null,
+      updatedAt: typeof value.generatedAt === "string" ? value.generatedAt : null
+    };
+  } catch {
+    return { status: null, updatedAt: null };
+  }
 }
 
 function hasOrchestratedPlan(paths: DevtaskPaths, workId: string): boolean {
