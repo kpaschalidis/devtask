@@ -30,6 +30,7 @@ import {
 } from "../services/work-service.js";
 import { killLiveSession } from "../roles/runner.js";
 import type { GateName } from "../mission/gates.js";
+import { watchAndAutoApprove } from "../mission/auto-approve.js";
 import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/session-run-service.js";
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
@@ -326,13 +327,23 @@ export function registerWorkCommands(program: Command): void {
     .description("Start the orchestrator in a background tmux session to produce spec, plan, and repo plans.");
   orchestrate
     .argument("<work-id>")
-    .action(async (workId: string) => {
+    .option("--auto", "Automatically approve all gates without human confirmation")
+    .action(async (workId: string, options: { auto?: boolean }) => {
       try {
-        const result = await startOrchestrateWork(resolveWorkspacePaths(), workId);
+        const paths = resolveWorkspacePaths();
+        const result = await startOrchestrateWork(paths, workId);
         console.log(`Started orchestrate session: ${result.tmuxSession}`);
         console.log(`Prompt: ${result.promptPath}`);
         console.log(`Output: ${result.outputPath}`);
-        console.log(`Attach: devtask work orchestrate attach ${workId}`);
+        if (options.auto) {
+          console.log("Auto-approve mode: gates will be approved automatically.");
+          await watchAndAutoApprove(paths, workId, {
+            onApprove: (gate) => console.log(`Auto-approved ${gate} for ${workId}.`),
+            onComplete: () => console.log(`Orchestrator session for ${workId} completed.`)
+          });
+        } else {
+          console.log(`Attach: devtask work orchestrate attach ${workId}`);
+        }
       } catch (error) {
         printError(error);
       }
