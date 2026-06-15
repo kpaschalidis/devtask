@@ -8,6 +8,7 @@ import {
   listRecentWorkspaceWork,
   listRegisteredWorkspaces,
   locateWork,
+  pruneRegisteredWorkspaces,
   registerWorkspacePath,
   removeRegisteredWorkspace
 } from "../services/workspace-service.js";
@@ -146,6 +147,25 @@ export function registerWorkspaceCommands(program: Command): void {
       try {
         const removed = removeRegisteredWorkspace(idOrPath);
         console.log(`Removed workspace ${removed.id}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  workspace
+    .command("prune")
+    .description("Remove stale registered workspaces whose paths no longer exist.")
+    .action(() => {
+      try {
+        const result = pruneRegisteredWorkspaces();
+        if (result.pruned.length === 0) {
+          console.log("No stale workspaces found");
+          return;
+        }
+        console.log(`Pruned ${result.pruned.length} stale workspace registration${result.pruned.length === 1 ? "" : "s"}`);
+        for (const workspace of result.pruned) {
+          console.log(`${workspace.id}: ${workspace.path}`);
+        }
       } catch (error) {
         printError(error);
       }

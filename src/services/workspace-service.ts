@@ -11,10 +11,12 @@ import {
 } from "../infra/paths.js";
 import {
   findIndexedWork,
+  pruneMissingWorkspacesFromIndex,
   readGlobalIndex,
   refreshWorkspaceRecentWork,
   registerWorkspace,
   removeWorkspaceFromIndex,
+  type PruneGlobalWorkspacesResult,
   type GlobalRecentWorkEntry,
   type GlobalWorkspaceEntry
 } from "../storage/global-index.js";
@@ -131,6 +133,10 @@ export function registerWorkspacePath(workspacePath?: string): GlobalWorkspaceEn
 
 export function removeRegisteredWorkspace(idOrPath: string): GlobalWorkspaceEntry {
   return removeWorkspaceFromIndex(idOrPath);
+}
+
+export function pruneRegisteredWorkspaces(): PruneGlobalWorkspacesResult {
+  return pruneMissingWorkspacesFromIndex();
 }
 
 export async function listRecentWorkspaceWork(currentWorkspacePath?: string): Promise<GlobalRecentWorkEntry[]> {
