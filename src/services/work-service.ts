@@ -12,7 +12,8 @@ import {
   workItemReviewDir,
   workItemRepoPlanPath,
   workItemRepoPlansDir,
-  phaseRunDir
+  phaseRunDir,
+  resultJsonPath
 } from "../infra/paths.js";
 import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
 import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun, type SessionRun } from "../infra/session-run.js";
@@ -937,4 +938,16 @@ function removeIfExists(filePath: string): void {
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
+}
+
+export function resetTaskForFix(paths: DevtaskPaths, workId: string, repoId: string): void {
+  const materialization = readWorkMaterialization(paths, workId);
+  if (!materialization) {
+    throw new DevtaskError(`Work item "${workId}" has not been materialized.`);
+  }
+  const task = materialization.tasks.find((t) => t.repoId === repoId);
+  if (!task) {
+    throw new DevtaskError(`No materialized task found for repo "${repoId}" in work item "${workId}".`);
+  }
+  removeIfExists(resultJsonPath(paths, task.taskId));
 }

@@ -16,6 +16,7 @@ const POLL_INTERVAL_MS = 5000;
 
 export interface AutoApproveOptions {
   message?: string;
+  initialOutputOffset?: number;
   onApprove?: (gate: GateName) => void;
   onComplete?: () => void;
 }
@@ -40,7 +41,8 @@ export async function watchAndAutoApprove(
 
       let output = "";
       try {
-        output = fs.readFileSync(run.outputPath, "utf8");
+        const buf = fs.readFileSync(run.outputPath);
+        output = buf.subarray(options.initialOutputOffset ?? 0).toString("utf8");
       } catch {
         return;
       }

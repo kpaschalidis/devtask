@@ -15,9 +15,9 @@ export async function approveWorkGate(
 ): Promise<void> {
   const runsDir = phaseRunDir(paths, workId, "orchestrate", null);
   const run = readRunningPhaseRun(runsDir);
-  if (!run || run.status !== "running") {
+  if (!run) {
     throw new DevtaskError(
-      `No running orchestrator session found for work item "${workId}". ` +
+      `No orchestrator session found for work item "${workId}". ` +
         `Start one with: devtask work orchestrate ${workId}`
     );
   }
@@ -25,10 +25,8 @@ export async function approveWorkGate(
   const approvalMessage = message?.trim() || "Approved. Proceed to next stage.";
 
   if (run.tmuxSession && tmuxSessionExists(run.tmuxSession)) {
-    // Session is still live and waiting at a gate — inject directly.
     sendToTmuxSession(run.tmuxSession, approvalMessage);
   } else {
-    // Session completed/exited — resume via the standard feedback path.
     await sendWorkPhaseFeedback(paths, "orchestrate", workId, approvalMessage);
   }
 
