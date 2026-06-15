@@ -32,6 +32,9 @@ export interface DevtaskConfig {
     email: string | null;
     cloudId: string | null;
   };
+  ci: {
+    maxFixAttempts: number;
+  };
   verify: string[];
 }
 
@@ -66,6 +69,9 @@ export const DEFAULT_CONFIG: DevtaskConfig = {
     email: null,
     cloudId: null
   },
+  ci: {
+    maxFixAttempts: 3
+  },
   verify: []
 };
 
@@ -89,7 +95,22 @@ export function readConfig(paths: DevtaskPaths): DevtaskConfig {
     runtime: parseRuntimeConfig(value.runtime),
     runtimeConfigured: value.runtimeConfigured === true,
     jira,
+    ci: parseCiConfig(value.ci),
     verify: Array.isArray(value.verify) ? value.verify.filter((item): item is string => typeof item === "string") : []
+  };
+}
+
+function parseCiConfig(value: unknown): DevtaskConfig["ci"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_CONFIG.ci;
+  }
+
+  const record = value as { maxFixAttempts?: unknown };
+  return {
+    maxFixAttempts:
+      typeof record.maxFixAttempts === "number" && Number.isInteger(record.maxFixAttempts) && record.maxFixAttempts >= 0
+        ? record.maxFixAttempts
+        : DEFAULT_CONFIG.ci.maxFixAttempts
   };
 }
 

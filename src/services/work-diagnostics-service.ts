@@ -65,12 +65,13 @@ export function getWorkDiagnostics(paths: DevtaskPaths, workId: string): WorkDia
 
   const reviewResults = readWorkResultIndex(paths, workId, "review");
   const ciResults = readWorkResultIndex(paths, workId, "ci");
+  const ciWatchResults = readWorkResultIndex(paths, workId, "ci-watch");
   const diagnostics = materialization.tasks.map((task) => {
     const storagePaths = taskStoragePaths(paths, task.repoPath);
     const meta = getTask(storagePaths, task.taskId);
     const hasRepoPlan = hasTaskPlan(storagePaths, task.taskId);
     const review = reviewResults.get(task.repoId) ?? "-";
-    const ci = ciResults.get(task.repoId) ?? "-";
+    const ci = ciWatchResults.get(task.repoId) ?? ciResults.get(task.repoId) ?? "-";
     return buildRepoTaskDiagnostic(workId, task.repoId, task.taskId, meta.status, meta.runtime?.reason ?? meta.resultSummary, hasRepoPlan, meta.prUrl !== null, review, ci);
   });
 
@@ -182,10 +183,32 @@ function buildRepoTaskDiagnostic(
       repoId,
       taskId,
       status,
-      next: `devtask work ci ${shellQuote(workId)}`,
+      next: `devtask work ci-watch ${shellQuote(workId)}`,
       waitingOn: "ci",
       reason: "The pull request exists, but CI has not been recorded yet.",
-      missingArtifacts: ["results/ci.json"]
+      missingArtifacts: ["results/ci-watch.json"]
+    };
+  }
+  if (ci === "running") {
+    return {
+      repoId,
+      taskId,
+      status,
+      next: `devtask work ci-watch ${shellQuote(workId)}`,
+      waitingOn: "ci",
+      reason: "CI watch is still polling for a terminal provider result.",
+      missingArtifacts: []
+    };
+  }
+  if (ci === "max-attempts" || ci === "fix-failed" || ci === "validation-failed" || ci === "unknown") {
+    return {
+      repoId,
+      taskId,
+      status,
+      next: `devtask work inspect ${shellQuote(workId)}`,
+      waitingOn: "unblock",
+      reason: `CI watch reached a terminal non-success state: ${ci}.`,
+      missingArtifacts: []
     };
   }
   return {
