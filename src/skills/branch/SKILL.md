@@ -24,7 +24,7 @@ A single work item has one kind. If the work genuinely spans multiple kinds, spl
 
 ## Output
 
-Set `"kind"` at the top level of `graph.json`, alongside `"schemaVersion"` and `"workId"`:
+Set `"kind"` at the top level of `graph.json`, alongside `"schemaVersion"` and `"workId"`. `devtask` enforces the branch naming convention `{kind}/{work-id}-{task-id}` for newly materialized tasks, so agents should classify the work item kind rather than invent branch names:
 
 ```json
 {

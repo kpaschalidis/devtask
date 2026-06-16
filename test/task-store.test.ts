@@ -103,6 +103,17 @@ describe("task store", () => {
     expect(meta.command).toBe('codex exec --full-auto -m gpt-5.2 - < "$DEVTASK_TASK_PATH"');
   });
 
+  it("stores an explicit branch override", async () => {
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolvePaths(repo);
+
+    const meta = await createTask(paths, "backend", {
+      branch: "feature/work-pr-comment-backend"
+    });
+
+    expect(meta.branch).toBe("feature/work-pr-comment-backend");
+  });
+
   it("lists task summaries in stable id order", async () => {
     const repo = await makeTempRepo({ withCommit: true });
     const paths = resolvePaths(repo);
