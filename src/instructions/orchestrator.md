@@ -130,7 +130,7 @@ Planning is complete. Before waiting, print a brief summary:
 
 Then wait. Do not proceed until you receive an approval message.
 
-On approval: proceed to Step 5.
+On approval: proceed to Step 5. Do NOT skip to Step 6 or create pull requests — Gate 2 has not happened yet and no code has been written.
 On feedback: update the relevant artifacts and re-run any affected repo-plan workers, then return to this gate.
 
 --- Step 5: Materialize and execute ---
@@ -183,6 +183,12 @@ On approval: proceed to Step 6.
 On feedback: address it for the specific repos mentioned, re-run validation, and return to this gate.
 
 --- Step 6: Create pull requests ---
+
+You must not reach this step unless Gate 2 was explicitly approved in this session. If you are unsure, run:
+
+  devtask work status {{WORK_ID}}
+
+and confirm that execution and validation results are present before proceeding.
 
 Create pull requests for all completed tasks:
 

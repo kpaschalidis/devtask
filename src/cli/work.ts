@@ -712,10 +712,10 @@ export function registerWorkCommands(program: Command): void {
     .command("pr")
     .description("Create pull requests for repo worktrees when they are publish-ready.")
     .argument("<work-id>")
-    .option("--ready", "Create ready pull requests instead of drafts")
-    .action(async (workId: string, options: { ready?: boolean }) => {
+    .option("--draft", "Create pull requests as drafts")
+    .action(async (workId: string, options: { draft?: boolean }) => {
       try {
-        const result = await createWorkPullRequests(resolveWorkspacePaths(), workId, { draft: options.ready !== true });
+        const result = await createWorkPullRequests(resolveWorkspacePaths(), workId, { draft: options.draft === true });
         printTable(
           ["REPO", "TASK", "STATUS", "PR", "DETAIL"],
           result.tasks.map((task) => [task.repoId, task.taskId, task.status, task.prUrl ?? "-", task.detail])
