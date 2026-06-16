@@ -108,10 +108,18 @@ describe("codex runner isolation", () => {
 
     configureManagedHooks(codexHome, "devtask work _phase-finalize-hook spec WORK-123 run-1");
 
+    // hooks.json must be static (points at global stop script, not the per-session command)
+    // so that codex only shows the trust prompt once, ever.
     const hooks = JSON.parse(fs.readFileSync(path.join(codexHome, "hooks.json"), "utf8")) as {
       hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> };
     };
-    expect(hooks.hooks.Stop[0]?.hooks[0]?.command).toContain("_phase-finalize-hook spec WORK-123 run-1");
+    const hookCommand = hooks.hooks.Stop[0]?.hooks[0]?.command;
+    expect(hookCommand).toContain("stop.sh");
+    expect(hookCommand).not.toContain("_phase-finalize-hook");
+
+    // per-session command is in completion-cmd.sh
+    const script = fs.readFileSync(path.join(codexHome, "completion-cmd.sh"), "utf8");
+    expect(script).toContain("_phase-finalize-hook spec WORK-123 run-1");
   });
 
   it("removes managed stop hooks when completion is unmanaged", () => {
@@ -172,7 +180,7 @@ describe("codex runner isolation", () => {
       managedCompletionCommand: "devtask work _phase-finalize-hook plan WORK-123 run-2"
     });
     expect(managed).toContain("codex resume --dangerously-bypass-hook-trust");
-    expect(fs.readFileSync(path.join(codexHome, "hooks.json"), "utf8")).toContain("_phase-finalize-hook plan WORK-123 run-2");
+    expect(fs.readFileSync(path.join(codexHome, "completion-cmd.sh"), "utf8")).toContain("_phase-finalize-hook plan WORK-123 run-2");
 
     runner.installCompletionHook(session, null);
     const unmanaged = runner.buildInteractiveResumeCommand(session, {
