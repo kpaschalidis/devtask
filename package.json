@@ -14,7 +14,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/chmod-bin.mjs && cp src/instructions/*.md dist/instructions/",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/chmod-bin.mjs && cp src/instructions/*.md dist/instructions/ && cp -r src/skills/* dist/skills/",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "prepack": "npm run build"

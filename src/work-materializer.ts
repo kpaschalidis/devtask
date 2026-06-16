@@ -50,6 +50,7 @@ export interface WorkGraphFeature {
 export interface WorkGraph {
   schemaVersion: 1;
   workId: string;
+  kind: "feature" | "bugfix" | "refactor";
   tasks: WorkGraphTask[];
   features: WorkGraphFeature[];
   validation: string[];
@@ -97,11 +98,13 @@ export async function materializeWorkPlan(paths: DevtaskPaths, workItem: WorkIte
     const repoPaths = resolveRepoPaths(repo);
     const storagePaths = taskStoragePaths(paths, repo.repoPath);
     initializeStore(storagePaths);
+    const branch = buildMaterializedTaskBranch(graph.kind, workItem.id, graphTask.id);
     const meta = await createTask(storagePaths, graphTask.id, {
       goal: buildRepoTaskGoal(paths, workItem, graph, graphTask, repo),
       command: buildMaterializedTaskCommand(paths, repoPaths, workItem),
       repoRoot: repoPaths.root,
-      worktreePath: path.join(paths.worktreesDir, graphTask.repoId, graphTask.id)
+      branch,
+      worktreePath: path.join(paths.worktreesDir, graphTask.repoId, branch)
     });
     const hydratedMeta = hydrateMaterializedTaskPlan(paths, workItem.id, graphTask.repoId, storagePaths, meta);
     tasks.push(toMaterializedTask(graphTask, repo, hydratedMeta));
@@ -116,6 +119,10 @@ export async function materializeWorkPlan(paths: DevtaskPaths, workItem: WorkIte
   };
   fs.writeFileSync(materializationPath, `${JSON.stringify(materialization, null, 2)}\n`);
   return materialization;
+}
+
+function buildMaterializedTaskBranch(kind: WorkGraph["kind"], workId: string, taskId: string): string {
+  return `${kind}/${workId}-${taskId}`;
 }
 
 export function readWorkGraph(paths: DevtaskPaths, workId: string): WorkGraph {
@@ -203,9 +210,12 @@ function parseWorkGraph(value: unknown, expectedWorkId: string): WorkGraph {
     throw new DevtaskError("Invalid work graph: tasks must be an array");
   }
   const rawFeatures = Array.isArray(value.features) ? value.features : [];
+  const rawKind = value.kind;
+  const kind: WorkGraph["kind"] = rawKind === "bugfix" || rawKind === "refactor" ? rawKind : "feature";
   const graph: WorkGraph = {
     schemaVersion: 1,
     workId,
+    kind,
     tasks: value.tasks.map(parseWorkGraphTask),
     features: rawFeatures.map(parseWorkGraphFeature),
     validation: parseStringArray(value.validation, "validation"),

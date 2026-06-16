@@ -23,7 +23,7 @@ describe("work materializer", () => {
     const paths = resolveWorkspacePathsForInit(workspace);
     initializeWorkspace(paths);
     const item = createManualWorkItem(paths, {
-      id: "WORK-123",
+      id: "work-123",
       title: "Add API behavior",
       body: "Implement the backend part."
     });
@@ -39,9 +39,10 @@ describe("work materializer", () => {
         {
           schemaVersion: 1,
           workId: item.id,
+          kind: "feature",
           tasks: [
             {
-              id: "work-123-backend",
+              id: "backend",
               repoId: "backend",
               goal: "Implement backend behavior.",
               owns: ["server/**"],
@@ -60,19 +61,22 @@ describe("work materializer", () => {
 
     expect(materialization.tasks).toHaveLength(1);
     expect(materialization.tasks[0]).toMatchObject({
-      graphTaskId: "work-123-backend",
+      graphTaskId: "backend",
       repoId: "backend",
-      taskId: "work-123-backend",
-      branch: "task/work-123-backend"
+      taskId: "backend",
+      branch: "feature/work-123-backend",
+      worktreePath: path.join(paths.worktreesDir, "backend", "feature", "work-123-backend")
     });
     expect(fs.existsSync(workItemGraphSnapshotPath(paths, item.id))).toBe(true);
     expect(fs.existsSync(workItemMaterializationPath(paths, item.id))).toBe(true);
-    expect(fs.existsSync(path.join(paths.tasksDir, "work-123-backend", "meta.json"))).toBe(true);
-    expect(fs.existsSync(path.join(paths.worktreesDir, "backend", "work-123-backend"))).toBe(true);
-    const meta = readTaskMeta(taskMetaPath(paths, "work-123-backend"));
+    expect(fs.existsSync(path.join(paths.tasksDir, "backend", "meta.json"))).toBe(true);
+    expect(fs.existsSync(path.join(paths.worktreesDir, "backend", "feature", "work-123-backend"))).toBe(true);
+    const meta = readTaskMeta(taskMetaPath(paths, "backend"));
 
     expect(meta.command).toContain(`--add-dir ${path.join(paths.workDir, item.id)}`);
     expect(meta.command).toContain(`--add-dir ${path.dirname(item.source.artifact)}`);
+    expect(meta.branch).toBe("feature/work-123-backend");
+    expect(meta.worktreePath).toBe(path.join(paths.worktreesDir, "backend", "feature", "work-123-backend"));
   });
 
   it("rejects unknown dependency references", async () => {
@@ -328,5 +332,76 @@ describe("work materializer", () => {
     await materializeWorkPlan(paths, item);
 
     await expect(materializeWorkPlan(paths, item)).rejects.toThrow("has already been materialized");
+  });
+
+  describe("work graph kind field", () => {
+    function writeMinimalGraph(paths: ReturnType<typeof resolveWorkspacePathsForInit>, workId: string, extra: Record<string, unknown> = {}) {
+      fs.writeFileSync(
+        workItemGraphPath(paths, workId),
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            workId,
+            tasks: [],
+            features: [],
+            validation: [],
+            openQuestions: [],
+            ...extra
+          },
+          null,
+          2
+        )
+      );
+    }
+
+    it("parses 'feature' kind", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND", { kind: "feature" });
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("feature");
+    });
+
+    it("parses 'bugfix' kind", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-bugfix-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND", { kind: "bugfix" });
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("bugfix");
+    });
+
+    it("parses 'refactor' kind", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-refactor-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND", { kind: "refactor" });
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("refactor");
+    });
+
+    it("defaults to 'feature' when kind is absent", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-absent-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND");
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("feature");
+    });
+
+    it("defaults to 'feature' for unrecognised kind values", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-unknown-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND", { kind: "chore" });
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("feature");
+    });
   });
 });
