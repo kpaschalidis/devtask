@@ -7,7 +7,7 @@ vi.mock("../src/infra/tmux.js", () => ({
   tmuxSessionExists: vi.fn((session: string) => session === "devtask-review")
 }));
 import { resolveWorkspacePathsForInit, taskMetaPath, phaseRunDir } from "../src/infra/paths.js";
-import { writePhaseRunRecord, writeRunningPhaseRun } from "../src/infra/phase-run.js";
+import { writePhaseRunRecord, writeRunningPhaseRun } from "../src/infra/session-run.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";

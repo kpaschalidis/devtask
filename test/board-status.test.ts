@@ -9,7 +9,7 @@ vi.mock("../src/infra/tmux.js", () => ({
 import { buildWorkspaceBoardRow } from "../src/board/workspace-board.js";
 import { buildWorkBoard } from "../src/board/work-board.js";
 import { resolveWorkspacePathsForInit, phaseRunDir } from "../src/infra/paths.js";
-import { writePhaseRunRecord, writeRunningPhaseRun } from "../src/infra/phase-run.js";
+import { writePhaseRunRecord, writeRunningPhaseRun } from "../src/infra/session-run.js";
 import { initializeWorkspace, createTask } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { writeTaskMeta } from "../src/storage/meta.js";

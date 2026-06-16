@@ -19,7 +19,7 @@ import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { materializeWorkPlan } from "../src/work-materializer.js";
 import { workItemGraphPath } from "../src/infra/paths.js";
-import { getLatestWorkPhaseRun } from "../src/services/phase-run-service.js";
+import { getLatestWorkPhaseRun } from "../src/services/session-run-service.js";
 import { executeWork } from "../src/services/work-service.js";
 import { readTaskMeta } from "../src/storage/meta.js";
 import { getWorkItem } from "../src/storage/work-store.js";

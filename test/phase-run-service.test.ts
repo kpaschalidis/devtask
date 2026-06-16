@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveWorkspacePathsForInit, phaseRunDir } from "../src/infra/paths.js";
-import { writePhaseRunRecord } from "../src/infra/phase-run.js";
-import { getLatestWorkPhaseRun, listWorkPhaseRuns } from "../src/services/phase-run-service.js";
+import { writePhaseRunRecord } from "../src/infra/session-run.js";
+import { getLatestWorkPhaseRun, listWorkPhaseRuns } from "../src/services/session-run-service.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 
 describe("phase run service", () => {

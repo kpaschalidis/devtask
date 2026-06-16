@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { readLatestPhaseRunRecord, writePhaseRunRecord } from "../src/infra/phase-run.js";
+import { readLatestPhaseRunRecord, writePhaseRunRecord } from "../src/infra/session-run.js";
 
 describe("phase run records", () => {
   it("writes and reads the latest persisted phase run", () => {

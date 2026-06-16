@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { resolveWorkspacePathsForInit, phaseRunDir } from "../src/infra/paths.js";
 import { writePhaseRunRecord } from "../src/infra/session-run.js";
 import { listWorkPhaseRuns, listWorkPhaseSessions, hasWorkPhaseRuns } from "../src/services/session-run-service.js";
-import { listWorkPhaseRuns as listWorkPhaseRunsShim } from "../src/services/phase-run-service.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 
 const SESSION = {
@@ -65,32 +64,5 @@ describe("session-run-service", () => {
     initializeWorkspace(paths);
 
     expect(hasWorkPhaseRuns(paths, "WORK-1")).toBe(false);
-  });
-
-  it("phase-run-service shim re-exports listWorkPhaseRuns from session-run-service", () => {
-    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-session-shim-"));
-    const paths = resolveWorkspacePathsForInit(workspace);
-    initializeWorkspace(paths);
-
-    writePhaseRunRecord(phaseRunDir(paths, "WORK-2", "orchestrate", null), {
-      schemaVersion: 1,
-      phase: "orchestrate",
-      runId: "2026-02-01T00-00-00-000Z",
-      workId: "WORK-2",
-      repoId: null,
-      taskId: null,
-      status: "planned",
-      promptPath: "/tmp/prompt2.md",
-      outputPath: "/tmp/output2.md",
-      startedAt: "2026-02-01T00:00:00.000Z",
-      finishedAt: "2026-02-01T00:00:01.000Z",
-      session: SESSION,
-      artifacts: {},
-      exitCode: 0
-    });
-
-    const runs = listWorkPhaseRunsShim(paths, "WORK-2");
-    expect(runs).toHaveLength(1);
-    expect(runs[0]?.workId).toBe("WORK-2");
   });
 });

@@ -74,10 +74,10 @@ vi.mock("../src/infra/tmux.js", () => ({
 }));
 
 import { resolveWorkspacePathsForInit, workItemSpecPath, phaseRunDir } from "../src/infra/paths.js";
-import { readRunningPhaseRun, writeRunningPhaseRun, updateRunningPhaseRun } from "../src/infra/phase-run.js";
+import { readRunningPhaseRun, writeRunningPhaseRun, updateRunningPhaseRun } from "../src/infra/session-run.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
-import { getLatestWorkPhaseRun } from "../src/services/phase-run-service.js";
+import { getLatestWorkPhaseRun } from "../src/services/session-run-service.js";
 import { attachWorkPhase, runManagedPhaseHookFinalizer, sendWorkPhaseFeedback, startOrchestrateWork } from "../src/services/work-service.js";
 
 const agent = await import("../src/agent.js");
