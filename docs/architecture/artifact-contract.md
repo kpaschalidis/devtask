@@ -198,7 +198,14 @@ These are intentionally shared for visibility.
         │   ├── verify.json
         │   ├── review.json
         │   ├── pr.json
-        │   └── ci.json
+        │   ├── ci.json
+        │   └── ci-watch.json
+        ├── ci-watch/
+        │   └── <repoId>/
+        │       ├── attempt-<n>.failure.log
+        │       └── attempt-<n>/
+        │           ├── state.md
+        │           └── result.json
         ├── reviews/
         ├── plans/
         └── spec-runs/
@@ -236,8 +243,16 @@ Current result artifacts for:
 - `review`
 - `pr`
 - `ci`
+- `ci-watch`
 
 These are local operational outputs and are not part of the shareable bundle.
+
+### `local/work/<workId>/ci-watch/`
+
+Local CI watch attempt artifacts:
+- bounded persisted CI failure output per attempt
+- per-attempt agent state/result files for scoped `ci-fix` runs
+- phase-run metadata for `ci-fix` still lives under `local/work/<workId>/phases/`
 
 ### `local/tasks/<taskId>/meta.json`
 

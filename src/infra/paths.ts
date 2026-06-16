@@ -239,6 +239,10 @@ export function workItemResultsDir(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "results");
 }
 
+export function workItemCiWatchDir(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemLocalDir(paths, id), "ci-watch");
+}
+
 export function workItemRepoPlansDir(paths: DevtaskPaths, id: string): string {
   return path.join(workItemDir(paths, id), "repo-plans");
 }

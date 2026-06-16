@@ -7,6 +7,7 @@ import { buildWorkBoard } from "../board/work-board.js";
 import {
   checkWork,
   checkWorkCi,
+  watchWorkCi,
   cleanupWork,
   compoundWork,
   createWorkPullRequests,
@@ -698,6 +699,35 @@ export function registerWorkCommands(program: Command): void {
     });
 
   work
+    .command("ci-watch")
+    .description("Watch provider CI for repo pull requests and attempt scoped auto-fixes on failure.")
+    .argument("<work-id>")
+    .option("--poll-interval-ms <ms>", "Polling interval in milliseconds", (value) => Number.parseInt(value, 10))
+    .option("--max-polls <count>", "Maximum poll rounds before returning a running status", (value) => Number.parseInt(value, 10))
+    .action(async (workId: string, options: { pollIntervalMs?: number; maxPolls?: number }) => {
+      try {
+        const result = await watchWorkCi(resolveWorkspacePaths(), workId, {
+          pollIntervalMs: options.pollIntervalMs,
+          maxPolls: options.maxPolls
+        });
+        console.log(`Status: ${result.status}`);
+        printTable(
+          ["REPO", "TASK", "STATUS", "ATTEMPTS", "DETAIL", "LOG"],
+          result.tasks.map((task) => [
+            task.repoId,
+            task.taskId,
+            task.status,
+            String(task.attempts),
+            task.detail,
+            task.latestFailureLogPath ?? "-"
+          ])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
     .command("cleanup")
     .description("Clean up worktrees for one work item while preserving history.")
     .argument("<work-id>")
@@ -734,17 +764,17 @@ export function registerWorkCommands(program: Command): void {
     });
 }
 
-function normalizePhaseOption(value: string | undefined): "orchestrate" | "repo-plan" | "review" | "execute" | "compound" | undefined {
+function normalizePhaseOption(value: string | undefined): "orchestrate" | "repo-plan" | "review" | "execute" | "ci-fix" | "compound" | undefined {
   if (value === undefined) {
     return undefined;
   }
-  if (value === "orchestrate" || value === "repo-plan" || value === "review" || value === "execute" || value === "compound") {
+  if (value === "orchestrate" || value === "repo-plan" || value === "review" || value === "execute" || value === "ci-fix" || value === "compound") {
     return value;
   }
   throw new DevtaskError(`Invalid phase ${value}`);
 }
 
-function normalizeRequiredPhase(value: string): "orchestrate" | "repo-plan" | "review" | "execute" | "compound" {
+function normalizeRequiredPhase(value: string): "orchestrate" | "repo-plan" | "review" | "execute" | "ci-fix" | "compound" {
   return normalizePhaseOption(value) ?? failMissingPhase();
 }
 

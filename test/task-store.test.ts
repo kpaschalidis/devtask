@@ -48,6 +48,9 @@ describe("task store", () => {
         email: null,
         cloudId: null
       },
+      ci: {
+        maxFixAttempts: 3
+      },
       verify: []
     });
   });

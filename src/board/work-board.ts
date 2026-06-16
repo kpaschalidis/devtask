@@ -37,6 +37,7 @@ export async function buildWorkBoardRows(
   const reviewResults = readWorkResultIndex(paths, item.id, "review");
   const verifyResults = readWorkResultIndex(paths, item.id, "verify");
   const ciResults = readWorkResultIndex(paths, item.id, "ci");
+  const ciWatchResults = readWorkResultIndex(paths, item.id, "ci-watch");
 
   return materialization.tasks.map((task) => {
     const storagePaths = taskStoragePaths(paths, task.repoPath);
@@ -45,7 +46,7 @@ export async function buildWorkBoardRows(
     const check = checkResults.get(task.repoId) ?? "-";
     const review = reviewResults.get(task.repoId) ?? "-";
     const verify = verifyResults.get(task.repoId) ?? "-";
-    const ci = ciResults.get(task.repoId) ?? "-";
+    const ci = ciWatchResults.get(task.repoId) ?? ciResults.get(task.repoId) ?? "-";
     const phase = hasRepoPlan ? deriveTaskPhase(meta.status, meta.prUrl !== null, ci) : "planning";
     return {
       repo: task.repoId,
@@ -93,6 +94,9 @@ function buildUnmaterializedWorkRow(
 }
 
 function deriveTaskPhase(status: string, hasPr: boolean, ci: string): string {
+  if (ci !== "-" && ci !== "skipped") {
+    return "ci";
+  }
   switch (status) {
     case "created":
     case "planned":
@@ -107,9 +111,6 @@ function deriveTaskPhase(status: string, hasPr: boolean, ci: string): string {
     case "failed":
       return "blocked";
     default:
-      if (ci !== "-" && ci !== "skipped") {
-        return "ci";
-      }
       if (hasPr) {
         return "pr";
       }
@@ -120,6 +121,12 @@ function deriveTaskPhase(status: string, hasPr: boolean, ci: string): string {
 function simplifyStatus(status: string, hasRepoPlan: boolean, hasPr: boolean, ci: string): string {
   if (!hasRepoPlan) {
     return "pending";
+  }
+  if (ci === "passed") {
+    return "done";
+  }
+  if (ci !== "-" && ci !== "skipped") {
+    return `ci-${ci}`;
   }
   switch (status) {
     case "created":
@@ -137,12 +144,6 @@ function simplifyStatus(status: string, hasRepoPlan: boolean, hasPr: boolean, ci
     case "failed":
       return "failed";
     default:
-      if (ci === "passed") {
-        return "done";
-      }
-      if (ci !== "-" && ci !== "skipped") {
-        return `ci-${ci}`;
-      }
       if (hasPr) {
         return "pr-open";
       }
@@ -170,6 +171,9 @@ function nextCommand(
   if (hasSession && (status === "running" || status === "paused")) {
     return `devtask work execute attach ${shellQuote(workId)} ${shellQuote(repoId)}`;
   }
+  if (ci === "running") {
+    return `devtask work ci-watch ${shellQuote(workId)}`;
+  }
   if (check === "-") {
     return `devtask work check ${shellQuote(workId)}`;
   }
@@ -180,7 +184,7 @@ function nextCommand(
     return `devtask work pr ${shellQuote(workId)}`;
   }
   if (ci === "-" || ci === "skipped") {
-    return `devtask work ci ${shellQuote(workId)}`;
+    return `devtask work ci-watch ${shellQuote(workId)}`;
   }
   return `devtask work board ${shellQuote(workId)}`;
 }

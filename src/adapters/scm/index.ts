@@ -9,7 +9,8 @@ import {
   type PullRequestComment,
   countBranchCommits,
   parseRemoteUrl,
-  preflightScmForPullRequest
+  preflightScmForPullRequest,
+  pushBranchUpdate
 } from "./shared.js";
 import type { CiCheckResult, PullRequestOptions, PullRequestSummary } from "./shared.js";
 import { listBitbucketPullRequestComments, listBitbucketPullRequests } from "./bitbucket.js";
@@ -25,6 +26,7 @@ export type {
   ScmProvider
 } from "./shared.js";
 export { countBranchCommits, detectRemoteInfo, hasUncommittedChanges, parseRemoteUrl, preflightScmForPullRequest } from "./shared.js";
+export { pushBranchUpdate } from "./shared.js";
 
 export async function createProviderPullRequest(
   worktreePath: string,

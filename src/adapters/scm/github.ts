@@ -23,11 +23,13 @@ export async function createGitHubPullRequest(worktreePath: string, options: Pul
 export async function checkGitHubCi(worktreePath: string, prUrl: string): Promise<CiCheckResult> {
   const result = await runCommand("gh", ["pr", "checks", prUrl], { cwd: worktreePath });
   const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
+  const status: CiCheckResult["status"] = result.exitCode === 0 ? "passed" : "failed";
   return {
     provider: "github",
-    status: result.exitCode === 0 ? "passed" : "failed",
+    status,
     detail: output || `gh pr checks exited ${result.exitCode}`,
-    url: prUrl
+    url: prUrl,
+    failureOutput: status === "failed" ? output || `gh pr checks exited ${result.exitCode}` : null
   };
 }
 

@@ -85,7 +85,8 @@ export async function checkBitbucketCi(remote: RemoteInfo, branch: string): Prom
     provider: "bitbucket",
     status: bitbucketPipelineStatus(stateName, resultName),
     detail: label,
-    url
+    url,
+    failureOutput: resultName && resultName !== "successful" ? label : null
   };
 }
 

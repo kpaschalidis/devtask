@@ -93,6 +93,7 @@ devtask work verify APP-123
 devtask work review APP-123
 devtask work pr APP-123 --ready
 devtask work pr-watch APP-123
+devtask work ci-watch APP-123
 devtask work compound APP-123
 ```
 
@@ -152,7 +153,7 @@ Repo paths inside the bundle are only hints. Local bindings are per machine.
 The intended flow is:
 
 ```text
-spec -> plan -> repo-plan -> materialize -> execute -> check/verify -> review -> pr -> ci -> compound
+spec -> plan -> repo-plan -> materialize -> execute -> check/verify -> review -> pr -> ci-watch -> compound
 ```
 
 Notes:
@@ -164,6 +165,7 @@ Notes:
 - `check` and `verify` are deterministic
 - `review` is agent-backed
 - `pr-watch` routes `/devtask` PR comments back into the orchestrator
+- `ci-watch` watches PR CI, injects failure context into scoped fix runs, reruns deterministic validation, and pushes validated fixes back to the same branch
 - `compound` captures reusable lessons into file-backed workspace/local memory artifacts
 - later commands are mostly guided, not hard-gated
 
