@@ -53,7 +53,8 @@
       "Bash(grep -v \"^$\")",
       "Bash(grep -v \"^ devtask$\")",
       "Read(//Users/konstantinospaschalides/.devtask/workspaces/devtask-dev/local/worktrees/app/pr-watch-orchestration/src/mission/**)",
-      "Read(//Users/konstantinospaschalides/.devtask/workspaces/devtask-dev/local/worktrees/app/pr-watch-orchestration/src/services/**)"
+      "Read(//Users/konstantinospaschalides/.devtask/workspaces/devtask-dev/local/worktrees/app/pr-watch-orchestration/src/services/**)",
+      "Skill(code-review)"
     ]
   }
 }

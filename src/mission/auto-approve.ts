@@ -6,6 +6,7 @@ import { tmuxSessionExists } from "../infra/tmux.js";
 import { readGateState } from "./gates.js";
 import { approveWorkGate } from "./approve.js";
 import type { GateName } from "./gates.js";
+import { readWorkGraph } from "../work-materializer.js";
 
 const GATE_MARKERS: Array<{ gate: GateName; marker: string }> = [
   { gate: "gate-1", marker: "Gate 1: Awaiting approval" },
@@ -19,6 +20,7 @@ export interface AutoApproveOptions {
   initialOutputOffset?: number;
   onApprove?: (gate: GateName) => void;
   onComplete?: () => void;
+  onPendingQuestions?: (gate: GateName, questions: string[]) => void;
 }
 
 export async function watchAndAutoApprove(
@@ -29,6 +31,7 @@ export async function watchAndAutoApprove(
   const runsDir = phaseRunDir(paths, workId, "orchestrate", null);
 
   return new Promise((resolve) => {
+    const lastNotifiedQuestions = new Map<GateName, string>();
     const interval = setInterval(async () => {
       const run = readRunningPhaseRun(runsDir);
 
@@ -52,6 +55,22 @@ export async function watchAndAutoApprove(
         const existing = readGateState(paths, workId, gate);
         if (existing?.status === "approved") continue;
 
+        if (gate === "gate-1") {
+          const openQuestions = readGraphOpenQuestions(paths, workId);
+          if (openQuestions === null) {
+            // partial write in progress — block silently, retry next tick
+            continue;
+          }
+          if (openQuestions.length > 0) {
+            const key = JSON.stringify(openQuestions);
+            if (lastNotifiedQuestions.get(gate) !== key) {
+              lastNotifiedQuestions.set(gate, key);
+              options.onPendingQuestions?.(gate, openQuestions);
+            }
+            continue;
+          }
+        }
+
         try {
           await approveWorkGate(paths, workId, gate, options.message);
           options.onApprove?.(gate);
@@ -61,4 +80,14 @@ export async function watchAndAutoApprove(
       }
     }, POLL_INTERVAL_MS);
   });
+}
+
+// Returns [] if graph not yet written, null if file exists but unreadable (partial write — block silently).
+function readGraphOpenQuestions(paths: DevtaskPaths, workId: string): string[] | null {
+  try {
+    return readWorkGraph(paths, workId).openQuestions;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    return null;
+  }
 }

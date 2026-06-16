@@ -448,7 +448,14 @@ export function registerWorkCommands(program: Command): void {
           initialOutputOffset: parseInt(options.offset, 10),
           message: options.message,
           onApprove: (gate) => console.log(`Auto-approved ${gate} for ${options.workId}.`),
-          onComplete: () => console.log(`Orchestrator session for ${options.workId} completed.`)
+          onComplete: () => console.log(`Orchestrator session for ${options.workId} completed.`),
+          onPendingQuestions: (gate, questions) => {
+            console.log(`${gate} has ${questions.length} open question(s) — manual approval required:`);
+            for (const [i, q] of questions.entries()) {
+              console.log(`  ${i + 1}. ${q}`);
+            }
+            console.log(`Run: devtask work approve ${options.workId} --gate ${gate} --message "<answers>"`);
+          }
         });
       } catch (error) {
         printError(error);
