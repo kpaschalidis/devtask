@@ -15,6 +15,7 @@ import {
 import { readRunningPhaseRun, updateRunningPhaseRun } from "../infra/session-run.js";
 import { tmuxSessionExists, tmuxSessionName } from "../infra/tmux.js";
 import { loadInstruction } from "../instructions/loader.js";
+import { copySkillsToDir } from "../skills/loader.js";
 import { getWorkItem } from "../storage/work-item.js";
 import {
   launchPhaseFresh,
@@ -45,6 +46,7 @@ export const orchestratorPhase: RoleConfig = {
   },
 
   async freshScope(paths, workId, _repoId, runId): Promise<RoleFreshScope> {
+    copySkillsToDir(paths.root, ["branch", "pr"]);
     const item = getWorkItem(paths, workId);
     const config = readConfig(paths);
     const runsDir = phaseRunDir(paths, workId, "orchestrate", null);

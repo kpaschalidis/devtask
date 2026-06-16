@@ -329,4 +329,75 @@ describe("work materializer", () => {
 
     await expect(materializeWorkPlan(paths, item)).rejects.toThrow("has already been materialized");
   });
+
+  describe("work graph kind field", () => {
+    function writeMinimalGraph(paths: ReturnType<typeof resolveWorkspacePathsForInit>, workId: string, extra: Record<string, unknown> = {}) {
+      fs.writeFileSync(
+        workItemGraphPath(paths, workId),
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            workId,
+            tasks: [],
+            features: [],
+            validation: [],
+            openQuestions: [],
+            ...extra
+          },
+          null,
+          2
+        )
+      );
+    }
+
+    it("parses 'feature' kind", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND", { kind: "feature" });
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("feature");
+    });
+
+    it("parses 'bugfix' kind", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-bugfix-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND", { kind: "bugfix" });
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("bugfix");
+    });
+
+    it("parses 'refactor' kind", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-refactor-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND", { kind: "refactor" });
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("refactor");
+    });
+
+    it("defaults to 'feature' when kind is absent", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-absent-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND");
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("feature");
+    });
+
+    it("defaults to 'feature' for unrecognised kind values", () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-wm-kind-unknown-"));
+      const paths = resolveWorkspacePathsForInit(workspace);
+      initializeWorkspace(paths);
+      createManualWorkItem(paths, { id: "WORK-KIND", title: "test" });
+      writeMinimalGraph(paths, "WORK-KIND", { kind: "chore" });
+      const graph = readWorkGraph(paths, "WORK-KIND");
+      expect(graph.kind).toBe("feature");
+    });
+  });
 });

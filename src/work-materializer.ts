@@ -50,6 +50,7 @@ export interface WorkGraphFeature {
 export interface WorkGraph {
   schemaVersion: 1;
   workId: string;
+  kind: "feature" | "bugfix" | "refactor";
   tasks: WorkGraphTask[];
   features: WorkGraphFeature[];
   validation: string[];
@@ -203,9 +204,12 @@ function parseWorkGraph(value: unknown, expectedWorkId: string): WorkGraph {
     throw new DevtaskError("Invalid work graph: tasks must be an array");
   }
   const rawFeatures = Array.isArray(value.features) ? value.features : [];
+  const rawKind = value.kind;
+  const kind: WorkGraph["kind"] = rawKind === "bugfix" || rawKind === "refactor" ? rawKind : "feature";
   const graph: WorkGraph = {
     schemaVersion: 1,
     workId,
+    kind,
     tasks: value.tasks.map(parseWorkGraphTask),
     features: rawFeatures.map(parseWorkGraphFeature),
     validation: parseStringArray(value.validation, "validation"),

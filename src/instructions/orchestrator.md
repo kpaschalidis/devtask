@@ -63,6 +63,7 @@ Graph JSON schema:
 {
   "schemaVersion": 1,
   "workId": "{{WORK_ID}}",
+  "kind": "feature",
   "tasks": [
     {
       "id": "short-task-id",
@@ -93,6 +94,7 @@ Graph JSON schema:
 ```
 
 Rules:
+- Set `kind` to `"feature"`, `"bugfix"`, or `"refactor"` at the top level. Use the `branch` skill for classification rules.
 - Use only repos you discover in the workspace; do not invent repo IDs.
 - If no repo clearly applies, output an empty tasks array and explain under openQuestions.
 - Prefer explicit ownership boundaries over broad repo-level ownership.
