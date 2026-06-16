@@ -275,6 +275,10 @@ export function workItemLocalStatePath(paths: DevtaskPaths, id: string): string 
   return path.join(workItemLocalDir(paths, id), "state.md");
 }
 
+export function workItemPrWatchStatePath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemLocalDir(paths, id), "pr-watch-state.json");
+}
+
 export function workItemReviewDir(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "reviews");
 }

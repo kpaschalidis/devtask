@@ -6,14 +6,25 @@ import {
   createGitLabMergeRequest,
   detectRemoteInfo,
   hasUncommittedChanges,
+  type PullRequestComment,
   countBranchCommits,
   parseRemoteUrl,
   preflightScmForPullRequest,
   pushBranchUpdate
 } from "./shared.js";
-import type { CiCheckResult, PullRequestOptions } from "./shared.js";
+import type { CiCheckResult, PullRequestOptions, PullRequestSummary } from "./shared.js";
+import { listBitbucketPullRequestComments, listBitbucketPullRequests } from "./bitbucket.js";
+import { listGitHubPullRequestComments, listGitHubPullRequests } from "./github.js";
 
-export type { CiCheckResult, PullRequestOptions, RemoteInfo, ScmPreflight, ScmProvider } from "./shared.js";
+export type {
+  CiCheckResult,
+  PullRequestComment,
+  PullRequestOptions,
+  PullRequestSummary,
+  RemoteInfo,
+  ScmPreflight,
+  ScmProvider
+} from "./shared.js";
 export { countBranchCommits, detectRemoteInfo, hasUncommittedChanges, parseRemoteUrl, preflightScmForPullRequest } from "./shared.js";
 export { pushBranchUpdate } from "./shared.js";
 
@@ -51,6 +62,38 @@ export async function checkProviderCi(
       return checkBitbucketCi(remote, branch);
     case "gitlab":
       throw new DevtaskError("GitLab CI checks are not supported yet");
+  }
+}
+
+export async function listProviderPullRequests(worktreePath: string, config?: DevtaskConfig): Promise<PullRequestSummary[]> {
+  const remote = await detectRemoteInfo(worktreePath);
+  assertExpectedWorkspaceProvider(config, remote.provider);
+
+  switch (remote.provider) {
+    case "github":
+      return listGitHubPullRequests(worktreePath);
+    case "bitbucket":
+      return listBitbucketPullRequests(remote);
+    case "gitlab":
+      throw new DevtaskError("GitLab pull request watching is not supported yet");
+  }
+}
+
+export async function listProviderPullRequestComments(
+  worktreePath: string,
+  pullRequestId: string,
+  config?: DevtaskConfig
+): Promise<PullRequestComment[]> {
+  const remote = await detectRemoteInfo(worktreePath);
+  assertExpectedWorkspaceProvider(config, remote.provider);
+
+  switch (remote.provider) {
+    case "github":
+      return listGitHubPullRequestComments(worktreePath, pullRequestId);
+    case "bitbucket":
+      return listBitbucketPullRequestComments(remote, pullRequestId);
+    case "gitlab":
+      throw new DevtaskError("GitLab pull request watching is not supported yet");
   }
 }
 

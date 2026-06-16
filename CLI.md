@@ -89,6 +89,7 @@ devtask work check <work-id>
 devtask work verify <work-id>
 devtask work review <work-id>
 devtask work pr <work-id> [--ready]
+devtask work pr-watch <work-id>
 devtask work ci <work-id>
 devtask work ci-watch <work-id>
 devtask work compound <work-id>
@@ -106,6 +107,7 @@ Notes:
 - `execute` launches or resumes the attachable execution sessions for those repo tasks
 - `check` and `verify` are deterministic
 - `review` is agent-backed
+- `pr-watch` polls open PR comments for `/devtask ...` instructions and routes them to the orchestrator session
 - `ci-watch` polls provider CI for existing PRs, captures bounded failure output, runs scoped `ci-fix` agent attempts, reruns deterministic validation, and pushes validated fixes back to the existing PR branch
 - `compound` writes reusable guidance and local notes into file-backed improvement artifacts
 
@@ -174,9 +176,12 @@ devtask work execute <work-id>
 devtask work execute attach <work-id> <repo-id>
 devtask work execute feedback <work-id> <repo-id> <message>
 devtask work execute fresh <work-id> <repo-id>
+devtask work pr-watch <work-id>
 ```
 
 `spec`, `plan`, `repo-plan`, and `review` start managed background sessions for `fresh` and `feedback`, finalize automatically when the provider reports the turn stopped, and then close their managed tmux session. `attach` opens the live session if one exists, or reopens a finished phase interactively without turning that manual continuation into a new tracked run.
+
+`pr-watch` polls associated open PR comments every 30 seconds. When it finds a comment whose body starts with `/devtask `, it strips the prefix, routes the message to the orchestrator via live tmux injection when possible or the normal orchestrator feedback path otherwise, and records the processed comment id in local work state so the same comment is never picked up twice.
 
 ## Worktree
 

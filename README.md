@@ -92,11 +92,14 @@ devtask work check APP-123
 devtask work verify APP-123
 devtask work review APP-123
 devtask work pr APP-123 --ready
+devtask work pr-watch APP-123
 devtask work ci-watch APP-123
 devtask work compound APP-123
 ```
 
 `work materialize <work-id>` creates repo tasks and global workspace worktrees. `work execute <work-id>` launches or resumes the attachable coding sessions for those materialized tasks.
+
+`work pr-watch <work-id>` is the bridge from PR review back into the running orchestrator. It polls associated open PR comments every 30 seconds, looks for comments starting with `/devtask `, routes the stripped instruction into the orchestrator session, and persists processed comment ids under the work item's local state so restarts stay idempotent.
 
 Agent-backed phases such as `spec`, `plan`, `repo-plan`, and `review` persist neutral session metadata for each run. With Codex, they run in dedicated persisted session roots so they do not reuse the current interactive Codex thread, and managed `fresh`/`feedback` runs install scoped completion hooks automatically rather than relying on user-global hook setup. Their prompt, output, transcript path, and resume metadata can be inspected from stored phase-run records.
 
@@ -161,6 +164,7 @@ Notes:
 - `execute` launches or resumes the repo-task coding sessions
 - `check` and `verify` are deterministic
 - `review` is agent-backed
+- `pr-watch` routes `/devtask` PR comments back into the orchestrator
 - `ci-watch` watches PR CI, injects failure context into scoped fix runs, reruns deterministic validation, and pushes validated fixes back to the same branch
 - `compound` captures reusable lessons into file-backed workspace/local memory artifacts
 - later commands are mostly guided, not hard-gated

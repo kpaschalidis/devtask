@@ -36,6 +36,22 @@ export interface CiCheckResult {
   failureOutput?: string | null;
 }
 
+export interface PullRequestSummary {
+  id: string;
+  number: string;
+  title: string;
+  branch: string;
+  url: string | null;
+}
+
+export interface PullRequestComment {
+  id: string;
+  body: string;
+  author: string | null;
+  createdAt: string | null;
+  url: string | null;
+}
+
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
   const result = await runCommandOrThrow("git", ["status", "--porcelain"], { cwd: worktreePath });
   return result.stdout.trim().length > 0;
