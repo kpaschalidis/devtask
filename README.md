@@ -1,31 +1,16 @@
 # devtask
 
-`devtask` is a local tool for managing AI-assisted work across multiple projects, workspaces, repos, and tickets.
+`devtask` is a local tool for managing AI-assisted work across multiple repos and workspaces.
 
-It is built for setups with:
-- multiple repos per product
-- vague Jira tickets that need refinement before coding
-- one or more developers working locally with Codex
-- deterministic checks plus agent-assisted planning and review
-
-`devtask` is not a workflow engine. It is a local control plane around:
-- workspaces
-- repo bindings
-- work items
-- shared specs and plans
-- global worktrees
-- agent sessions
+Built for setups with multiple repos per product, vague tickets that need refinement before coding, and one or more developers working locally with Codex or Cursor Agent.
 
 ## Requirements
 
 - Node.js 22.x
 - Git with worktree support
 - Codex CLI or Cursor Agent CLI installed and authenticated
-- provider auth for PR/CI operations:
-  - GitHub: `gh`
-  - Bitbucket Cloud: `BITBUCKET_EMAIL` and `BITBUCKET_API_TOKEN`
-  - GitLab: `glab`
-- Jira auth if you import work from Jira
+- Provider auth for PR/CI operations: `gh` (GitHub), `glab` (GitLab), or `BITBUCKET_EMAIL` + `BITBUCKET_API_TOKEN`
+- Jira auth if importing work from Jira
 
 See [docs/auth-and-environment.md](docs/auth-and-environment.md).
 
@@ -40,158 +25,111 @@ devtask --help
 
 ## Quick Start
 
-Create a workspace and register it locally:
-
 ```bash
-cd /path/to/product
+# Create a workspace and register repos
 devtask workspace create --id platform --name Platform
-```
-
-Add repos to that workspace:
-
-```bash
 devtask repo add backend ./backend --kind service
 devtask repo add web ./web --kind frontend
-```
 
-If you want Cursor Agent instead of the default Codex runner:
-
-```bash
-devtask config agent cursor
-```
-
-To smoke-test the configured agent integration:
-
-```bash
-devtask agent test
-devtask agent test "Reply with the current agent provider only."
-```
-
-Create or import work:
-
-```bash
+# Import or create a work item
 devtask work import jira APP-123
+# or: devtask work create --title "My task"
+
+# Run it
+devtask work orchestrate APP-123
 ```
-
-Refine and plan it:
-
-```bash
-devtask work spec APP-123
-devtask work plan APP-123
-devtask work repo-plan APP-123
-```
-
-`work repo-plan` is triggered manually and covers every affected repo in the work item. Today it runs one repo plan after another under a single command.
-
-Then execute and validate:
-
-```bash
-devtask work materialize APP-123
-devtask work execute APP-123
-devtask work check APP-123
-devtask work verify APP-123
-devtask work review APP-123
-devtask work pr APP-123 --ready
-devtask work pr-watch APP-123
-devtask work ci-watch APP-123
-devtask work compound APP-123
-```
-
-`work materialize <work-id>` creates repo tasks and global workspace worktrees. `work execute <work-id>` launches or resumes the attachable coding sessions for those materialized tasks.
-
-`work pr-watch <work-id>` is the bridge from PR review back into the running orchestrator. It polls associated open PR comments every 30 seconds, looks for comments starting with `/devtask `, routes the stripped instruction into the orchestrator session, and persists processed comment ids under the work item's local state so restarts stay idempotent.
-
-Agent-backed phases such as `spec`, `plan`, `repo-plan`, and `review` persist neutral session metadata for each run. With Codex, they run in dedicated persisted session roots so they do not reuse the current interactive Codex thread, and managed `fresh`/`feedback` runs install scoped completion hooks automatically rather than relying on user-global hook setup. Their prompt, output, transcript path, and resume metadata can be inspected from stored phase-run records.
-
-Use the board to keep track of active work:
-
-```bash
-devtask board
-devtask board serve --workspace platform
-devtask board html --workspace platform
-devtask board work APP-123
-devtask work diagnose APP-123
-devtask work inspect APP-123
-devtask work runs APP-123 --latest
-devtask work runs show APP-123 execute backend
-devtask work spec attach APP-123
-devtask work review attach APP-123 backend
-devtask work execute attach APP-123 backend
-```
-
-Current observability UX is terminal output plus optional web views. `board serve` starts a local read-only board app that rereads current state on refresh, and `board html` still generates a static snapshot when you want a file artifact.
-
-If your local registry still contains workspaces whose directories were deleted, prune only those stale registrations:
-
-```bash
-devtask workspace prune
-```
-
-## Team Onboarding
-
-Workspaces are local-first and exportable.
-
-Create and export a workspace bundle:
-
-```bash
-devtask workspace create --id platform --name Platform
-devtask workspace export --workspace platform --out platform.bundle.zip
-```
-
-Import it on another machine and bind local repos:
-
-```bash
-devtask workspace import --file platform.bundle.zip
-devtask repo bind --workspace platform backend /path/to/backend
-devtask repo bind --workspace platform web /path/to/web
-```
-
-Repo paths inside the bundle are only hints. Local bindings are per machine.
 
 ## Main Flow
 
-The intended flow is:
+The primary flow is a single orchestrated mission:
 
-```text
-spec -> plan -> repo-plan -> materialize -> execute -> check/verify -> review -> pr -> ci-watch -> compound
+```bash
+devtask work orchestrate <work-id>
 ```
 
-Notes:
-- `spec` refines the ticket into a shared spec artifact
-- `plan` builds the global multi-repo plan
-- `repo-plan` builds per-repo implementation plans for all affected repos
-- `materialize` creates repo-local task records and global workspace worktrees from the approved graph
-- `execute` launches or resumes the repo-task coding sessions
-- `check` and `verify` are deterministic
-- `review` is agent-backed
-- `pr-watch` routes `/devtask` PR comments back into the orchestrator
-- `ci-watch` watches PR CI, injects failure context into scoped fix runs, reruns deterministic validation, and pushes validated fixes back to the same branch
-- `compound` captures reusable lessons into file-backed workspace/local memory artifacts
-- later commands are mostly guided, not hard-gated
+The orchestrator runs as an agent session and drives the work item end-to-end:
+
+1. Produces a spec, global plan, and per-repo implementation plans
+2. **Gate 1** — pauses for human approval of the plan before any code is written
+3. Materializes worktrees and spawns per-repo coding sessions
+4. Runs validation against each repo's contract
+5. **Gate 2** — pauses for human approval before opening pull requests
+6. Opens pull requests for all affected repos
+
+Approve a gate:
+
+```bash
+devtask work approve <work-id> --gate gate-1
+devtask work approve <work-id> --gate gate-1 --message "Looks good, but keep the API surface minimal"
+```
+
+To auto-approve both gates without interruption:
+
+```bash
+devtask work orchestrate <work-id> --auto
+```
+
+## Observability
+
+```bash
+devtask work status <work-id>       # gate states, active session, validator result
+devtask work inspect <work-id>      # artifacts, latest runs, live sessions
+devtask work diagnose <work-id>     # what is blocking and why
+devtask work runs <work-id> --latest
+devtask board
+devtask board serve --workspace platform
+```
+
+## Manual Escape Hatches
+
+The orchestrator coordinates these commands internally. Run them directly when you need to intervene:
+
+```bash
+devtask work spec <work-id>                     # refine ticket into spec artifact
+devtask work plan <work-id>                     # build global multi-repo plan
+devtask work repo-plan <work-id>                # build per-repo implementation plans
+devtask work materialize <work-id>              # create task records and worktrees
+devtask work execute <work-id> [--repo <id>]    # launch or resume coding sessions
+devtask work check <work-id>                    # deterministic checks
+devtask work verify <work-id>                   # verify against validation contract
+devtask work review <work-id> [--repo <id>]     # agent-backed review
+devtask work pr <work-id> --ready               # open pull requests
+devtask work pr-watch <work-id>                 # route /devtask PR comments into session
+devtask work ci-watch <work-id>                 # watch CI, inject failures, push fixes
+devtask work compound <work-id>                 # capture reusable lessons into workspace memory
+```
+
+Attach to or send feedback into a running session:
+
+```bash
+devtask work orchestrate attach <work-id>
+devtask work orchestrate feedback <work-id> "Your message"
+devtask work execute attach <work-id> <repo-id>
+devtask work review attach <work-id> <repo-id>
+```
 
 ## Storage Model
 
-Shared and local workspace state live under:
-
 ```text
-~/.devtask/workspaces/<workspaceId>/
+~/.devtask/workspaces/<workspaceId>/shared/   # specs, plans, shared docs
+~/.devtask/workspaces/<workspaceId>/local/    # bindings, runtime state, results
 ```
 
-Split into:
-- `shared/` for workspace metadata, shared docs, approved spec, global plan, repo plans
-- `local/` for local bindings, runtime state, results, reviews
+See [docs/architecture/storage-model.md](docs/architecture/storage-model.md).
 
-Repo-local state is intentionally minimal:
-- no required devtask runtime state for workspace flows
+## Team Onboarding
 
-See [docs/architecture/storage-model.md](docs/architecture/storage-model.md) and [docs/architecture/workspace-team-onboarding.md](docs/architecture/workspace-team-onboarding.md).
+```bash
+# Export workspace bundle
+devtask workspace export --workspace platform --out platform.bundle.zip
+
+# Import on another machine and bind local paths
+devtask workspace import --file platform.bundle.zip
+devtask repo bind --workspace platform backend /path/to/backend
+```
+
+Repo paths inside the bundle are hints only — local bindings are per machine.
 
 ## Documentation
 
 - [CLI.md](CLI.md)
-- [docs/auth-and-environment.md](docs/auth-and-environment.md)
-- [docs/architecture/storage-model.md](docs/architecture/storage-model.md)
-- [docs/architecture/config-contract.md](docs/architecture/config-contract.md)
-- [docs/architecture/artifact-contract.md](docs/architecture/artifact-contract.md)
-- [docs/architecture/workspace-team-onboarding.md](docs/architecture/workspace-team-onboarding.md)
-- [docs/architecture/self-improvement.md](docs/architecture/self-improvement.md)

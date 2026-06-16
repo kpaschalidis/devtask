@@ -38,6 +38,7 @@ import { watchAndAutoApprove } from "../mission/auto-approve.js";
 import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/session-run-service.js";
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
+import { getWorkStatus } from "../services/work-status-service.js";
 import { recommendWorkNextAction } from "../board/next-actions.js";
 import { printError, printTable } from "./common.js";
 
@@ -227,6 +228,48 @@ export function registerWorkCommands(program: Command): void {
             ["REPO", "TASK", "STATUS", "WAITING_ON", "NEXT", "WHY"],
             diagnostic.tasks.map((task) => [task.repoId, task.taskId, task.status, task.waitingOn, task.next, task.reason])
           );
+        }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  work
+    .command("status")
+    .description("Show mission state: orchestrator session, gate approvals, and validator results.")
+    .argument("<work-id>")
+    .action((workId: string) => {
+      try {
+        const status = getWorkStatus(resolveWorkspacePaths(), workId);
+
+        const sessionLabel = status.orchestratorSession.running
+          ? `running  (${status.orchestratorSession.tmuxSession})`
+          : status.orchestratorSession.tmuxSession
+            ? `stopped  (${status.orchestratorSession.tmuxSession})`
+            : "no session";
+        console.log(`Orchestrator: ${sessionLabel}`);
+
+        const formatGate = (gate: typeof status.gate1, name: string): string => {
+          if (!gate) return `${name}: pending`;
+          const ts = gate.updatedAt ? `  ${gate.updatedAt}` : "";
+          const msg = gate.message ? `  "${gate.message}"` : "";
+          return `${name}: ${gate.status}${ts}${msg}`;
+        };
+        console.log(formatGate(status.gate1, "Gate 1"));
+        console.log(formatGate(status.gate2, "Gate 2"));
+
+        if (status.validatorResults.length > 0) {
+          console.log("");
+          printTable(
+            ["REPO", "VALIDATOR", "FAILED / TOTAL"],
+            status.validatorResults.map((r) => [
+              r.repoId,
+              r.status,
+              r.totalAssertions > 0 ? `${r.failedAssertions} / ${r.totalAssertions}` : "-"
+            ])
+          );
+        } else {
+          console.log("Validator:    no results yet");
         }
       } catch (error) {
         printError(error);
