@@ -18,7 +18,7 @@ import {
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
 import { getLatestWorkPhaseRun } from "../services/session-run-service.js";
-import type { RoleConfig, RoleLaunchResult } from "./types.js";
+import type { RoleConfig, RoleLaunchResult, FreshScopeOpts } from "./types.js";
 
 export type { RoleLaunchResult };
 
@@ -44,7 +44,7 @@ export async function launchPhaseFresh(
   workId: string,
   phase: SessionPhase,
   repoId: string | null,
-  opts?: import("./types.js").FreshScopeOpts
+  opts?: FreshScopeOpts
 ): Promise<RoleLaunchResult> {
   ensureNoLiveSession(paths, workId, phase, repoId);
   const runId = newRunId();
