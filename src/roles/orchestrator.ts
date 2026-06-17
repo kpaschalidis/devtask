@@ -25,7 +25,10 @@ import {
   killLiveSession,
   attachTmuxSession
 } from "./runner.js";
-import type { RoleConfig, RoleFreshScope, RoleScope } from "./types.js";
+import type { RoleConfig, RoleFreshScope, RoleScope, FreshScopeOpts } from "./types.js";
+
+const ACCEPT_RECOMMENDED_PREAMBLE =
+  "\nIn this session, --accept-recommended is active. Do not pause to ask the human for clarification at any point. When you encounter an ambiguity, apply your best judgment, state your assumption explicitly (e.g. \"Assuming X because Y\"), record it in the Clarifications section of the spec, and proceed. Keep the openQuestions array empty unless a worker explicitly surfaces a blocker you cannot resolve.\n";
 
 export const orchestratorPhase: RoleConfig = {
   resumeScope(paths, workId, _repoId, runId): RoleScope {
@@ -45,7 +48,7 @@ export const orchestratorPhase: RoleConfig = {
     };
   },
 
-  async freshScope(paths, workId, _repoId, runId): Promise<RoleFreshScope> {
+  async freshScope(paths, workId, _repoId, runId, opts?: FreshScopeOpts): Promise<RoleFreshScope> {
     copySkillsToDir(paths.root, ["branch", "pr"]);
     const item = getWorkItem(paths, workId);
     const config = readConfig(paths);
@@ -74,7 +77,8 @@ export const orchestratorPhase: RoleConfig = {
         SPEC_PATH: specPath,
         CONTRACT_PATH: contractPath,
         PLAN_PATH: planPath,
-        GRAPH_PATH: graphPath
+        GRAPH_PATH: graphPath,
+        ACCEPT_RECOMMENDED_PREAMBLE: opts?.acceptRecommended ? ACCEPT_RECOMMENDED_PREAMBLE : ""
       }),
       startOptions: {
         workspacePath: paths.root,

@@ -15,7 +15,7 @@ Questions that arise while writing the plan: ask before finalizing graph.json.
 
 By Gate 1, the plan must be complete and unambiguous. Gate 1 is a plan review,
 not a Q&A session.
-
+{{ACCEPT_RECOMMENDED_PREAMBLE}}
 Source:
 - type: {{SOURCE_TYPE}}
 - title: {{SOURCE_TITLE}}

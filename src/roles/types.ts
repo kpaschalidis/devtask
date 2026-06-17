@@ -33,8 +33,12 @@ export interface RoleLaunchResult {
   outputPath: string;
 }
 
+export interface FreshScopeOpts {
+  acceptRecommended?: boolean;
+}
+
 export interface RoleConfig {
-  freshScope(paths: DevtaskPaths, workId: string, repoId: string | null, runId: string): Promise<RoleFreshScope>;
+  freshScope(paths: DevtaskPaths, workId: string, repoId: string | null, runId: string, opts?: FreshScopeOpts): Promise<RoleFreshScope>;
   resumeScope(paths: DevtaskPaths, workId: string, repoId: string | null, runId: string): RoleScope;
   workspacePath(paths: DevtaskPaths, workId: string, repoId: string | null): string;
   finalize(paths: DevtaskPaths, workId: string, repoId: string | null, sessionRecord: SessionRun): Promise<RoleResult>;

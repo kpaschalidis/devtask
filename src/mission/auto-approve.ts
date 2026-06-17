@@ -18,6 +18,7 @@ const POLL_INTERVAL_MS = 5000;
 export interface AutoApproveOptions {
   message?: string;
   initialOutputOffset?: number;
+  acceptRecommended?: boolean;
   onApprove?: (gate: GateName) => void;
   onComplete?: () => void;
   onPendingQuestions?: (gate: GateName, questions: string[]) => void;
@@ -55,7 +56,7 @@ export async function watchAndAutoApprove(
         const existing = readGateState(paths, workId, gate);
         if (existing?.status === "approved") continue;
 
-        if (gate === "gate-1") {
+        if (gate === "gate-1" && !options.acceptRecommended) {
           const openQuestions = readGraphOpenQuestions(paths, workId);
           if (openQuestions === null) {
             // partial write in progress — block silently, retry next tick

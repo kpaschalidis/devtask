@@ -304,8 +304,12 @@ const PHASE_CONFIGS: Record<InteractivePhase, RoleConfig> = {
   review: reviewPhase
 };
 
-export async function startOrchestrateWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult> {
-  return launchPhaseFresh(orchestratorPhase, paths, workId, "orchestrate", null);
+export async function startOrchestrateWork(
+  paths: DevtaskPaths,
+  workId: string,
+  opts?: { acceptRecommended?: boolean }
+): Promise<PhaseLaunchResult> {
+  return launchPhaseFresh(orchestratorPhase, paths, workId, "orchestrate", null, opts);
 }
 
 export async function runRepoPlanWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {

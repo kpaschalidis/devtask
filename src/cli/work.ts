@@ -32,7 +32,7 @@ import {
   runValidateWorker,
   resetTaskForFix
 } from "../services/work-service.js";
-import { killLiveSession } from "../roles/runner.js";
+import { killLiveSession, attachTmuxSession } from "../roles/runner.js";
 import type { GateName } from "../mission/gates.js";
 import { watchAndAutoApprove } from "../mission/auto-approve.js";
 import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/session-run-service.js";
@@ -375,24 +375,28 @@ export function registerWorkCommands(program: Command): void {
   orchestrate
     .argument("<work-id>")
     .option("--auto", "Automatically approve all gates without human confirmation")
-    .action(async (workId: string, options: { auto?: boolean }) => {
+    .option("--accept-recommended", "Proceed autonomously without pausing to ask clarifying questions")
+    .option("--attach", "Attach terminal to the session immediately after starting")
+    .action(async (workId: string, options: { auto?: boolean; acceptRecommended?: boolean; attach?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
-        const result = await startOrchestrateWork(paths, workId);
+        const result = await startOrchestrateWork(paths, workId, { acceptRecommended: options.acceptRecommended });
         console.log(`Started orchestrate session: ${result.tmuxSession}`);
         console.log(`Prompt: ${result.promptPath}`);
         console.log(`Output: ${result.outputPath}`);
         if (options.auto) {
           const initialOffset = fs.existsSync(result.outputPath) ? fs.statSync(result.outputPath).size : 0;
-          const child = spawn(
-            process.execPath,
-            [process.argv[1], "work", "_auto-approve-worker", "--work-id", workId, "--offset", String(initialOffset)],
-            { detached: true, stdio: "ignore" }
-          );
+          const workerArgs = [process.argv[1], "work", "_auto-approve-worker", "--work-id", workId, "--offset", String(initialOffset)];
+          if (options.acceptRecommended) workerArgs.push("--accept-recommended");
+          const child = spawn(process.execPath, workerArgs, { detached: true, stdio: "ignore" });
           child.unref();
           console.log("Auto-approve watcher started in background.");
         }
-        console.log(`Attach: devtask work orchestrate attach ${workId}`);
+        if (options.attach) {
+          attachTmuxSession(result.tmuxSession);
+        } else {
+          console.log(`Attach: devtask work orchestrate attach ${workId}`);
+        }
       } catch (error) {
         printError(error);
       }
@@ -441,12 +445,14 @@ export function registerWorkCommands(program: Command): void {
     .requiredOption("--work-id <id>")
     .option("--offset <n>", "Byte offset into the output file to start scanning from", "0")
     .option("--message <msg>", "Approval message to send")
-    .action(async (options: { workId: string; offset: string; message?: string }) => {
+    .option("--accept-recommended", "Skip openQuestions guard and auto-approve gate-1 unconditionally")
+    .action(async (options: { workId: string; offset: string; message?: string; acceptRecommended?: boolean }) => {
       try {
         const paths = resolveWorkspacePaths();
         await watchAndAutoApprove(paths, options.workId, {
           initialOutputOffset: parseInt(options.offset, 10),
           message: options.message,
+          acceptRecommended: !!options.acceptRecommended,
           onApprove: (gate) => console.log(`Auto-approved ${gate} for ${options.workId}.`),
           onComplete: () => console.log(`Orchestrator session for ${options.workId} completed.`),
           onPendingQuestions: (gate, questions) => {
@@ -527,9 +533,11 @@ export function registerWorkCommands(program: Command): void {
     .description("Launch or resume repo-task execution sessions for a work item.");
   execute
     .argument("<work-id>")
-    .action(async (workId: string) => {
+    .option("--attach", "Attach terminal to the session immediately after starting")
+    .action(async (workId: string, options: { attach?: boolean }) => {
       try {
-        const result = await executeWork(resolveWorkspacePaths(), workId);
+        const paths = resolveWorkspacePaths();
+        const result = await executeWork(paths, workId);
         printTable(
           ["REPO", "TASK", "STATUS", "ACTION", "SESSION", "SUMMARY"],
           result.tasks.map((task) => [
@@ -541,6 +549,19 @@ export function registerWorkCommands(program: Command): void {
             task.summary ?? "-"
           ])
         );
+        if (options.attach) {
+          const active = result.tasks.filter((t) => t.sessionName);
+          if (active.length === 0) {
+            console.log("No active sessions to attach to.");
+          } else if (active.length === 1) {
+            attachTmuxSession(active[0].sessionName!);
+          } else {
+            console.log("Multiple sessions started. Attach with:");
+            for (const t of active) {
+              console.log(`  devtask work execute attach ${workId} ${t.repoId}`);
+            }
+          }
+        }
       } catch (error) {
         printError(error);
       }

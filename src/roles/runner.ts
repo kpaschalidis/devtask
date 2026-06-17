@@ -43,13 +43,14 @@ export async function launchPhaseFresh(
   paths: DevtaskPaths,
   workId: string,
   phase: SessionPhase,
-  repoId: string | null
+  repoId: string | null,
+  opts?: import("./types.js").FreshScopeOpts
 ): Promise<RoleLaunchResult> {
   ensureNoLiveSession(paths, workId, phase, repoId);
   const runId = newRunId();
   const devtaskConfig = readConfig(paths);
   const runner = createDefaultAgentRunner(devtaskConfig);
-  const { scope, prompt, startOptions } = await config.freshScope(paths, workId, repoId, runId);
+  const { scope, prompt, startOptions } = await config.freshScope(paths, workId, repoId, runId, opts);
   const completionCommand = buildManagedCompletionCommand(paths, phase, workId, repoId, runId);
   const start = await runner.buildInteractiveStartCommand?.(
     { ...startOptions, managedCompletionCommand: completionCommand },
