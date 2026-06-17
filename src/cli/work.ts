@@ -34,7 +34,7 @@ import {
 } from "../services/work-service.js";
 import { killLiveSession, attachTmuxSession } from "../roles/runner.js";
 import type { GateName } from "../mission/gates.js";
-import { watchAndAutoApprove } from "../mission/auto-approve.js";
+import { watchAndAutoApprove, isAutoApproveWatcherAlive, writeAutoApprovePid, clearAutoApprovePid } from "../mission/auto-approve.js";
 import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/session-run-service.js";
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
@@ -385,12 +385,16 @@ export function registerWorkCommands(program: Command): void {
         console.log(`Prompt: ${result.promptPath}`);
         console.log(`Output: ${result.outputPath}`);
         if (options.auto) {
-          const initialOffset = fs.existsSync(result.outputPath) ? fs.statSync(result.outputPath).size : 0;
-          const workerArgs = [process.argv[1], "work", "_auto-approve-worker", "--work-id", workId, "--offset", String(initialOffset)];
-          if (options.acceptRecommended) workerArgs.push("--accept-recommended");
-          const child = spawn(process.execPath, workerArgs, { detached: true, stdio: "ignore" });
-          child.unref();
-          console.log("Auto-approve watcher started in background.");
+          if (isAutoApproveWatcherAlive(paths, workId)) {
+            console.log("Auto-approve watcher already running.");
+          } else {
+            const initialOffset = fs.existsSync(result.outputPath) ? fs.statSync(result.outputPath).size : 0;
+            const workerArgs = [process.argv[1], "work", "_auto-approve-worker", "--work-id", workId, "--offset", String(initialOffset)];
+            if (options.acceptRecommended) workerArgs.push("--accept-recommended");
+            const child = spawn(process.execPath, workerArgs, { detached: true, stdio: "ignore" });
+            child.unref();
+            console.log("Auto-approve watcher started in background.");
+          }
         }
         if (options.attach) {
           attachTmuxSession(result.tmuxSession);
@@ -447,8 +451,17 @@ export function registerWorkCommands(program: Command): void {
     .option("--message <msg>", "Approval message to send")
     .option("--accept-recommended", "Skip openQuestions guard and auto-approve gate-1 unconditionally")
     .action(async (options: { workId: string; offset: string; message?: string; acceptRecommended?: boolean }) => {
+      const paths = resolveWorkspacePaths();
+      if (isAutoApproveWatcherAlive(paths, options.workId)) {
+        console.log("Auto-approve watcher already running.");
+        return;
+      }
+      writeAutoApprovePid(paths, options.workId);
+      const cleanup = () => clearAutoApprovePid(paths, options.workId);
+      process.on("exit", cleanup);
+      process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+      process.on("SIGINT", () => { cleanup(); process.exit(0); });
       try {
-        const paths = resolveWorkspacePaths();
         await watchAndAutoApprove(paths, options.workId, {
           initialOutputOffset: parseInt(options.offset, 10),
           message: options.message,

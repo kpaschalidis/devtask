@@ -1,6 +1,7 @@
 import fs from "node:fs";
+import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { phaseRunDir } from "../infra/paths.js";
+import { phaseRunDir, workItemAutoApprovePidPath } from "../infra/paths.js";
 import { readRunningPhaseRun } from "../infra/session-run.js";
 import { tmuxSessionExists } from "../infra/tmux.js";
 import { readGateState } from "./gates.js";
@@ -81,6 +82,41 @@ export async function watchAndAutoApprove(
       }
     }, POLL_INTERVAL_MS);
   });
+}
+
+export function isAutoApproveWatcherAlive(paths: DevtaskPaths, workId: string): boolean {
+  const pid = readAutoApprovePid(paths, workId);
+  if (pid === null) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function writeAutoApprovePid(paths: DevtaskPaths, workId: string): void {
+  const pidPath = workItemAutoApprovePidPath(paths, workId);
+  fs.mkdirSync(path.dirname(pidPath), { recursive: true });
+  fs.writeFileSync(pidPath, String(process.pid));
+}
+
+export function clearAutoApprovePid(paths: DevtaskPaths, workId: string): void {
+  try {
+    fs.unlinkSync(workItemAutoApprovePidPath(paths, workId));
+  } catch {
+    // ignore if already gone
+  }
+}
+
+function readAutoApprovePid(paths: DevtaskPaths, workId: string): number | null {
+  try {
+    const text = fs.readFileSync(workItemAutoApprovePidPath(paths, workId), "utf8").trim();
+    const pid = parseInt(text, 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
 }
 
 // Returns [] if graph not yet written, null if file exists but unreadable (partial write — block silently).

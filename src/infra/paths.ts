@@ -259,6 +259,10 @@ export function workItemGatesDir(paths: DevtaskPaths, id: string): string {
   return path.join(workItemLocalDir(paths, id), "gates");
 }
 
+export function workItemAutoApprovePidPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemLocalDir(paths, id), "auto-approve.pid");
+}
+
 export const GLOBAL_PHASES = new Set(["orchestrate", "compound"]);
 
 export function phaseRunDir(
