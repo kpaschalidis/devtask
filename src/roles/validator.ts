@@ -146,9 +146,24 @@ function requireMaterialization(paths: DevtaskPaths, workId: string) {
   return m;
 }
 
-function readReviewResult(filePath: string): { status: "approved" | "passed" | "findings" | "blocked" | "failed" } | null {
+export type AssertionAttribution = "spec-gap" | "implementation-gap" | "environment" | "wrong-repo" | "inconclusive" | null;
+
+export interface AssertionResult {
+  id: string;
+  status: "passed" | "failed" | "skipped";
+  evidence: string;
+  attribution: AssertionAttribution;
+  attributionReason: string | null;
+}
+
+export interface ReviewResult {
+  status: "approved" | "passed" | "findings" | "blocked" | "failed";
+  assertions: AssertionResult[];
+}
+
+function readReviewResult(filePath: string): ReviewResult | null {
   try {
-    const value = JSON.parse(fs.readFileSync(filePath, "utf8")) as { status?: unknown };
+    const value = JSON.parse(fs.readFileSync(filePath, "utf8")) as { status?: unknown; assertions?: unknown };
     const status = value.status;
     if (
       status === "approved" ||
@@ -157,10 +172,49 @@ function readReviewResult(filePath: string): { status: "approved" | "passed" | "
       status === "findings" ||
       status === "blocked"
     ) {
-      return { status };
+      return { status, assertions: parseAssertions(value.assertions) };
     }
   } catch {
     // ignore malformed
+  }
+  return null;
+}
+
+export function readReviewResultFromPath(filePath: string): ReviewResult | null {
+  return readReviewResult(filePath);
+}
+
+function parseAssertions(raw: unknown): AssertionResult[] {
+  if (!Array.isArray(raw)) return [];
+  const results: AssertionResult[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const id = typeof obj.id === "string" ? obj.id : null;
+    const status = obj.status === "passed" || obj.status === "failed" || obj.status === "skipped" ? obj.status : null;
+    if (!id || !status) continue;
+    const attribution = parseAttribution(obj.attribution);
+    results.push({
+      id,
+      status,
+      evidence: typeof obj.evidence === "string" ? obj.evidence : "",
+      attribution,
+      attributionReason: typeof obj.attributionReason === "string" ? obj.attributionReason : null
+    });
+  }
+  return results;
+}
+
+function parseAttribution(value: unknown): AssertionAttribution {
+  if (value === null || value === undefined) return null;
+  if (
+    value === "spec-gap" ||
+    value === "implementation-gap" ||
+    value === "environment" ||
+    value === "wrong-repo" ||
+    value === "inconclusive"
+  ) {
+    return value;
   }
   return null;
 }

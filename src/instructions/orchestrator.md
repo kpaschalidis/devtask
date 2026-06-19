@@ -134,6 +134,21 @@ If graph.json has no tasks, skip this step.
 
 A non-zero exit from a worker means that repo-plan failed for that repo. Note the failure in your Gate 1 summary but do not stop other workers. If all workers fail, describe the errors at Gate 1 so the human can intervene before execution begins.
 
+After all workers complete (or fail), write a context artifact for each repoId alongside its repo-plan. The context artifact path is:
+
+  <repo-plans-dir>/<REPO_ID>.context.md
+
+where `<repo-plans-dir>` is the directory containing the repo-plan files. Write the context artifact in Markdown with these sections:
+
+1. **Key Decisions** — architectural choices made and the reasoning behind them
+2. **Rejected Alternatives** — approaches considered but not chosen, and why
+3. **Identified Risks** — edge cases, known unknowns, or areas likely to need care
+4. **Codebase Gotchas** — repo-specific patterns, constraints, or conventions discovered during planning
+5. **Assumptions** — anything assumed true that the worker should verify or flag if incorrect
+6. **Escalation Triggers** — conditions under which the worker should stop and surface a question rather than proceeding
+
+Keep each section concise. The context artifact is consumed by the execution worker to avoid re-deriving planning reasoning. Omit sections that are not applicable for this repo.
+
 --- Gate 1: Awaiting approval ---
 
 Planning is complete. Before waiting, print a brief summary:

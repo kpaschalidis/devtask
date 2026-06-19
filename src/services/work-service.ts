@@ -12,7 +12,9 @@ import {
   workItemResultsDir,
   workItemReviewDir,
   workItemRepoPlanPath,
+  workItemRepoContextPath,
   workItemRepoPlansDir,
+  workItemLessonProposalsPath,
   phaseRunDir,
   resultJsonPath
 } from "../infra/paths.js";
@@ -333,11 +335,14 @@ export async function runRepoPlanWorker(paths: DevtaskPaths, workId: string, rep
   const task = buildWorkerTaskDescription(workId, graphTask, repo);
   const state = `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${workId}\n`;
   const memory = collectPhaseMemory(paths, "planning", { repoId });
+  const contextPath = workItemRepoContextPath(paths, workId, repoId);
+  const contextContent = fs.existsSync(contextPath) ? fs.readFileSync(contextPath, "utf8").trim() : null;
   const prompt = loadInstruction("repo-plan", {
     TASK_ID: graphTask.id,
     TASK_CONTENT: task,
     STATE_CONTENT: state,
     PLAN_PATH: runtimePlanPath,
+    CONTEXT: contextContent ? `## Orchestrator Context\n\n${contextContent}\n\n` : "",
     MEMORY: memory ? `${memory}\n\n` : ""
   });
   fs.writeFileSync(promptPath, `${prompt}\n`);
@@ -450,6 +455,8 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
   const specPath = fs.existsSync(specFile) ? specFile : null;
   const planPath = fs.existsSync(path.join(paths.workDir, workId, "plan.md")) ? path.join(paths.workDir, workId, "plan.md") : null;
   const graphPath = fs.existsSync(path.join(paths.workDir, workId, "graph.json")) ? path.join(paths.workDir, workId, "graph.json") : null;
+  const proposalsPath = workItemLessonProposalsPath(paths, workId);
+  fs.mkdirSync(path.dirname(proposalsPath), { recursive: true });
   const prompt = loadInstruction("compound", {
     WORK_ID: workId,
     SOURCE_PATH: item.source.artifact,
@@ -463,7 +470,8 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
     SHARED_IMPLEMENTATION_PATH: sharedImplementationPath,
     SHARED_REVIEW_PATH: sharedReviewPath,
     SHARED_PATTERNS_PATH: sharedPatternsPath,
-    LOCAL_NOTES_PATH: localNotesPath
+    LOCAL_NOTES_PATH: localNotesPath,
+    PROPOSALS_PATH: proposalsPath
   });
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
@@ -502,7 +510,8 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
       sharedImplementationPath,
       sharedReviewPath,
       sharedPatternsPath,
-      localNotesPath
+      localNotesPath,
+      proposalsPath
     },
     exitCode: result.status === "completed" ? 0 : null
   });

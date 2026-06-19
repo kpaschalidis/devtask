@@ -16,7 +16,8 @@ describe("compound prompt", () => {
       sharedImplementationPath: "/tmp/shared/implementation.md",
       sharedReviewPath: "/tmp/shared/review.md",
       sharedPatternsPath: "/tmp/shared/patterns.md",
-      localNotesPath: "/tmp/local/notes.md"
+      localNotesPath: "/tmp/local/notes.md",
+      proposalsPath: "/tmp/local/lessons/proposals.jsonl"
     });
 
     expect(prompt).toContain("devtask compound activity");
@@ -25,5 +26,6 @@ describe("compound prompt", () => {
     expect(prompt).toContain("/tmp/shared/review.md");
     expect(prompt).toContain("/tmp/shared/patterns.md");
     expect(prompt).toContain("/tmp/local/notes.md");
+    expect(prompt).toContain("/tmp/local/lessons/proposals.jsonl");
   });
 });

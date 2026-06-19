@@ -12,7 +12,8 @@ import {
   workItemGraphPath,
   workItemGraphSnapshotPath,
   workItemMaterializationPath,
-  workItemPlanPath
+  workItemPlanPath,
+  workItemRepoContextPath
 } from "./infra/paths.js";
 import { assertValidTaskId } from "./task-id.js";
 import { createTask, initializeStore } from "./storage/task-store.js";
@@ -367,7 +368,13 @@ function hydrateMaterializedTaskPlan(
     return meta;
   }
 
-  fs.writeFileSync(planMarkdownPath(storagePaths, meta.id), `${plan}\n`);
+  const contextPath = workItemRepoContextPath(paths, workId, repoId);
+  const contextContent = fs.existsSync(contextPath) ? fs.readFileSync(contextPath, "utf8").trim() : null;
+  const planWithContext = contextContent
+    ? `${plan}\n\n---\n\n## Orchestrator Context\n\n${contextContent}\n`
+    : `${plan}\n`;
+
+  fs.writeFileSync(planMarkdownPath(storagePaths, meta.id), planWithContext);
   const next: TaskMeta = {
     ...meta,
     status: "ready",

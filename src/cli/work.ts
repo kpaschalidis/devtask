@@ -40,6 +40,7 @@ import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
 import { getWorkStatus } from "../services/work-status-service.js";
 import { recommendWorkNextAction } from "../board/next-actions.js";
+import { listPendingProposals, listAllProposals, approveProposal, rejectProposal } from "../services/lessons-service.js";
 import { printError, printTable } from "./common.js";
 
 export function registerWorkCommands(program: Command): void {
@@ -842,6 +843,61 @@ export function registerWorkCommands(program: Command): void {
             console.log(`- ${blocker}`);
           }
         }
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  const lessons = work.command("lessons").description("Manage lesson proposals extracted from validator failures.");
+
+  lessons
+    .command("list")
+    .description("List pending lesson proposals for a work item.")
+    .argument("<work-id>")
+    .option("--all", "Include approved and rejected proposals")
+    .action((workId: string, options: { all?: boolean }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        const proposals = options.all ? listAllProposals(paths, workId) : listPendingProposals(paths, workId);
+        if (proposals.length === 0) {
+          console.log(options.all ? "No proposals." : "No pending proposals.");
+          return;
+        }
+        printTable(
+          ["ID", "PHASE", "STATUS", "CONFIDENCE", "LESSON"],
+          proposals.map((p) => [p.id, p.phase, p.status, p.confidence, p.lesson.slice(0, 80)])
+        );
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  lessons
+    .command("approve")
+    .description("Approve a lesson proposal and promote it to improvement memory.")
+    .argument("<work-id>")
+    .argument("<proposal-id>")
+    .action((workId: string, proposalId: string) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        approveProposal(paths, workId, proposalId);
+        console.log(`Approved proposal ${proposalId}`);
+      } catch (error) {
+        printError(error);
+      }
+    });
+
+  lessons
+    .command("reject")
+    .description("Reject a lesson proposal so it is not re-proposed.")
+    .argument("<work-id>")
+    .argument("<proposal-id>")
+    .requiredOption("--reason <reason>", "Reason for rejection")
+    .action((workId: string, proposalId: string, options: { reason: string }) => {
+      try {
+        const paths = resolveWorkspacePaths();
+        rejectProposal(paths, workId, proposalId, options.reason);
+        console.log(`Rejected proposal ${proposalId}`);
       } catch (error) {
         printError(error);
       }

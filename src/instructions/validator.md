@@ -74,9 +74,15 @@ Schema:
 ```json
 {
   "schemaVersion": 1,
-  "status": "passed" | "failed",
+  "status": "passed" | "failed" | "blocked",
   "assertions": [
-    { "id": "VAL-001", "status": "passed" | "failed" | "skipped", "evidence": "specific file:line or test name or error quote" }
+    {
+      "id": "VAL-001",
+      "status": "passed" | "failed" | "skipped",
+      "evidence": "specific file:line or test name or error quote",
+      "attribution": "spec-gap" | "implementation-gap" | "environment" | "wrong-repo" | "inconclusive" | null,
+      "attributionReason": "one sentence explaining the attribution, or null"
+    }
   ],
   "commands": [
     { "command": "npm test", "exitCode": 0, "output": "..." }
@@ -84,9 +90,19 @@ Schema:
 }
 ```
 
+Attribution rules (set on each assertion):
+- `null` — assertion passed; no failure to attribute
+- `"environment"` — the assertion could not be evaluated because the environment is broken (command not found, dependency missing, infra blocked). No instruction change warranted.
+- `"wrong-repo"` — assertion belongs to a different repo; skipped. Map to the planning phase for future consideration.
+- `"spec-gap"` — the assertion failed because the spec did not provide enough guidance: the behavior was absent or underspecified in the spec/validation contract. The worker had no clear target.
+- `"implementation-gap"` — the spec was clear but the implementation is wrong or missing. Evidence of what was attempted is present but incorrect.
+- `"inconclusive"` — the assertion failed but the cause cannot be determined from available evidence (use sparingly).
+
 Rules:
 - status is "passed" only if all evaluated assertions pass and all commands exit 0
-- status is "failed" if any evaluated assertion fails, any command exits non-zero, or this is a total environment failure
+- status is "failed" if any evaluated assertion fails or any command exits non-zero
+- status is "blocked" only if this is a total environment failure (every command exited 127 and no assertions were evaluated against code)
 - Include every VAL-XXX assertion from the contract; use "skipped" for assertions owned by other repos
 - Truncate command output to the last 200 lines if it is very long
 - The result file must contain JSON only, with no Markdown fences
+- Always set attribution on every assertion; use null for passed assertions

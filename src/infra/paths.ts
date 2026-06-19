@@ -263,6 +263,18 @@ export function workItemAutoApprovePidPath(paths: DevtaskPaths, id: string): str
   return path.join(workItemLocalDir(paths, id), "auto-approve.pid");
 }
 
+export function workItemRepoContextPath(paths: DevtaskPaths, id: string, repoId: string): string {
+  return path.join(workItemRepoPlansDir(paths, id), `${repoId}.context.md`);
+}
+
+export function workItemLessonProposalsPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemLocalDir(paths, id), "lessons", "proposals.jsonl");
+}
+
+export function lessonProposalsArchivePath(paths: DevtaskPaths): string {
+  return path.join(paths.localDir, "improvement", "proposals-archive.jsonl");
+}
+
 export const GLOBAL_PHASES = new Set(["orchestrate", "compound"]);
 
 export function phaseRunDir(

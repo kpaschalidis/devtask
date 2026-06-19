@@ -14,6 +14,7 @@ export function buildCompoundPrompt(context: {
   sharedReviewPath: string;
   sharedPatternsPath: string;
   localNotesPath: string;
+  proposalsPath: string;
 }): string {
   return loadInstruction("compound", {
     WORK_ID: context.workId,
@@ -28,6 +29,7 @@ export function buildCompoundPrompt(context: {
     SHARED_IMPLEMENTATION_PATH: context.sharedImplementationPath,
     SHARED_REVIEW_PATH: context.sharedReviewPath,
     SHARED_PATTERNS_PATH: context.sharedPatternsPath,
-    LOCAL_NOTES_PATH: context.localNotesPath
+    LOCAL_NOTES_PATH: context.localNotesPath,
+    PROPOSALS_PATH: context.proposalsPath
   });
 }

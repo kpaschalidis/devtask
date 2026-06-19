@@ -33,3 +33,33 @@ Writing rules:
 - Local notes may include machine-local or tentative reminders that should not be promoted to shared guidance.
 
 Use Markdown in every output file.
+
+--- Lesson proposals ---
+
+After writing the guidance files, generate lesson proposals from validator failures.
+
+Proposals output: {{PROPOSALS_PATH}}
+
+For each failed assertion in each result.json under {{RESULTS_DIR}}, determine whether the failure warrants a lesson proposal. Use the `attribution` field on each assertion to decide:
+
+| attribution | action |
+|---|---|
+| `null` or `environment` | skip — no instruction change warranted |
+| `wrong-repo` | propose to planning phase |
+| `spec-gap` | propose to planning phase |
+| `implementation-gap` | propose to implementation phase |
+| `inconclusive` | propose to review phase |
+
+For each assertion that warrants a proposal, write one JSON line to {{PROPOSALS_PATH}} (JSONL format — one valid JSON object per line, no trailing commas, no array wrapper):
+
+```json
+{"id":"<workId>-<repoId>-<assertionId>","workId":"<workId>","repoId":"<repoId>","assertionId":"<VAL-XXX>","phase":"planning|implementation|review","lesson":"one sentence: what instruction would have prevented this failure","trigger":"what failed and why, in one sentence","confidence":"high|medium|low","evidence":"<result-file-path>#<assertionId>","proposedAt":"<ISO timestamp>","status":"pending"}
+```
+
+Idempotency rules:
+- Before writing any proposal, read {{PROPOSALS_PATH}} if it exists. If a proposal with the same `id` already exists, skip it.
+- Only write proposals for assertions with status "failed". Skip "passed" and "skipped".
+- Do not propose lessons for attribution values `null` or `environment`.
+- If there are no failed assertions with a proposable attribution, do not create the file.
+
+Use high confidence when the attribution is clear and the fix is obvious. Use medium when the failure pattern is plausible but may have other causes. Use low when the assertion failed but the lesson is speculative.

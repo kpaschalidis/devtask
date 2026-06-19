@@ -10,6 +10,7 @@ import {
   workItemPlanPath,
   workItemGraphPath,
   workItemRepoPlanPath,
+  workItemRepoContextPath,
   workItemResultsDir
 } from "../infra/paths.js";
 import { readRunningPhaseRun, updateRunningPhaseRun } from "../infra/session-run.js";
@@ -200,6 +201,9 @@ function allRepoPlansFresh(paths: DevtaskPaths, workId: string, graphPath: strin
   if (tasks.length === 0) return true;
   return tasks.every((task) => {
     if (!task.repoId) return false;
-    return isFreshArtifactSince(workItemRepoPlanPath(paths, workId, task.repoId), startedAt);
+    return (
+      isFreshArtifactSince(workItemRepoPlanPath(paths, workId, task.repoId), startedAt) &&
+      isFreshArtifactSince(workItemRepoContextPath(paths, workId, task.repoId), startedAt)
+    );
   });
 }

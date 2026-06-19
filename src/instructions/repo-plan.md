@@ -42,5 +42,5 @@ Planning rules:
 - Do not include code patches unless a small interface sketch is necessary to remove ambiguity.
 - Make the plan precise enough that another agent can implement it without re-discovering the whole task.
 
-{{MEMORY}}If the task is blocked, write a short blocked plan and set $DEVTASK_RESULT_PATH to {"status":"blocked","reason":"..."}.
+{{CONTEXT}}{{MEMORY}}If the task is blocked, write a short blocked plan and set $DEVTASK_RESULT_PATH to {"status":"blocked","reason":"..."}.
 Otherwise, leave $DEVTASK_RESULT_PATH unchanged and ensure the plan file is complete.

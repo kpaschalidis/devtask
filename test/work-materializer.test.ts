@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   taskMetaPath,
   workItemGraphSnapshotPath,
-  workItemMaterializationPath
+  workItemMaterializationPath,
+  planMarkdownPath,
+  workItemRepoContextPath
 } from "../src/infra/paths.js";
 import { resolvePaths, resolveWorkspacePathsForInit } from "../src/infra/paths.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
@@ -77,6 +79,85 @@ describe("work materializer", () => {
     expect(meta.command).toContain(`--add-dir ${path.dirname(item.source.artifact)}`);
     expect(meta.branch).toBe("feature/work-123-backend");
     expect(meta.worktreePath).toBe(path.join(paths.worktreesDir, "backend", "feature", "work-123-backend"));
+  });
+
+  it("appends orchestrator context to task plan when context file exists", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-ctx-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "work-ctx",
+      title: "Context test"
+    });
+    addWorkspaceRepo(paths, { id: "backend", repoPath: repo, kind: "api" });
+    fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
+    fs.mkdirSync(path.join(paths.workDir, item.id, "repo-plans"), { recursive: true });
+    fs.writeFileSync(path.join(paths.workDir, item.id, "repo-plans", "backend.md"), "# Repo Plan\nDo the thing.\n");
+    fs.writeFileSync(
+      workItemRepoContextPath(paths, item.id, "backend"),
+      "## Key Decisions\n- Use existing auth module.\n"
+    );
+    fs.writeFileSync(
+      workItemGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          kind: "feature",
+          tasks: [{ id: "backend", repoId: "backend", goal: "Do thing.", owns: ["server/**"], dependencies: [] }],
+          features: [],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+
+    await materializeWorkPlan(paths, item);
+
+    const taskPlan = fs.readFileSync(planMarkdownPath(paths, "backend"), "utf8");
+    expect(taskPlan).toContain("Do the thing.");
+    expect(taskPlan).toContain("## Orchestrator Context");
+    expect(taskPlan).toContain("Use existing auth module.");
+  });
+
+  it("materializes without appending context when context file is absent", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-work-materializer-noctx-"));
+    const repo = await makeTempRepo({ withCommit: true });
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "work-noctx",
+      title: "No context test"
+    });
+    addWorkspaceRepo(paths, { id: "backend", repoPath: repo, kind: "api" });
+    fs.writeFileSync(path.join(paths.workDir, item.id, "plan.md"), "# Plan\n");
+    fs.mkdirSync(path.join(paths.workDir, item.id, "repo-plans"), { recursive: true });
+    fs.writeFileSync(path.join(paths.workDir, item.id, "repo-plans", "backend.md"), "# Repo Plan\nJust the plan.\n");
+    fs.writeFileSync(
+      workItemGraphPath(paths, item.id),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          workId: item.id,
+          kind: "feature",
+          tasks: [{ id: "backend", repoId: "backend", goal: "Just work.", owns: ["server/**"], dependencies: [] }],
+          features: [],
+          validation: [],
+          openQuestions: []
+        },
+        null,
+        2
+      )
+    );
+
+    await materializeWorkPlan(paths, item);
+
+    const taskPlan = fs.readFileSync(planMarkdownPath(paths, "backend"), "utf8");
+    expect(taskPlan).toContain("Just the plan.");
+    expect(taskPlan).not.toContain("## Orchestrator Context");
   });
 
   it("rejects unknown dependency references", async () => {
