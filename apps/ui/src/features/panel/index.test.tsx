@@ -1,0 +1,635 @@
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+	cleanup,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import type { WorkspaceDetail, WorkspaceSessionSummary } from "@/lib/api";
+import { createHelmorQueryClient, helmorQueryKeys } from "@/lib/query-client";
+
+const apiMocks = vi.hoisted(() => ({
+	createSession: vi.fn(),
+	hideSession: vi.fn(),
+	renameSession: vi.fn(),
+}));
+
+vi.mock("@/components/icons", () => ({
+	ClaudeIcon: (props: { className?: string }) => (
+		<span data-testid="claude-icon" {...props}>
+			claude-icon
+		</span>
+	),
+	OpenAIIcon: (props: { className?: string }) => (
+		<span data-testid="codex-icon" {...props}>
+			codex-icon
+		</span>
+	),
+}));
+
+vi.mock("@/components/helmor-thinking-indicator", () => ({
+	HelmorThinkingIndicator: () => (
+		<span
+			aria-hidden="true"
+			data-slot="helmor-thinking-indicator"
+			data-testid="thinking-indicator"
+		/>
+	),
+}));
+
+vi.mock("@/lib/api", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/api")>();
+
+	return {
+		...actual,
+		createSession: apiMocks.createSession,
+		hideSession: apiMocks.hideSession,
+		renameSession: apiMocks.renameSession,
+	};
+});
+
+import { WorkspacePanel } from "./index";
+
+const WORKSPACE: WorkspaceDetail = {
+	id: "workspace-1",
+	title: "Workspace 1",
+	repoId: "repo-1",
+	repoName: "helmor",
+	directoryName: "helmor",
+	state: "ready",
+	hasUnread: false,
+	workspaceUnread: 0,
+	unreadSessionCount: 0,
+	status: "in-progress",
+	activeSessionId: "session-1",
+	activeSessionTitle: "Session 1",
+	activeSessionAgentType: "claude",
+	activeSessionStatus: "idle",
+	branch: "main",
+	initializationParentBranch: "main",
+	intendedTargetBranch: "main",
+	mode: "worktree",
+	pinnedAt: null,
+	prTitle: null,
+	archiveCommit: null,
+	sessionCount: 1,
+	messageCount: 0,
+	rootPath: "/tmp/helmor",
+};
+
+const SESSIONS: WorkspaceSessionSummary[] = [
+	{
+		id: "session-1",
+		workspaceId: "workspace-1",
+		title: "Session 1",
+		agentType: "claude",
+		status: "idle",
+		model: "opus",
+		permissionMode: "default",
+		providerSessionId: null,
+		effortLevel: null,
+		unreadCount: 0,
+		fastMode: false,
+		createdAt: "2026-04-10T00:00:00Z",
+		updatedAt: "2026-04-10T00:00:00Z",
+		lastUserMessageAt: null,
+		isHidden: false,
+		actionKind: null,
+		active: true,
+	},
+];
+
+describe("WorkspacePanel", () => {
+	beforeEach(() => {
+		apiMocks.createSession.mockReset();
+		apiMocks.hideSession.mockReset();
+		apiMocks.renameSession.mockReset();
+		apiMocks.createSession.mockResolvedValue({ sessionId: "session-new" });
+		apiMocks.hideSession.mockResolvedValue(undefined);
+		apiMocks.renameSession.mockResolvedValue(undefined);
+	});
+
+	afterEach(() => {
+		cleanup();
+		vi.clearAllMocks();
+	});
+
+	it("shows a session tab loading indicator from persisted streaming status when live sending ids are empty", () => {
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={{
+							...WORKSPACE,
+							activeSessionStatus: "streaming",
+						}}
+						sessions={[
+							{
+								...SESSIONS[0],
+								status: "streaming",
+							},
+						]}
+						selectedSessionId="session-1"
+						sessionPanes={[]}
+						sending={false}
+						busySessionIds={new Set()}
+						onSelectSession={vi.fn()}
+						onSessionsChanged={vi.fn()}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		expect(screen.getByTestId("thinking-indicator")).toBeInTheDocument();
+	});
+
+	it("keeps the selected session tab loading when panel sending is true and live sending ids are empty", () => {
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[]}
+						sending
+						busySessionIds={new Set()}
+						onSelectSession={vi.fn()}
+						onSessionsChanged={vi.fn()}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		expect(screen.getByTestId("thinking-indicator")).toBeInTheDocument();
+	});
+
+	it("optimistically seeds the new session before switching selection", async () => {
+		const user = userEvent.setup();
+		const queryClient = createHelmorQueryClient();
+		const onSelectSession = vi.fn();
+
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={queryClient}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[]}
+						sending={false}
+						onSelectSession={onSelectSession}
+						onSessionsChanged={vi.fn()}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		await user.click(screen.getByRole("button", { name: "New session" }));
+
+		await waitFor(() => {
+			expect(onSelectSession).toHaveBeenCalledWith("session-new");
+		});
+
+		expect(
+			queryClient.getQueryData<WorkspaceDetail>(
+				helmorQueryKeys.workspaceDetail("workspace-1"),
+			),
+		).toMatchObject({
+			activeSessionId: "session-new",
+			activeSessionTitle: "Untitled",
+			activeSessionStatus: "idle",
+		});
+		expect(
+			queryClient.getQueryData<WorkspaceSessionSummary[]>(
+				helmorQueryKeys.workspaceSessions("workspace-1"),
+			),
+		).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					id: "session-new",
+					title: "Untitled",
+					active: true,
+				}),
+			]),
+		);
+		expect(
+			queryClient.getQueryData([
+				...helmorQueryKeys.sessionMessages("session-new"),
+				"thread",
+			]),
+		).toEqual([]);
+	});
+
+	it("replaces the last visible session before closing it", async () => {
+		const user = userEvent.setup();
+		const queryClient = createHelmorQueryClient();
+		const onSelectSession = vi.fn();
+		const onSessionsChanged = vi.fn();
+
+		apiMocks.createSession.mockResolvedValueOnce({
+			sessionId: "session-replacement",
+		});
+
+		const { container } = render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={queryClient}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[]}
+						sending={false}
+						onSelectSession={onSelectSession}
+						onSessionsChanged={onSessionsChanged}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		const closeAction = container.querySelector(
+			'[aria-label="Close session"]',
+		) as HTMLElement | null;
+		expect(closeAction).not.toBeNull();
+
+		await user.click(closeAction!);
+
+		await waitFor(() => {
+			expect(apiMocks.createSession).toHaveBeenCalledWith("workspace-1");
+		});
+		await waitFor(() => {
+			expect(apiMocks.hideSession).toHaveBeenCalledWith("session-1");
+		});
+		expect(onSelectSession).toHaveBeenCalledWith("session-replacement");
+		expect(onSessionsChanged).toHaveBeenCalled();
+		expect(
+			queryClient.getQueryData<WorkspaceDetail>(
+				helmorQueryKeys.workspaceDetail("workspace-1"),
+			),
+		).toMatchObject({
+			activeSessionId: "session-replacement",
+			activeSessionTitle: "Untitled",
+		});
+		expect(
+			queryClient.getQueryData<WorkspaceSessionSummary[]>(
+				helmorQueryKeys.workspaceSessions("workspace-1"),
+			),
+		).toEqual([
+			expect.objectContaining({
+				id: "session-replacement",
+				active: true,
+			}),
+		]);
+	});
+
+	it("wraps the empty session state in a full-size centered container", () => {
+		const { container } = render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[
+							{
+								sessionId: "session-1",
+								messages: [],
+								sending: false,
+								hasLoaded: true,
+								presentationState: "presented",
+							},
+						]}
+						sending={false}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		const centeredContainer = container.querySelector(
+			".conversation-scroll-viewport .justify-center",
+		) as HTMLElement | null;
+
+		expect(centeredContainer).not.toBeNull();
+		expect(centeredContainer).toHaveClass(
+			"flex",
+			"min-h-full",
+			"flex-1",
+			"items-center",
+			"justify-center",
+			"px-8",
+		);
+		const heading = within(centeredContainer!).getByText("Nothing here yet");
+		expect(heading).toHaveClass("text-foreground/70");
+		expect(heading.parentElement).toHaveClass(
+			"flex",
+			"max-w-sm",
+			"flex-col",
+			"items-center",
+			"gap-2",
+		);
+	});
+
+	it("shows star collection progress on the workspace name text button", async () => {
+		const user = userEvent.setup();
+
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={{ ...WORKSPACE, directoryName: "himalia" }}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[
+							{
+								sessionId: "session-1",
+								messages: [],
+								sending: false,
+								hasLoaded: true,
+								presentationState: "presented",
+							},
+						]}
+						sending={false}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		const workspaceButton = screen.getByRole("button", { name: "himalia" });
+		const alignedText = screen.getByText("New session in").parentElement;
+
+		expect(workspaceButton.querySelector("svg")).toBeNull();
+		expect(alignedText).toHaveClass(
+			"inline-flex",
+			"items-center",
+			"whitespace-nowrap",
+		);
+
+		await user.hover(workspaceButton);
+
+		const tooltip = await screen.findByRole("tooltip");
+		const tooltipContent = document.querySelector(
+			'[data-slot="tooltip-content"]',
+		);
+
+		expect(tooltip).toHaveTextContent("You've collected 122/185 stars!");
+		expect(tooltip.querySelector("svg")).not.toBeNull();
+		expect(tooltipContent).toHaveClass(
+			"flex",
+			"h-[24px]",
+			"items-center",
+			"px-2",
+			"text-small",
+			"leading-none",
+		);
+	});
+
+	it("renders only the missing workspace script actions in the empty state", () => {
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[
+							{
+								sessionId: "session-1",
+								messages: [],
+								sending: false,
+								hasLoaded: true,
+								presentationState: "presented",
+							},
+						]}
+						missingScriptTypes={["setup", "archive"]}
+						onInitializeScript={vi.fn()}
+						sending={false}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		expect(
+			screen.getByRole("button", { name: /Create setup script/i }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: /Create archive script/i }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: /Create run actions/i }),
+		).toBeNull();
+	});
+
+	it("calls the initialize handler when a missing script action is clicked", async () => {
+		const user = userEvent.setup();
+		const onInitializeScript = vi.fn();
+
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[
+							{
+								sessionId: "session-1",
+								messages: [],
+								sending: false,
+								hasLoaded: true,
+								presentationState: "presented",
+							},
+						]}
+						missingScriptTypes={["run"]}
+						onInitializeScript={onInitializeScript}
+						sending={false}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		await user.click(
+			screen.getByRole("button", { name: /Create run actions/i }),
+		);
+
+		expect(onInitializeScript).toHaveBeenCalledWith("run");
+	});
+
+	it("shows a yellow dot for sessions waiting on user interaction", () => {
+		const sessions = [
+			SESSIONS[0],
+			{
+				...SESSIONS[0],
+				id: "session-2",
+				title: "Session 2",
+				active: false,
+				unreadCount: 3,
+			},
+		];
+
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={sessions}
+						selectedSessionId="session-1"
+						sessionPanes={[]}
+						sending={false}
+						interactionRequiredSessionIds={new Set(["session-2"])}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		const tab = screen.getByRole("tab", { name: /Session 2/i });
+		expect(
+			within(tab).getByLabelText("Interaction required"),
+		).toBeInTheDocument();
+		expect(within(tab).queryByLabelText("Unread session")).toBeNull();
+	});
+
+	it("keeps the yellow dot visible on the selected session while interaction is pending", () => {
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[]}
+						sending={false}
+						interactionRequiredSessionIds={new Set(["session-1"])}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		const selectedTabs = screen.getAllByRole("tab", { name: /Session 1/i });
+		expect(
+			selectedTabs.some(
+				(tab) => within(tab).queryByLabelText("Interaction required") !== null,
+			),
+		).toBe(true);
+	});
+
+	it("shows the Helmor thinking indicator for the active sending session", () => {
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={SESSIONS}
+						selectedSessionId="session-1"
+						sessionPanes={[]}
+						sending
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		const activeSessions = screen.getAllByRole("tab", { name: "Session 1" });
+		expect(
+			activeSessions.some(
+				(tab) =>
+					tab.querySelector('[data-slot="helmor-thinking-indicator"]') !== null,
+			),
+		).toBe(true);
+	});
+
+	it("keeps each tab icon aligned with that session's composer selection", () => {
+		const sessions = [
+			SESSIONS[0],
+			{
+				...SESSIONS[0],
+				id: "session-2",
+				title: "Session 2",
+				active: false,
+			},
+		];
+
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={sessions}
+						selectedSessionId="session-2"
+						sessionDisplayProviders={{
+							"session-1": "codex",
+							"session-2": "claude",
+						}}
+						sessionPanes={[]}
+						sending={false}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		const session1Tab = screen
+			.getAllByRole("tab", { name: /Session 1/i })
+			.find((tab) => within(tab).queryByTestId("codex-icon") !== null);
+		const session2Tab = screen
+			.getAllByRole("tab", { name: /Session 2/i })
+			.find((tab) => within(tab).queryByTestId("claude-icon") !== null);
+
+		expect(session1Tab).toBeDefined();
+		expect(session2Tab).toBeDefined();
+		expect(within(session1Tab!).getByTestId("codex-icon")).toBeInTheDocument();
+		expect(within(session2Tab!).getByTestId("claude-icon")).toBeInTheDocument();
+	});
+
+	it("keeps long session title tooltips bounded while rename remains reachable", async () => {
+		const user = userEvent.setup();
+		const longTitle = `处理 workspace tab 自动命名失败后产生的超长 hover tooltip 文本 ${"reallylongunbrokentoken".repeat(16)}`;
+		const sessions = [
+			{
+				...SESSIONS[0],
+				title: longTitle,
+			},
+		];
+
+		render(
+			<TooltipProvider delayDuration={0}>
+				<QueryClientProvider client={createHelmorQueryClient()}>
+					<WorkspacePanel
+						workspace={WORKSPACE}
+						sessions={sessions}
+						selectedSessionId="session-1"
+						sessionPanes={[]}
+						sending={false}
+					/>
+				</QueryClientProvider>
+			</TooltipProvider>,
+		);
+
+		const tab = screen.getByRole("tab", { name: /处理 workspace tab/ });
+		await user.hover(tab);
+
+		const tooltip = await screen.findByRole("tooltip");
+		const tooltipContent = document.querySelector(
+			'[data-slot="tooltip-content"]',
+		) as HTMLElement | null;
+		expect(tooltipContent).not.toBeNull();
+		expect(tooltipContent!).toHaveClass(
+			"max-w-[22rem]",
+			"whitespace-normal",
+			"leading-snug",
+		);
+		expect(tooltip.textContent?.length).toBeLessThanOrEqual(240);
+		expect(tooltip.textContent).toMatch(/\.\.\.$/);
+
+		const tooltipText = tooltip.querySelector("span");
+		expect(tooltipText).toHaveClass("whitespace-normal", "break-words");
+		expect(tooltipText?.className).toContain("[overflow-wrap:anywhere]");
+
+		await user.click(
+			within(tab).getByRole("button", { name: "Rename session" }),
+		);
+
+		expect(within(tab).getByDisplayValue(longTitle)).toBeInTheDocument();
+	});
+});

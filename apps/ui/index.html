@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+    />
+    <title>Helmor</title>
+    <script>
+      ;(() => {
+        var root = document.documentElement
+        var ls = localStorage
+        var t = ls.getItem('helmor-theme') || 'system'
+        var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme:dark)').matches)
+        if (dark) root.classList.add('dark')
+        root.style.colorScheme = dark ? 'dark' : 'light'
+        var ct = ls.getItem(dark ? 'helmor-dark-theme' : 'helmor-light-theme') || 'default'
+        if (ct !== 'default') root.classList.add(`theme-${ct}`)
+        // User font overrides
+        var ui = ls.getItem('helmor-ui-font-family')
+        if (ui) root.style.setProperty('--font-sans-user', ui)
+        var mono = ls.getItem('helmor-code-font-family')
+        if (mono) root.style.setProperty('--font-mono-user', mono)
+      })()
+    </script>
+    <style>
+      body { background-color: #0E0E0E; }
+      html:not(.dark) body { background-color: #FFFFFF; }
+      /* Quick panel window (class injected via initialization script in
+         src-tauri/src/quick_panel.rs): the window is transparent and the
+         rounded card paints its own background. */
+      html.helmor-quick-window body { background-color: transparent; }
+    </style>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

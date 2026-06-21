@@ -1,0 +1,1526 @@
+import { createContext, useContext } from "react";
+import {
+	type AppLanguage,
+	DEFAULT_APP_LANGUAGE,
+	isAppLanguage,
+} from "@/lib/i18n/types";
+import type { WorkspaceBranchIntent } from "./api";
+// Routed through the transport shim so settings load works in the mobile
+// browser companion too (not just the Tauri webview).
+import { invoke } from "./ipc";
+
+export type ThemeMode = "system" | "light" | "dark";
+
+export type ColorTheme =
+	| "default"
+	| "midnight"
+	| "forest"
+	| "ember"
+	| "aurora"
+	| "aubergine"
+	| "hoth"
+	| "choco-mint"
+	| "banana";
+
+/** Behavior when submitting a message while the agent is still responding.
+ *  - `steer`: inject into the active turn (provider-native mid-turn steer).
+ *  - `queue`: stash locally; auto-fire as a new turn once the agent finishes.
+ */
+export type FollowUpBehavior = "steer" | "queue";
+
+/** Controls how Claude Code returns thinking content.
+ *  - `summarized`: thinking blocks contain summarized thinking text.
+ *  - `omitted`: server skips streaming thinking tokens; the final text
+ *    response begins streaming sooner. */
+export type ClaudeThinkingDisplay = "summarized" | "omitted";
+export type AppSurface = "workspace" | "workspace-start";
+export type WorkspaceRightSidebarMode = "inspector" | "context";
+/** A global model preference (default / review / action). Carries its
+ *  provider so a slug-based model (opencode / mimo) is never re-derived
+ *  ambiguously from the bare id. `provider` is null only for legacy rows
+ *  not yet re-saved. Persisted as JSON. */
+export type ModelRef = { provider: string | null; modelId: string };
+
+export type SidebarGrouping = "status" | "repo";
+export type SidebarSort = "custom" | "repoName" | "updatedAt" | "createdAt";
+
+/** Sound played alongside each desktop notification. `off` disables it. */
+export type NotificationSound =
+	| "off"
+	| "ding"
+	| "pop"
+	| "chime"
+	| "glass"
+	| "soft"
+	| "positive"
+	| "doorbell"
+	| "scifi"
+	| "bubble"
+	| "confirm"
+	| "elevator"
+	| "blip";
+
+export const VALID_NOTIFICATION_SOUNDS: readonly NotificationSound[] = [
+	"off",
+	"ding",
+	"pop",
+	"chime",
+	"glass",
+	"soft",
+	"positive",
+	"doorbell",
+	"scifi",
+	"bubble",
+	"confirm",
+	"elevator",
+	"blip",
+];
+
+export type ShortcutOverrides = Record<string, string | null>;
+
+export type InboxIssueScope =
+	| "involves"
+	| "assigned"
+	| "mentioned"
+	| "created"
+	| "all";
+export type InboxPullRequestScope =
+	| "involves"
+	| "author"
+	| "assignee"
+	| "mentions"
+	| "reviewRequested"
+	| "reviewedBy"
+	| "all";
+export type InboxSort = "updated" | "created" | "comments";
+export type InboxDraftFilter = "exclude" | "include" | "only";
+export type InboxIssueState = "open" | "closed" | "all";
+export type InboxPullRequestState = "open" | "closed" | "merged" | "all";
+export type InboxDiscussionState = "unanswered" | "answered" | "all";
+
+export type InboxKindDefaults = {
+	issueScopes: InboxIssueScope[];
+	prScopes: InboxPullRequestScope[];
+	issueState: InboxIssueState;
+	prState: InboxPullRequestState;
+	discussionState: InboxDiscussionState;
+	issueSort: InboxSort;
+	prSort: InboxSort;
+	discussionSort: InboxSort;
+	draftPrs: InboxDraftFilter;
+	issueLabels: string;
+	prLabels: string;
+};
+
+/** Mirrors SDK `ModelParameterDefinition` shape. */
+export type CursorCachedModelParameterValue = {
+	value: string;
+	displayName?: string;
+};
+
+export type CursorCachedModelParameter = {
+	id: string;
+	displayName?: string;
+	values: CursorCachedModelParameterValue[];
+};
+
+/** `Cursor.models.list` snapshot. `parameters` may be absent on legacy
+ *  entries — Rust catalog degrades until next Refresh writes them back. */
+export type CursorCachedModel = {
+	id: string;
+	label: string;
+	parameters?: CursorCachedModelParameter[];
+};
+
+export type CursorProviderSettings = {
+	apiKey: string;
+	/** `null` = first fetch auto-fills defaults; `[]` = user cleared,
+	 *  never auto-fill again. */
+	enabledModelIds: string[] | null;
+	/** Last fetched catalog; lets the Rust picker render synchronously. */
+	cachedModels: CursorCachedModel[] | null;
+};
+
+// `slug` = `<providerID>/<modelID>`.
+export type OpencodeCachedModel = {
+	slug: string;
+	label: string;
+	// Effort tiers (the model's `variants` keys). Empty ⟺ no effort switch.
+	effortLevels?: string[];
+};
+
+// Bump when the cached model schema changes so older caches refetch once.
+export const OPENCODE_CACHE_VERSION = 1;
+
+export type OpencodeProviderSettings = {
+	status: "ready" | "unavailable";
+	connected: string[];
+	cachedModels: OpencodeCachedModel[] | null;
+	// `null` = auto-fill all connected on first fetch; `[]` = user cleared.
+	enabledModelIds: string[] | null;
+	// Older/absent → one-time refetch to backfill new per-model metadata.
+	cacheVersion?: number;
+};
+
+/** One Kimi model discovered via `kimi provider list`. `id` is the bare alias. */
+export type KimiCachedModel = { id: string; label: string };
+
+export type KimiProviderSettings = {
+	// `null` until the first sync; `[]` means "no Kimi providers configured".
+	cachedModels: KimiCachedModel[] | null;
+	// `null` = show all cached in the picker; explicit list = that subset.
+	enabledModelIds: string[] | null;
+};
+
+export type AgentProxySettings = {
+	mode: "none" | "system" | "custom";
+	customUrl: string;
+};
+
+export type LocalLlmSettings = {
+	enabled: boolean;
+	model: string;
+	autoStart: boolean;
+	/** Per-catalog-entry runtime `-c` overrides. Absent key = use the
+	 *  catalog default. Backend keeps this map in sync via
+	 *  `setLocalLlmContextOverride`. */
+	contextOverrides?: Record<string, number>;
+};
+
+/** Per-account toggles for which item kinds the inbox should pull from
+ * a given forge login. Keyed externally by `<provider>:<login>` (e.g.
+ * `github:octocat`). Missing keys default to all `true` — newly added
+ * accounts opt into everything until the user changes their mind. */
+export type InboxAccountSourceToggles = InboxKindDefaults & {
+	issues: boolean;
+	prs: boolean;
+	discussions: boolean;
+	repos?: Record<string, InboxRepoSourceConfig>;
+};
+
+export type InboxRepoSourceConfig = InboxKindDefaults & {
+	enabled: boolean;
+	issues: boolean;
+	prs: boolean;
+	discussions: boolean;
+};
+
+export type InboxSourceConfig = {
+	accounts: Record<string, InboxAccountSourceToggles>;
+};
+
+export const DEFAULT_INBOX_ACCOUNT_TOGGLES: InboxAccountSourceToggles = {
+	issues: true,
+	prs: true,
+	discussions: true,
+	issueScopes: ["involves"],
+	prScopes: ["involves"],
+	issueState: "open",
+	prState: "open",
+	discussionState: "unanswered",
+	issueSort: "updated",
+	prSort: "updated",
+	discussionSort: "updated",
+	draftPrs: "exclude",
+	issueLabels: "",
+	prLabels: "",
+};
+
+export const DEFAULT_INBOX_REPO_CONFIG: InboxRepoSourceConfig = {
+	enabled: false,
+	issues: true,
+	prs: true,
+	discussions: true,
+	issueScopes: ["all"],
+	prScopes: ["all"],
+	issueState: "open",
+	prState: "open",
+	discussionState: "unanswered",
+	issueSort: "updated",
+	prSort: "updated",
+	discussionSort: "updated",
+	draftPrs: "exclude",
+	issueLabels: "",
+	prLabels: "",
+};
+
+/** Per-repo work mode on the start surface. `chat` is a top-level toggle
+ *  (`chatModeActive`) because it doesn't belong to any repo. */
+export type StartSurfaceWorkMode = "worktree" | "local";
+
+/** Persisted preferences for the workspace-start surface. */
+export type StartSurfacePreferences = {
+	/** Composer submit-mode: immediate dispatch or saved draft. */
+	createState: "in-progress" | "backlog";
+	/** Last selected repository. */
+	repoId: string | null;
+	sourceBranchByRepoId: Record<string, string>;
+	modeByRepoId: Record<string, StartSurfaceWorkMode>;
+	branchIntentByRepoId: Record<string, WorkspaceBranchIntent>;
+	/** Top-level "Just chat" toggle. Independent of the selected repo. */
+	chatModeActive: boolean;
+	/** Start-composer Terminal-Mode toggle. */
+	terminalModeActive: boolean;
+};
+
+export type AppSettings = {
+	language: AppLanguage;
+	/** Chat message body font size (px). Migrated from the legacy `fontSize`
+	 *  field, which only ever affected chat rendering. */
+	chatFontSize: number;
+	/** Override for the sans-serif UI font stack. `null` = preset default. */
+	uiFontFamily: string | null;
+	/** Override for the monospace code font stack. `null` = preset default. */
+	codeFontFamily: string | null;
+	/** Override for embedded terminal font stack. `null` = preset default. */
+	terminalFontFamily: string | null;
+	/** When true, all clickable elements show a pointer cursor on hover.
+	 *  When false, falls back to the default arrow. */
+	usePointerCursors: boolean;
+	theme: ThemeMode;
+	/** Color preset applied when the effective mode is `light`. */
+	lightTheme: ColorTheme;
+	/** Color preset applied when the effective mode is `dark`. */
+	darkTheme: ColorTheme;
+	notifications: boolean;
+	/** Sound effect to play with each desktop notification.
+	 *  `off` keeps notifications silent. */
+	notificationSound: NotificationSound;
+	/** When true, hovering a terminal-like inspector tab body expands it. */
+	terminalHoverExpansion: boolean;
+	/** Shows the Terminal-Mode toggle in the composer; sending with it on
+	 *  opens the prompt in an agent TUI instead of a GUI session. */
+	enableTerminalMode: boolean;
+	/** When true, skip the heads-up dialog shown before sending a conversation
+	 *  with history to the terminal (new Terminal session + resume). */
+	suppressTerminalResumeWarning: boolean;
+	lastWorkspaceId: string | null;
+	lastSessionId: string | null;
+	lastSurface: AppSurface;
+	startContextPanelOpen: boolean;
+	workspaceRightSidebarMode: WorkspaceRightSidebarMode;
+	defaultModel: ModelRef | null;
+	/** Model used when the inspector "Review changes" helper creates a session.
+	 *  When null, falls back to `defaultModel`. */
+	reviewModel: ModelRef | null;
+	/** Effort level for the Review helper. When null, falls back to
+	 *  `defaultEffort`. */
+	reviewEffort: string | null;
+	/** Fast-mode flag for the Review helper. When null, falls back to
+	 *  `defaultFastMode`. */
+	reviewFastMode: boolean | null;
+	/** Model used by simple action sessions: create/reopen PR/MR and
+	 *  commit-and-push. When null, falls back to `defaultModel`. */
+	prModel: ModelRef | null;
+	/** Effort level for simple action sessions. When null, falls back to
+	 *  `defaultEffort`. */
+	prEffort: string | null;
+	/** Fast-mode flag for simple action sessions. When null, falls back to
+	 *  `defaultFastMode`. */
+	prFastMode: boolean | null;
+	defaultEffort: string | null;
+	defaultFastMode: boolean;
+	/** Webview zoom factor. 1.0 = 100%. Range 0.5–2.0. */
+	zoomLevel: number;
+	followUpBehavior: FollowUpBehavior;
+	/** How Claude Code returns thinking content. Plumbed through to the
+	 *  sidecar's `thinking.display` field. */
+	claudeThinkingDisplay: ClaudeThinkingDisplay;
+	/** Force the context-usage ring to always be visible. When false (the
+	 *  default), the ring auto-hides until usage crosses
+	 *  `CONTEXT_USAGE_AUTO_REVEAL_THRESHOLD`. */
+	alwaysShowContextUsage: boolean;
+	showUsageStats: boolean;
+	/** Opt-in: when the workspace's linked PR/MR transitions to merged,
+	 *  attempt to archive the workspace automatically. One-shot — runs
+	 *  exactly once at the merged-edge; skipped if the workspace has an
+	 *  active agent session or fails archive validation. */
+	autoArchiveOnMerge: boolean;
+	onboardingCompleted: boolean;
+	shortcuts: ShortcutOverrides;
+	/** Claude model ids in the picker. `null` = all (default), `[]` = none. */
+	claudeEnabledModelIds: string[] | null;
+	/** Codex model ids in the picker. Same `null`/`[]` semantics. */
+	codexEnabledModelIds: string[] | null;
+	cursorProvider: CursorProviderSettings;
+	opencodeProvider: OpencodeProviderSettings;
+	kimiProvider: KimiProviderSettings;
+	/** MiMo Code (opencode-protocol fork) — same settings shape. */
+	mimoProvider: OpencodeProviderSettings;
+	agentProxy: AgentProxySettings;
+	localLlm: LocalLlmSettings;
+	inboxSourceConfig: InboxSourceConfig;
+	startSurfacePreferences: StartSurfacePreferences;
+	/** Sidebar grouping mode. Persisted to localStorage (sync read on boot
+	 *  to avoid the sidebar flashing the wrong grouping while SQLite-backed
+	 *  settings load asynchronously). */
+	sidebarGrouping: SidebarGrouping;
+	/** Sidebar repository filter. Empty means all repositories. Persisted
+	 *  to localStorage because it affects first-paint navigation shape. */
+	sidebarRepoFilterIds: string[];
+	/** Sidebar view-only sort. `custom` preserves saved drag order. */
+	sidebarSort: SidebarSort;
+};
+
+export const DEFAULT_START_SURFACE_PREFERENCES: StartSurfacePreferences = {
+	createState: "in-progress",
+	repoId: null,
+	sourceBranchByRepoId: {},
+	modeByRepoId: {},
+	branchIntentByRepoId: {},
+	chatModeActive: false,
+	terminalModeActive: false,
+};
+
+/** Fallbacks for repos without a per-repo entry. */
+export const START_SURFACE_MODE_FALLBACK: StartSurfaceWorkMode = "worktree";
+export const START_SURFACE_BRANCH_INTENT_FALLBACK: WorkspaceBranchIntent =
+	"from_branch";
+
+/** Read a per-repo preference, falling back when missing. */
+export function readRepoPreference<V>(
+	record: Record<string, V>,
+	repoId: string | null | undefined,
+	fallback: V,
+): V {
+	if (!repoId) return fallback;
+	return record[repoId] ?? fallback;
+}
+
+/** Immutably set a per-repo entry. */
+export function writeRepoPreference<V>(
+	record: Record<string, V>,
+	repoId: string,
+	value: V,
+): Record<string, V> {
+	return { ...record, [repoId]: value };
+}
+
+/**
+ * Percentage of the context window above which the ring auto-reveals
+ * even when `alwaysShowContextUsage` is off. Picked to match the
+ * settings copy ("…only shown when more than 70% is used").
+ */
+export const CONTEXT_USAGE_AUTO_REVEAL_THRESHOLD = 70;
+
+export const DEFAULT_SETTINGS: AppSettings = {
+	language: DEFAULT_APP_LANGUAGE,
+	chatFontSize: 14,
+	uiFontFamily: null,
+	codeFontFamily: null,
+	terminalFontFamily: null,
+	usePointerCursors: true,
+	theme: "system",
+	lightTheme: "default",
+	darkTheme: "default",
+	notifications: true,
+	notificationSound: "off",
+	terminalHoverExpansion: true,
+	enableTerminalMode: false,
+	suppressTerminalResumeWarning: false,
+	lastWorkspaceId: null,
+	lastSessionId: null,
+	lastSurface: "workspace",
+	startContextPanelOpen: false,
+	workspaceRightSidebarMode: "inspector",
+	defaultModel: null,
+	reviewModel: null,
+	reviewEffort: null,
+	reviewFastMode: null,
+	prModel: null,
+	prEffort: null,
+	prFastMode: null,
+	defaultEffort: "high",
+	defaultFastMode: false,
+	zoomLevel: 1.0,
+	followUpBehavior: "steer",
+	claudeThinkingDisplay: "summarized",
+	alwaysShowContextUsage: true,
+	showUsageStats: true,
+	autoArchiveOnMerge: false,
+	onboardingCompleted: false,
+	shortcuts: {},
+	claudeEnabledModelIds: null,
+	codexEnabledModelIds: null,
+	cursorProvider: {
+		apiKey: "",
+		enabledModelIds: null,
+		cachedModels: null,
+	},
+	opencodeProvider: {
+		status: "unavailable",
+		connected: [],
+		cachedModels: null,
+		enabledModelIds: null,
+	},
+	kimiProvider: {
+		cachedModels: null,
+		enabledModelIds: null,
+	},
+	mimoProvider: {
+		status: "unavailable",
+		connected: [],
+		cachedModels: null,
+		enabledModelIds: null,
+	},
+	agentProxy: {
+		mode: "none",
+		customUrl: "",
+	},
+	localLlm: {
+		enabled: false,
+		model: "",
+		autoStart: true,
+		contextOverrides: {},
+	},
+	inboxSourceConfig: { accounts: {} },
+	startSurfacePreferences: DEFAULT_START_SURFACE_PREFERENCES,
+	sidebarGrouping: "status",
+	sidebarRepoFilterIds: [],
+	sidebarSort: "custom",
+};
+
+export const THEME_STORAGE_KEY = "helmor-theme";
+export const LANGUAGE_STORAGE_KEY = "helmor-language";
+export const LIGHT_THEME_STORAGE_KEY = "helmor-light-theme";
+export const DARK_THEME_STORAGE_KEY = "helmor-dark-theme";
+export const SIDEBAR_GROUPING_STORAGE_KEY = "helmor-sidebar-grouping";
+export const SIDEBAR_REPO_FILTER_STORAGE_KEY = "helmor-sidebar-repo-filter";
+export const SIDEBAR_SORT_STORAGE_KEY = "helmor-sidebar-sort";
+export const UI_FONT_FAMILY_STORAGE_KEY = "helmor-ui-font-family";
+export const CODE_FONT_FAMILY_STORAGE_KEY = "helmor-code-font-family";
+export const TERMINAL_FONT_FAMILY_STORAGE_KEY = "helmor-terminal-font-family";
+
+/** Keys mirrored to localStorage for flash-free synchronous boot reads.
+ *  Anything visible in the first paint must live here so we don't wait
+ *  on the async SQLite round-trip. */
+const LOCALSTORAGE_KEYS = {
+	language: LANGUAGE_STORAGE_KEY,
+	theme: THEME_STORAGE_KEY,
+	lightTheme: LIGHT_THEME_STORAGE_KEY,
+	darkTheme: DARK_THEME_STORAGE_KEY,
+	sidebarGrouping: SIDEBAR_GROUPING_STORAGE_KEY,
+	sidebarRepoFilterIds: SIDEBAR_REPO_FILTER_STORAGE_KEY,
+	sidebarSort: SIDEBAR_SORT_STORAGE_KEY,
+	uiFontFamily: UI_FONT_FAMILY_STORAGE_KEY,
+	codeFontFamily: CODE_FONT_FAMILY_STORAGE_KEY,
+	terminalFontFamily: TERMINAL_FONT_FAMILY_STORAGE_KEY,
+} as const;
+
+type LocalStorageKey = keyof typeof LOCALSTORAGE_KEYS;
+
+const VALID_SIDEBAR_GROUPINGS: readonly SidebarGrouping[] = ["status", "repo"];
+const VALID_SIDEBAR_SORTS: readonly SidebarSort[] = [
+	"custom",
+	"repoName",
+	"updatedAt",
+	"createdAt",
+];
+
+export const VALID_COLOR_THEMES: readonly ColorTheme[] = [
+	"default",
+	"midnight",
+	"forest",
+	"ember",
+	"aurora",
+	"aubergine",
+	"hoth",
+	"choco-mint",
+	"banana",
+];
+
+// Synchronous theme read for flash-free splash boot. The full settings
+// payload lives in SQLite and loads async; theme is mirrored to
+// localStorage so we can paint with the right colour scheme before that
+// returns.
+export function getPreloadedTheme(): ThemeMode {
+	if (typeof localStorage === "undefined") {
+		return DEFAULT_SETTINGS.theme;
+	}
+	const raw = localStorage.getItem(THEME_STORAGE_KEY);
+	return (raw as ThemeMode | null) ?? DEFAULT_SETTINGS.theme;
+}
+
+export function getPreloadedLanguage(): AppLanguage {
+	if (typeof localStorage === "undefined") {
+		return DEFAULT_SETTINGS.language;
+	}
+	const raw = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+	return isAppLanguage(raw) ? raw : DEFAULT_SETTINGS.language;
+}
+
+function readLocalStorageString(key: string): string | null {
+	if (typeof localStorage === "undefined") return null;
+	const v = localStorage.getItem(key);
+	return v && v.length > 0 ? v : null;
+}
+
+function readColorTheme(key: string, fallback: ColorTheme): ColorTheme {
+	const raw = readLocalStorageString(key);
+	return VALID_COLOR_THEMES.includes(raw as ColorTheme)
+		? (raw as ColorTheme)
+		: fallback;
+}
+
+export function getPreloadedSettings(): AppSettings {
+	const lightTheme = readColorTheme(
+		LIGHT_THEME_STORAGE_KEY,
+		DEFAULT_SETTINGS.lightTheme,
+	);
+	const darkTheme = readColorTheme(
+		DARK_THEME_STORAGE_KEY,
+		DEFAULT_SETTINGS.darkTheme,
+	);
+	const sidebarGrouping = (() => {
+		const raw = readLocalStorageString(SIDEBAR_GROUPING_STORAGE_KEY);
+		return VALID_SIDEBAR_GROUPINGS.includes(raw as SidebarGrouping)
+			? (raw as SidebarGrouping)
+			: DEFAULT_SETTINGS.sidebarGrouping;
+	})();
+	const sidebarSort = (() => {
+		const raw = readLocalStorageString(SIDEBAR_SORT_STORAGE_KEY);
+		return VALID_SIDEBAR_SORTS.includes(raw as SidebarSort)
+			? (raw as SidebarSort)
+			: DEFAULT_SETTINGS.sidebarSort;
+	})();
+	return {
+		...DEFAULT_SETTINGS,
+		language: getPreloadedLanguage(),
+		theme: getPreloadedTheme(),
+		lightTheme,
+		darkTheme,
+		sidebarGrouping,
+		sidebarRepoFilterIds: parseSidebarRepoFilterIds(
+			readLocalStorageString(SIDEBAR_REPO_FILTER_STORAGE_KEY) ?? undefined,
+		),
+		sidebarSort,
+		uiFontFamily: readLocalStorageString(UI_FONT_FAMILY_STORAGE_KEY),
+		codeFontFamily: readLocalStorageString(CODE_FONT_FAMILY_STORAGE_KEY),
+		terminalFontFamily: readLocalStorageString(
+			TERMINAL_FONT_FAMILY_STORAGE_KEY,
+		),
+	};
+}
+
+// localStorage-backed fields (sync read for flash-free boot) live in
+// `LOCALSTORAGE_KEYS` above. Everything else goes through SQLite.
+const SETTINGS_KEY_MAP: Record<
+	Exclude<keyof AppSettings, LocalStorageKey>,
+	string
+> = {
+	chatFontSize: "app.chat_font_size",
+	usePointerCursors: "app.use_pointer_cursors",
+	notifications: "app.notifications",
+	notificationSound: "app.notification_sound",
+	terminalHoverExpansion: "app.terminal_hover_expansion",
+	enableTerminalMode: "app.enable_terminal_mode",
+	suppressTerminalResumeWarning: "app.suppress_terminal_resume_warning",
+	lastWorkspaceId: "app.last_workspace_id",
+	lastSessionId: "app.last_session_id",
+	lastSurface: "app.last_surface",
+	startContextPanelOpen: "app.start_context_panel_open",
+	workspaceRightSidebarMode: "app.workspace_right_sidebar_mode",
+	defaultModel: "app.default_model_id",
+	reviewModel: "app.review_model_id",
+	reviewEffort: "app.review_effort",
+	reviewFastMode: "app.review_fast_mode",
+	prModel: "app.pr_model_id",
+	prEffort: "app.pr_effort",
+	prFastMode: "app.pr_fast_mode",
+	defaultEffort: "app.default_effort",
+	defaultFastMode: "app.default_fast_mode",
+	zoomLevel: "app.zoom_level",
+	followUpBehavior: "app.follow_up_behavior",
+	claudeThinkingDisplay: "app.claude_thinking_display",
+	alwaysShowContextUsage: "app.always_show_context_usage",
+	showUsageStats: "app.show_usage_stats",
+	autoArchiveOnMerge: "app.auto_archive_on_merge",
+	onboardingCompleted: "app.onboarding_completed",
+	shortcuts: "app.shortcuts",
+	claudeEnabledModelIds: "app.claude_enabled_model_ids",
+	codexEnabledModelIds: "app.codex_enabled_model_ids",
+	cursorProvider: "app.cursor_provider",
+	opencodeProvider: "app.opencode_provider",
+	kimiProvider: "app.kimi_provider",
+	mimoProvider: "app.mimo_provider",
+	agentProxy: "app.agent_proxy",
+	localLlm: "app.local_llm",
+	inboxSourceConfig: "app.inbox_source_config",
+	startSurfacePreferences: "app.start_surface_preferences",
+};
+
+/** Renamed storage keys. Append-only; never reuse a string as a current key. */
+export const LEGACY_SETTING_KEYS = {
+	startSurfacePreferences: "app.kanban_view_state",
+} as const;
+
+/** Shim legacy keys under their current names and clear them in the DB. */
+function migrateLegacySettings(
+	raw: Record<string, string>,
+): Record<string, string> {
+	const writes: Record<string, string> = {};
+	const shimmed = { ...raw };
+	for (const [currentKey, legacyKey] of Object.entries(LEGACY_SETTING_KEYS)) {
+		const currentValue =
+			raw[SETTINGS_KEY_MAP[currentKey as keyof typeof SETTINGS_KEY_MAP]];
+		const legacyValue = raw[legacyKey];
+		if (currentValue !== undefined || legacyValue === undefined) continue;
+		shimmed[SETTINGS_KEY_MAP[currentKey as keyof typeof SETTINGS_KEY_MAP]] =
+			legacyValue;
+		writes[SETTINGS_KEY_MAP[currentKey as keyof typeof SETTINGS_KEY_MAP]] =
+			legacyValue;
+		writes[legacyKey] = "";
+	}
+	if (Object.keys(writes).length > 0) {
+		void invoke("update_app_settings", { settingsMap: writes }).catch(() => {});
+	}
+	return shimmed;
+}
+
+function parseSidebarRepoFilterIds(raw: string | undefined): string[] {
+	if (!raw) return DEFAULT_SETTINGS.sidebarRepoFilterIds;
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (!Array.isArray(parsed)) return DEFAULT_SETTINGS.sidebarRepoFilterIds;
+		return Array.from(
+			new Set(
+				parsed.filter(
+					(value): value is string =>
+						typeof value === "string" && value.length > 0,
+				),
+			),
+		);
+	} catch {
+		return DEFAULT_SETTINGS.sidebarRepoFilterIds;
+	}
+}
+
+function parseShortcutOverrides(raw: string | undefined): ShortcutOverrides {
+	if (!raw) return DEFAULT_SETTINGS.shortcuts;
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return DEFAULT_SETTINGS.shortcuts;
+		}
+		return Object.fromEntries(
+			Object.entries(parsed).filter(
+				([, value]) => typeof value === "string" || value === null,
+			),
+		) as ShortcutOverrides;
+	} catch {
+		return DEFAULT_SETTINGS.shortcuts;
+	}
+}
+
+function parseInboxToggles(
+	value: unknown,
+	defaults: InboxKindDefaults & {
+		issues: boolean;
+		prs: boolean;
+		discussions: boolean;
+	},
+): InboxKindDefaults & { issues: boolean; prs: boolean; discussions: boolean } {
+	const v = (value ?? {}) as Partial<InboxAccountSourceToggles> & {
+		labels?: unknown;
+		sort?: unknown;
+		issueScope?: unknown;
+		prScope?: unknown;
+	};
+	const legacySort = isInboxSort(v.sort) ? v.sort : defaults.issueSort;
+	const legacyLabels = typeof v.labels === "string" ? v.labels : "";
+	return {
+		issues: typeof v.issues === "boolean" ? v.issues : defaults.issues,
+		prs: typeof v.prs === "boolean" ? v.prs : defaults.prs,
+		discussions:
+			typeof v.discussions === "boolean" ? v.discussions : defaults.discussions,
+		issueScopes: parseInboxIssueScopes(
+			v.issueScopes,
+			v.issueScope,
+			defaults.issueScopes,
+		),
+		prScopes: parseInboxPullRequestScopes(
+			v.prScopes,
+			v.prScope,
+			defaults.prScopes,
+		),
+		issueState: isInboxIssueState(v.issueState)
+			? v.issueState
+			: defaults.issueState,
+		prState: isInboxPullRequestState(v.prState) ? v.prState : defaults.prState,
+		discussionState: isInboxDiscussionState(v.discussionState)
+			? v.discussionState
+			: defaults.discussionState,
+		issueSort: isInboxSort(v.issueSort) ? v.issueSort : legacySort,
+		prSort: isInboxSort(v.prSort) ? v.prSort : legacySort,
+		discussionSort: isInboxSort(v.discussionSort)
+			? v.discussionSort
+			: legacySort,
+		draftPrs: isInboxDraftFilter(v.draftPrs) ? v.draftPrs : defaults.draftPrs,
+		issueLabels:
+			typeof v.issueLabels === "string" ? v.issueLabels : legacyLabels,
+		prLabels: typeof v.prLabels === "string" ? v.prLabels : legacyLabels,
+	};
+}
+
+function parseInboxSourceConfig(raw: string | undefined): InboxSourceConfig {
+	if (!raw) return DEFAULT_SETTINGS.inboxSourceConfig;
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return DEFAULT_SETTINGS.inboxSourceConfig;
+		}
+		const accountsRaw = (parsed as { accounts?: unknown }).accounts;
+		if (
+			!accountsRaw ||
+			typeof accountsRaw !== "object" ||
+			Array.isArray(accountsRaw)
+		) {
+			return { accounts: {} };
+		}
+		const accounts: Record<string, InboxAccountSourceToggles> = {};
+		for (const [key, value] of Object.entries(accountsRaw)) {
+			if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+			const v = value as Partial<InboxAccountSourceToggles>;
+			const reposRaw = v.repos;
+			const repos: Record<string, InboxRepoSourceConfig> = {};
+			if (
+				reposRaw &&
+				typeof reposRaw === "object" &&
+				!Array.isArray(reposRaw)
+			) {
+				for (const [repo, repoValue] of Object.entries(reposRaw)) {
+					if (
+						!repoValue ||
+						typeof repoValue !== "object" ||
+						Array.isArray(repoValue)
+					) {
+						continue;
+					}
+					const repoConfig = repoValue as Partial<InboxRepoSourceConfig>;
+					repos[repo] = {
+						...parseInboxToggles(repoValue, DEFAULT_INBOX_REPO_CONFIG),
+						enabled:
+							typeof repoConfig.enabled === "boolean"
+								? repoConfig.enabled
+								: DEFAULT_INBOX_REPO_CONFIG.enabled,
+					};
+				}
+			}
+			accounts[key] = {
+				...parseInboxToggles(value, DEFAULT_INBOX_ACCOUNT_TOGGLES),
+				repos,
+			};
+		}
+		return { accounts };
+	} catch {
+		return DEFAULT_SETTINGS.inboxSourceConfig;
+	}
+}
+
+function oneOf<T extends string>(
+	value: unknown,
+	values: readonly T[],
+): value is T {
+	return typeof value === "string" && values.includes(value as T);
+}
+
+function isInboxIssueScope(value: unknown): value is InboxIssueScope {
+	return oneOf(value, [
+		"involves",
+		"assigned",
+		"mentioned",
+		"created",
+		"all",
+	] as const);
+}
+
+function parseInboxIssueScopes(
+	value: unknown,
+	legacyValue: unknown,
+	fallback = DEFAULT_INBOX_ACCOUNT_TOGGLES.issueScopes,
+): InboxIssueScope[] {
+	if (Array.isArray(value)) {
+		const scopes = value.filter(isInboxIssueScope);
+		if (scopes.length > 0) return scopes;
+	}
+	if (isInboxIssueScope(legacyValue)) return [legacyValue];
+	return fallback;
+}
+
+function isInboxPullRequestScope(
+	value: unknown,
+): value is InboxPullRequestScope {
+	return oneOf(value, [
+		"involves",
+		"author",
+		"assignee",
+		"mentions",
+		"reviewRequested",
+		"reviewedBy",
+		"all",
+	] as const);
+}
+
+function parseInboxPullRequestScopes(
+	value: unknown,
+	legacyValue: unknown,
+	fallback = DEFAULT_INBOX_ACCOUNT_TOGGLES.prScopes,
+): InboxPullRequestScope[] {
+	if (Array.isArray(value)) {
+		const scopes = value.filter(isInboxPullRequestScope);
+		if (scopes.length > 0) return scopes;
+	}
+	if (isInboxPullRequestScope(legacyValue)) return [legacyValue];
+	return fallback;
+}
+
+function isInboxIssueState(value: unknown): value is InboxIssueState {
+	return oneOf(value, ["open", "closed", "all"] as const);
+}
+
+function isInboxPullRequestState(
+	value: unknown,
+): value is InboxPullRequestState {
+	return oneOf(value, ["open", "closed", "merged", "all"] as const);
+}
+
+function isInboxDiscussionState(value: unknown): value is InboxDiscussionState {
+	return oneOf(value, ["unanswered", "answered", "all"] as const);
+}
+
+function isInboxSort(value: unknown): value is InboxSort {
+	return oneOf(value, ["updated", "created", "comments"] as const);
+}
+
+function isInboxDraftFilter(value: unknown): value is InboxDraftFilter {
+	return oneOf(value, ["exclude", "include", "only"] as const);
+}
+
+function parseStringRecord(value: unknown): Record<string, string> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return {};
+	}
+	return Object.fromEntries(
+		Object.entries(value).filter(
+			([key, entry]) => key.length > 0 && typeof entry === "string" && entry,
+		),
+	);
+}
+
+/** Like `parseStringRecord`, with each value constrained to `allowed`. */
+function parseEnumRecord<V extends string>(
+	value: unknown,
+	allowed: readonly V[],
+): Record<string, V> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return {};
+	}
+	const allowedSet = new Set<string>(allowed);
+	return Object.fromEntries(
+		Object.entries(value).filter(
+			([key, entry]) =>
+				key.length > 0 && typeof entry === "string" && allowedSet.has(entry),
+		),
+	) as Record<string, V>;
+}
+
+function parseStartSurfacePreferences(
+	raw: string | undefined,
+): StartSurfacePreferences {
+	if (!raw) return DEFAULT_START_SURFACE_PREFERENCES;
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return DEFAULT_START_SURFACE_PREFERENCES;
+		}
+		const o = parsed as Partial<StartSurfacePreferences> & {
+			mode?: unknown;
+			branchIntent?: unknown;
+			chatModeActive?: unknown;
+		};
+		const repoId = typeof o.repoId === "string" && o.repoId ? o.repoId : null;
+		// Legacy `modeByRepoId` may still contain "chat" entries from before
+		// chat was promoted to a top-level toggle. Capture them so the user
+		// doesn't lose the "I was in Just Chat last session" state, then
+		// strip them out — modeByRepoId now only carries repo-bound modes.
+		const rawModeByRepoId = parseEnumRecord(o.modeByRepoId, [
+			"worktree",
+			"local",
+			"chat",
+		] as const);
+		const modeByRepoId: Record<string, StartSurfaceWorkMode> = {};
+		let migratedFromLegacyChat = false;
+		for (const [key, value] of Object.entries(rawModeByRepoId)) {
+			if (value === "chat") {
+				migratedFromLegacyChat = true;
+				continue;
+			}
+			modeByRepoId[key] = value;
+		}
+		const branchIntentByRepoId = parseEnumRecord(o.branchIntentByRepoId, [
+			"from_branch",
+			"use_branch",
+		] as const);
+		if (repoId && !modeByRepoId[repoId]) {
+			const legacyMode =
+				o.mode === "worktree" || o.mode === "local" ? o.mode : null;
+			if (legacyMode) modeByRepoId[repoId] = legacyMode;
+			if (o.mode === "chat") migratedFromLegacyChat = true;
+		}
+		if (repoId && !branchIntentByRepoId[repoId]) {
+			const legacyBranchIntent =
+				o.branchIntent === "from_branch" || o.branchIntent === "use_branch"
+					? o.branchIntent
+					: null;
+			if (legacyBranchIntent) branchIntentByRepoId[repoId] = legacyBranchIntent;
+		}
+		const chatModeActive =
+			typeof o.chatModeActive === "boolean"
+				? o.chatModeActive
+				: migratedFromLegacyChat;
+		return {
+			createState:
+				o.createState === "backlog" || o.createState === "in-progress"
+					? o.createState
+					: DEFAULT_START_SURFACE_PREFERENCES.createState,
+			repoId,
+			sourceBranchByRepoId: parseStringRecord(o.sourceBranchByRepoId),
+			modeByRepoId,
+			branchIntentByRepoId,
+			chatModeActive,
+			terminalModeActive:
+				typeof o.terminalModeActive === "boolean"
+					? o.terminalModeActive
+					: false,
+		};
+	} catch {
+		return DEFAULT_START_SURFACE_PREFERENCES;
+	}
+}
+
+function parseCursorProviderSettings(
+	raw: string | undefined,
+): CursorProviderSettings {
+	if (!raw) return DEFAULT_SETTINGS.cursorProvider;
+	try {
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		return {
+			apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
+			enabledModelIds: parseEnabledModelIds(parsed.enabledModelIds),
+			cachedModels: parseCachedModels(parsed.cachedModels),
+		};
+	} catch {
+		return DEFAULT_SETTINGS.cursorProvider;
+	}
+}
+
+// Shared by opencodeProvider and mimoProvider — same persisted shape.
+function parseSlugProviderSettings(
+	raw: string | undefined,
+	fallback: OpencodeProviderSettings,
+): OpencodeProviderSettings {
+	if (!raw) return fallback;
+	try {
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		return {
+			status: parsed.status === "ready" ? "ready" : "unavailable",
+			connected: parseStringArray(parsed.connected),
+			cachedModels: parseOpencodeCachedModels(parsed.cachedModels),
+			enabledModelIds: parseEnabledModelIds(parsed.enabledModelIds),
+			cacheVersion:
+				typeof parsed.cacheVersion === "number" ? parsed.cacheVersion : 0,
+		};
+	} catch {
+		return fallback;
+	}
+}
+
+function parseStringArray(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter((item): item is string => typeof item === "string");
+}
+
+function parseKimiProviderSettings(
+	raw: string | undefined,
+): KimiProviderSettings {
+	if (!raw) return DEFAULT_SETTINGS.kimiProvider;
+	try {
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		return {
+			cachedModels: parseKimiCachedModels(parsed.cachedModels),
+			enabledModelIds: parseEnabledModelIds(parsed.enabledModelIds),
+		};
+	} catch {
+		return DEFAULT_SETTINGS.kimiProvider;
+	}
+}
+
+function parseKimiCachedModels(value: unknown): KimiCachedModel[] | null {
+	if (!Array.isArray(value)) return null;
+	const models: KimiCachedModel[] = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+		const obj = entry as Record<string, unknown>;
+		if (typeof obj.id !== "string") continue;
+		models.push({
+			id: obj.id,
+			label: typeof obj.label === "string" ? obj.label : obj.id,
+		});
+	}
+	return models;
+}
+
+function parseOpencodeCachedModels(
+	value: unknown,
+): OpencodeCachedModel[] | null {
+	if (!Array.isArray(value)) return null;
+	const models: OpencodeCachedModel[] = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+		const obj = entry as Record<string, unknown>;
+		if (typeof obj.slug !== "string" || typeof obj.label !== "string") continue;
+		const effortLevels = Array.isArray(obj.effortLevels)
+			? obj.effortLevels.filter((v): v is string => typeof v === "string")
+			: undefined;
+		models.push({
+			slug: obj.slug,
+			label: obj.label,
+			...(effortLevels && effortLevels.length > 0 ? { effortLevels } : {}),
+		});
+	}
+	return models;
+}
+
+function parseEnabledModelIds(value: unknown): string[] | null {
+	if (value === null) return null;
+	if (!Array.isArray(value)) return null;
+	const ids = value.filter((item): item is string => typeof item === "string");
+	return ids;
+}
+
+function parseCachedModels(value: unknown): CursorCachedModel[] | null {
+	if (!Array.isArray(value)) return null;
+	const models: CursorCachedModel[] = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+		const obj = entry as Record<string, unknown>;
+		if (typeof obj.id !== "string" || typeof obj.label !== "string") continue;
+		const parameters = parseCachedModelParameters(obj.parameters);
+		models.push({
+			id: obj.id,
+			label: obj.label,
+			...(parameters ? { parameters } : {}),
+		});
+	}
+	return models;
+}
+
+function parseCachedModelParameters(
+	value: unknown,
+): CursorCachedModelParameter[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const out: CursorCachedModelParameter[] = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+		const obj = entry as Record<string, unknown>;
+		if (typeof obj.id !== "string") continue;
+		const values: CursorCachedModelParameterValue[] = [];
+		if (Array.isArray(obj.values)) {
+			for (const v of obj.values) {
+				if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+				const vobj = v as Record<string, unknown>;
+				if (typeof vobj.value !== "string") continue;
+				values.push({
+					value: vobj.value,
+					...(typeof vobj.displayName === "string"
+						? { displayName: vobj.displayName }
+						: {}),
+				});
+			}
+		}
+		out.push({
+			id: obj.id,
+			...(typeof obj.displayName === "string"
+				? { displayName: obj.displayName }
+				: {}),
+			values,
+		});
+	}
+	return out;
+}
+
+// Absent → null (all enabled); JSON array → that subset.
+function parseEnabledModelIdsSetting(raw: string | undefined): string[] | null {
+	if (!raw) return null;
+	try {
+		return parseEnabledModelIds(JSON.parse(raw) as unknown);
+	} catch {
+		return null;
+	}
+}
+
+function parseAgentProxySettings(raw: string | undefined): AgentProxySettings {
+	if (!raw) return DEFAULT_SETTINGS.agentProxy;
+	try {
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		const mode =
+			parsed.mode === "system" || parsed.mode === "custom"
+				? parsed.mode
+				: DEFAULT_SETTINGS.agentProxy.mode;
+		return {
+			mode,
+			customUrl: typeof parsed.customUrl === "string" ? parsed.customUrl : "",
+		};
+	} catch {
+		return DEFAULT_SETTINGS.agentProxy;
+	}
+}
+
+function parseLocalLlmSettings(raw: string | undefined): LocalLlmSettings {
+	if (!raw) return DEFAULT_SETTINGS.localLlm;
+	try {
+		const parsed = JSON.parse(raw) as Partial<LocalLlmSettings>;
+		const overrides: Record<string, number> = {};
+		if (
+			parsed.contextOverrides &&
+			typeof parsed.contextOverrides === "object"
+		) {
+			for (const [key, value] of Object.entries(parsed.contextOverrides)) {
+				if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+					overrides[key] = value;
+				}
+			}
+		}
+		return {
+			enabled:
+				typeof parsed.enabled === "boolean"
+					? parsed.enabled
+					: DEFAULT_SETTINGS.localLlm.enabled,
+			model:
+				typeof parsed.model === "string"
+					? parsed.model
+					: DEFAULT_SETTINGS.localLlm.model,
+			autoStart:
+				typeof parsed.autoStart === "boolean"
+					? parsed.autoStart
+					: DEFAULT_SETTINGS.localLlm.autoStart,
+			contextOverrides: overrides,
+		};
+	} catch {
+		return DEFAULT_SETTINGS.localLlm;
+	}
+}
+
+/** Read an integer setting bounded to [min, max] with a default fallback.
+ *  Used for font sizes so corrupted or out-of-range values can't render
+ *  the UI unreadable. */
+function readClampedInt(
+	value: string | undefined,
+	{ min, max, fallback }: { min: number; max: number; fallback: number },
+): number {
+	if (value === undefined) return fallback;
+	const n = Number(value);
+	if (!Number.isFinite(n)) return fallback;
+	return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+/** Parse a stored model preference. Accepts the new `{provider, modelId}` JSON
+ *  form and legacy bare ids (provider unknown → null until re-saved). */
+function parseModelRef(value: string | undefined): ModelRef | null {
+	const trimmed = value?.trim();
+	if (!trimmed) return null;
+	try {
+		const obj = JSON.parse(trimmed) as unknown;
+		if (
+			obj &&
+			typeof obj === "object" &&
+			typeof (obj as { modelId?: unknown }).modelId === "string"
+		) {
+			const o = obj as { provider?: unknown; modelId: string };
+			const modelId = o.modelId.trim();
+			if (modelId) {
+				const provider =
+					typeof o.provider === "string" && o.provider.trim()
+						? o.provider.trim()
+						: null;
+				return { provider, modelId };
+			}
+		}
+	} catch {
+		// Not JSON → legacy bare id below.
+	}
+	return { provider: null, modelId: trimmed };
+}
+
+export async function loadSettings(): Promise<AppSettings> {
+	try {
+		const rawFromDb = await invoke<Record<string, string>>("get_app_settings");
+		const raw = migrateLegacySettings(rawFromDb);
+		const rawDefaultModelId = raw[SETTINGS_KEY_MAP.defaultModel];
+		const rawReviewModelId = raw[SETTINGS_KEY_MAP.reviewModel];
+		const rawReviewEffort = raw[SETTINGS_KEY_MAP.reviewEffort];
+		const rawReviewFastMode = raw[SETTINGS_KEY_MAP.reviewFastMode];
+		const rawPrModelId = raw[SETTINGS_KEY_MAP.prModel];
+		const rawPrEffort = raw[SETTINGS_KEY_MAP.prEffort];
+		const rawPrFastMode = raw[SETTINGS_KEY_MAP.prFastMode];
+		// Migration: legacy `app.font_size` is the new chatFontSize. Read
+		// it as a fallback when the new key is absent; the old row stays
+		// in SQLite (unused) until the user next changes the chat font.
+		const legacyFontSize = raw["app.font_size"];
+		return {
+			chatFontSize: readClampedInt(
+				raw[SETTINGS_KEY_MAP.chatFontSize] ?? legacyFontSize,
+				{ min: 10, max: 24, fallback: DEFAULT_SETTINGS.chatFontSize },
+			),
+			uiFontFamily: readLocalStorageString(UI_FONT_FAMILY_STORAGE_KEY),
+			codeFontFamily: readLocalStorageString(CODE_FONT_FAMILY_STORAGE_KEY),
+			terminalFontFamily: readLocalStorageString(
+				TERMINAL_FONT_FAMILY_STORAGE_KEY,
+			),
+			usePointerCursors:
+				raw[SETTINGS_KEY_MAP.usePointerCursors] !== undefined
+					? raw[SETTINGS_KEY_MAP.usePointerCursors] === "true"
+					: DEFAULT_SETTINGS.usePointerCursors,
+			theme:
+				(localStorage.getItem(THEME_STORAGE_KEY) as AppSettings["theme"]) ??
+				DEFAULT_SETTINGS.theme,
+			language: getPreloadedLanguage(),
+			lightTheme: readColorTheme(
+				LIGHT_THEME_STORAGE_KEY,
+				DEFAULT_SETTINGS.lightTheme,
+			),
+			darkTheme: readColorTheme(
+				DARK_THEME_STORAGE_KEY,
+				DEFAULT_SETTINGS.darkTheme,
+			),
+			sidebarGrouping: (() => {
+				const raw = localStorage.getItem(SIDEBAR_GROUPING_STORAGE_KEY);
+				return VALID_SIDEBAR_GROUPINGS.includes(raw as SidebarGrouping)
+					? (raw as SidebarGrouping)
+					: DEFAULT_SETTINGS.sidebarGrouping;
+			})(),
+			sidebarRepoFilterIds: parseSidebarRepoFilterIds(
+				localStorage.getItem(SIDEBAR_REPO_FILTER_STORAGE_KEY) ?? undefined,
+			),
+			sidebarSort: (() => {
+				const raw = localStorage.getItem(SIDEBAR_SORT_STORAGE_KEY);
+				return VALID_SIDEBAR_SORTS.includes(raw as SidebarSort)
+					? (raw as SidebarSort)
+					: DEFAULT_SETTINGS.sidebarSort;
+			})(),
+			notifications:
+				raw[SETTINGS_KEY_MAP.notifications] !== undefined
+					? raw[SETTINGS_KEY_MAP.notifications] === "true"
+					: DEFAULT_SETTINGS.notifications,
+			notificationSound: (() => {
+				const v = raw[SETTINGS_KEY_MAP.notificationSound];
+				return VALID_NOTIFICATION_SOUNDS.includes(v as NotificationSound)
+					? (v as NotificationSound)
+					: DEFAULT_SETTINGS.notificationSound;
+			})(),
+			terminalHoverExpansion:
+				raw[SETTINGS_KEY_MAP.terminalHoverExpansion] !== undefined
+					? raw[SETTINGS_KEY_MAP.terminalHoverExpansion] === "true"
+					: DEFAULT_SETTINGS.terminalHoverExpansion,
+			enableTerminalMode: raw[SETTINGS_KEY_MAP.enableTerminalMode] === "true",
+			suppressTerminalResumeWarning:
+				raw[SETTINGS_KEY_MAP.suppressTerminalResumeWarning] === "true",
+			lastWorkspaceId: raw[SETTINGS_KEY_MAP.lastWorkspaceId] || null,
+			lastSessionId: raw[SETTINGS_KEY_MAP.lastSessionId] || null,
+			lastSurface:
+				raw[SETTINGS_KEY_MAP.lastSurface] === "workspace-start"
+					? "workspace-start"
+					: DEFAULT_SETTINGS.lastSurface,
+			startContextPanelOpen:
+				raw[SETTINGS_KEY_MAP.startContextPanelOpen] !== undefined
+					? raw[SETTINGS_KEY_MAP.startContextPanelOpen] === "true"
+					: DEFAULT_SETTINGS.startContextPanelOpen,
+			workspaceRightSidebarMode:
+				raw[SETTINGS_KEY_MAP.workspaceRightSidebarMode] === "context"
+					? "context"
+					: DEFAULT_SETTINGS.workspaceRightSidebarMode,
+			defaultModel: parseModelRef(rawDefaultModelId),
+			reviewModel: parseModelRef(rawReviewModelId),
+			reviewEffort:
+				rawReviewEffort && rawReviewEffort !== ""
+					? rawReviewEffort
+					: DEFAULT_SETTINGS.reviewEffort,
+			reviewFastMode:
+				rawReviewFastMode === "true"
+					? true
+					: rawReviewFastMode === "false"
+						? false
+						: DEFAULT_SETTINGS.reviewFastMode,
+			prModel: parseModelRef(rawPrModelId),
+			prEffort:
+				rawPrEffort && rawPrEffort !== ""
+					? rawPrEffort
+					: DEFAULT_SETTINGS.prEffort,
+			prFastMode:
+				rawPrFastMode === "true"
+					? true
+					: rawPrFastMode === "false"
+						? false
+						: DEFAULT_SETTINGS.prFastMode,
+			defaultEffort:
+				raw[SETTINGS_KEY_MAP.defaultEffort] || DEFAULT_SETTINGS.defaultEffort,
+			defaultFastMode:
+				raw[SETTINGS_KEY_MAP.defaultFastMode] !== undefined
+					? raw[SETTINGS_KEY_MAP.defaultFastMode] === "true"
+					: DEFAULT_SETTINGS.defaultFastMode,
+			zoomLevel: raw[SETTINGS_KEY_MAP.zoomLevel]
+				? Number(raw[SETTINGS_KEY_MAP.zoomLevel])
+				: DEFAULT_SETTINGS.zoomLevel,
+			followUpBehavior: (() => {
+				const v = raw[SETTINGS_KEY_MAP.followUpBehavior];
+				return v === "queue" || v === "steer"
+					? v
+					: DEFAULT_SETTINGS.followUpBehavior;
+			})(),
+			claudeThinkingDisplay: (() => {
+				const v = raw[SETTINGS_KEY_MAP.claudeThinkingDisplay];
+				return v === "summarized" || v === "omitted"
+					? v
+					: DEFAULT_SETTINGS.claudeThinkingDisplay;
+			})(),
+			alwaysShowContextUsage:
+				raw[SETTINGS_KEY_MAP.alwaysShowContextUsage] !== undefined
+					? raw[SETTINGS_KEY_MAP.alwaysShowContextUsage] === "true"
+					: DEFAULT_SETTINGS.alwaysShowContextUsage,
+			showUsageStats:
+				raw[SETTINGS_KEY_MAP.showUsageStats] !== undefined
+					? raw[SETTINGS_KEY_MAP.showUsageStats] === "true"
+					: DEFAULT_SETTINGS.showUsageStats,
+			autoArchiveOnMerge:
+				raw[SETTINGS_KEY_MAP.autoArchiveOnMerge] !== undefined
+					? raw[SETTINGS_KEY_MAP.autoArchiveOnMerge] === "true"
+					: DEFAULT_SETTINGS.autoArchiveOnMerge,
+			onboardingCompleted:
+				raw[SETTINGS_KEY_MAP.onboardingCompleted] !== undefined
+					? raw[SETTINGS_KEY_MAP.onboardingCompleted] === "true"
+					: DEFAULT_SETTINGS.onboardingCompleted,
+			shortcuts: parseShortcutOverrides(raw[SETTINGS_KEY_MAP.shortcuts]),
+			claudeEnabledModelIds: parseEnabledModelIdsSetting(
+				raw[SETTINGS_KEY_MAP.claudeEnabledModelIds],
+			),
+			codexEnabledModelIds: parseEnabledModelIdsSetting(
+				raw[SETTINGS_KEY_MAP.codexEnabledModelIds],
+			),
+			cursorProvider: parseCursorProviderSettings(
+				raw[SETTINGS_KEY_MAP.cursorProvider],
+			),
+			opencodeProvider: parseSlugProviderSettings(
+				raw[SETTINGS_KEY_MAP.opencodeProvider],
+				DEFAULT_SETTINGS.opencodeProvider,
+			),
+			mimoProvider: parseSlugProviderSettings(
+				raw[SETTINGS_KEY_MAP.mimoProvider],
+				DEFAULT_SETTINGS.mimoProvider,
+			),
+			kimiProvider: parseKimiProviderSettings(
+				raw[SETTINGS_KEY_MAP.kimiProvider],
+			),
+			agentProxy: parseAgentProxySettings(raw[SETTINGS_KEY_MAP.agentProxy]),
+			localLlm: parseLocalLlmSettings(raw[SETTINGS_KEY_MAP.localLlm]),
+			inboxSourceConfig: parseInboxSourceConfig(
+				raw[SETTINGS_KEY_MAP.inboxSourceConfig],
+			),
+			startSurfacePreferences: parseStartSurfacePreferences(
+				raw[SETTINGS_KEY_MAP.startSurfacePreferences],
+			),
+		};
+	} catch {
+		return { ...DEFAULT_SETTINGS };
+	}
+}
+
+export async function saveSettings(patch: Partial<AppSettings>): Promise<void> {
+	// localStorage-backed fields. `null` / "" clears the row so the next
+	// boot falls back to the preset default.
+	for (const [field, lsKey] of Object.entries(LOCALSTORAGE_KEYS) as Array<
+		[LocalStorageKey, string]
+	>) {
+		const value = patch[field];
+		if (value === undefined) continue;
+		try {
+			if (value === null || value === "") {
+				localStorage.removeItem(lsKey);
+			} else if (Array.isArray(value)) {
+				if (value.length === 0) {
+					localStorage.removeItem(lsKey);
+				} else {
+					localStorage.setItem(lsKey, JSON.stringify(value));
+				}
+			} else {
+				localStorage.setItem(lsKey, String(value));
+			}
+		} catch (error) {
+			console.error(`[helmor] localStorage save failed for "${lsKey}"`, error);
+		}
+	}
+
+	const settings: Record<string, string> = {};
+	for (const [key, dbKey] of Object.entries(SETTINGS_KEY_MAP)) {
+		const value = patch[key as keyof Omit<AppSettings, LocalStorageKey>];
+		if (value !== undefined) {
+			const isJsonKey =
+				key === "shortcuts" ||
+				key === "claudeEnabledModelIds" ||
+				key === "codexEnabledModelIds" ||
+				key === "cursorProvider" ||
+				key === "opencodeProvider" ||
+				key === "kimiProvider" ||
+				key === "mimoProvider" ||
+				key === "agentProxy" ||
+				key === "localLlm" ||
+				key === "inboxSourceConfig" ||
+				key === "startSurfacePreferences" ||
+				key === "defaultModel" ||
+				key === "reviewModel" ||
+				key === "prModel";
+			// null clears the row (falls back to default on next boot); JSON keys
+			// otherwise serialize the object, scalars stringify.
+			settings[dbKey] =
+				value === null ? "" : isJsonKey ? JSON.stringify(value) : String(value);
+		}
+	}
+	if (Object.keys(settings).length === 0) return;
+	try {
+		await invoke("update_app_settings", { settingsMap: settings });
+	} catch {
+		// ignore — non-Tauri env
+	}
+}
+
+export type SettingsContextValue = {
+	settings: AppSettings;
+	/** False while the initial load from SQLite is still in flight. */
+	isLoaded: boolean;
+	updateSettings: (patch: Partial<AppSettings>) => void | Promise<void>;
+};
+
+export const SettingsContext = createContext<SettingsContextValue>({
+	settings: DEFAULT_SETTINGS,
+	isLoaded: false,
+	updateSettings: async () => {},
+});
+
+export function useSettings(): SettingsContextValue {
+	return useContext(SettingsContext);
+}
+
+/** Resolve the effective theme ("light" | "dark") from a ThemeMode setting. */
+export function resolveTheme(mode: ThemeMode): "light" | "dark" {
+	if (mode === "system") {
+		if (
+			typeof window !== "undefined" &&
+			typeof window.matchMedia === "function"
+		) {
+			return window.matchMedia("(prefers-color-scheme: dark)").matches
+				? "dark"
+				: "light";
+		}
+		return "dark";
+	}
+	return mode;
+}

@@ -1,0 +1,50 @@
+import type { WorkspaceRow } from "@/lib/api";
+import { translateSource } from "@/lib/i18n";
+
+// Values are i18n catalog KEYS, resolved via translateSource at read time.
+export const WORKSPACE_STATUS_LABEL: Record<
+	NonNullable<WorkspaceRow["status"]>,
+	string
+> = {
+	"in-progress": "progress",
+	review: "review",
+	done: "done",
+	backlog: "backlog",
+	canceled: "canceled",
+};
+
+export const WORKSPACE_STATUS_DOT_CLASS: Record<
+	NonNullable<WorkspaceRow["status"]>,
+	string
+> = {
+	"in-progress": "bg-[var(--workspace-sidebar-status-progress)]",
+	review: "bg-[var(--workspace-sidebar-status-review)]",
+	done: "bg-[var(--workspace-sidebar-status-done)]",
+	backlog: "bg-[var(--workspace-sidebar-status-backlog)]",
+	canceled: "bg-[var(--workspace-sidebar-status-canceled)]",
+};
+
+export type WorkspaceStatusValue = NonNullable<WorkspaceRow["status"]>;
+
+export type WorkspaceStatusDot = {
+	label: string;
+	dotClass: string;
+};
+
+export function deriveWorkspaceStatusDot(
+	row: WorkspaceRow,
+): WorkspaceStatusDot {
+	// Defensive lookup: legacy DBs may have rows with "in-review" /
+	// "cancelled" / etc. — a backend migration normalizes them on boot,
+	// but until that runs once we fall back to in-progress rather than
+	// rendering a class-less (transparent) dot.
+	const raw = row.status ?? "in-progress";
+	const status: WorkspaceStatusValue =
+		raw in WORKSPACE_STATUS_DOT_CLASS
+			? (raw as WorkspaceStatusValue)
+			: "in-progress";
+	return {
+		label: translateSource(WORKSPACE_STATUS_LABEL[status]),
+		dotClass: WORKSPACE_STATUS_DOT_CLASS[status],
+	};
+}

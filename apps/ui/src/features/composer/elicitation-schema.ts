@@ -1,0 +1,418 @@
+import type { PendingUserInput } from "@/features/conversation/pending-user-input";
+import { translateSource } from "@/lib/i18n";
+
+type ElicitationEnumOption = {
+	value: string;
+	label: string;
+	description: string;
+};
+
+type ElicitationBaseField = {
+	key: string;
+	label: string;
+	description: string;
+	required: boolean;
+};
+
+export type ElicitationBooleanField = ElicitationBaseField & {
+	kind: "boolean";
+	defaultValue: boolean | null;
+};
+
+export type ElicitationStringField = ElicitationBaseField & {
+	kind: "string";
+	format: "email" | "uri" | "date" | "date-time" | null;
+	minLength: number | null;
+	maxLength: number | null;
+	defaultValue: string;
+};
+
+export type ElicitationNumberField = ElicitationBaseField & {
+	kind: "number" | "integer";
+	minimum: number | null;
+	maximum: number | null;
+	defaultValue: string;
+};
+
+export type ElicitationSingleSelectField = ElicitationBaseField & {
+	kind: "single-select";
+	options: ElicitationEnumOption[];
+	defaultValue: string | null;
+	allowOther: boolean;
+};
+
+export type ElicitationMultiSelectField = ElicitationBaseField & {
+	kind: "multi-select";
+	options: ElicitationEnumOption[];
+	minItems: number | null;
+	maxItems: number | null;
+	defaultValue: string[];
+};
+
+export type ElicitationFormField =
+	| ElicitationBooleanField
+	| ElicitationStringField
+	| ElicitationNumberField
+	| ElicitationSingleSelectField
+	| ElicitationMultiSelectField;
+
+export type ElicitationFormViewModel = {
+	kind: "form";
+	elicitationId: string;
+	serverName: string;
+	message: string;
+	fields: ElicitationFormField[];
+};
+
+export type ElicitationUrlViewModel = {
+	kind: "url";
+	elicitationId: string;
+	serverName: string;
+	message: string;
+	url: string;
+	host: string | null;
+};
+
+/** Codex MCP tool-call approval (empty schema + `_meta.codex_approval_kind: "mcp_tool_call"`). `allowSession` / `allowAlways` mirror `_meta.persist`. */
+export type ElicitationToolApprovalViewModel = {
+	kind: "tool-approval";
+	elicitationId: string;
+	serverName: string;
+	message: string;
+	allowSession: boolean;
+	allowAlways: boolean;
+};
+
+export type UnsupportedElicitationViewModel = {
+	kind: "unsupported";
+	elicitationId: string;
+	serverName: string;
+	message: string;
+	reason: string;
+};
+
+export type ElicitationViewModel =
+	| ElicitationFormViewModel
+	| ElicitationUrlViewModel
+	| ElicitationToolApprovalViewModel
+	| UnsupportedElicitationViewModel;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | null {
+	return typeof value === "string" ? value : null;
+}
+
+function readNumber(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+	return typeof value === "boolean" ? value : null;
+}
+
+function readStringArray(value: unknown): string[] {
+	return Array.isArray(value)
+		? value.filter((entry): entry is string => typeof entry === "string")
+		: [];
+}
+
+function normalizeEnumOptions(
+	schema: Record<string, unknown>,
+): ElicitationEnumOption[] {
+	if (Array.isArray(schema.oneOf)) {
+		return schema.oneOf
+			.map((option) => {
+				if (!isRecord(option)) {
+					return null;
+				}
+
+				const value = readString(option.const);
+				if (!value) {
+					return null;
+				}
+
+				return {
+					value,
+					label: readString(option.title) ?? value,
+					description: readString(option.description) ?? "",
+				} satisfies ElicitationEnumOption;
+			})
+			.filter((option): option is ElicitationEnumOption => option !== null);
+	}
+
+	const enumValues = readStringArray(schema.enum);
+	const enumNames = readStringArray(schema.enumNames);
+	return enumValues.map((value, index) => ({
+		value,
+		label: enumNames[index] ?? value,
+		description: "",
+	}));
+}
+
+function normalizeMultiSelectOptions(
+	schema: Record<string, unknown>,
+): ElicitationEnumOption[] {
+	const items = isRecord(schema.items) ? schema.items : null;
+	if (!items) {
+		return [];
+	}
+
+	if (Array.isArray(items.anyOf)) {
+		return items.anyOf
+			.map((option) => {
+				if (!isRecord(option)) {
+					return null;
+				}
+
+				const value = readString(option.const);
+				if (!value) {
+					return null;
+				}
+
+				return {
+					value,
+					label: readString(option.title) ?? value,
+					description: readString(option.description) ?? "",
+				} satisfies ElicitationEnumOption;
+			})
+			.filter((option): option is ElicitationEnumOption => option !== null);
+	}
+
+	return readStringArray(items.enum).map((value) => ({
+		value,
+		label: value,
+		description: "",
+	}));
+}
+
+function normalizeFormField(
+	key: string,
+	schema: unknown,
+	requiredKeys: Set<string>,
+): ElicitationFormField | null {
+	if (!isRecord(schema)) {
+		return null;
+	}
+
+	const label = readString(schema.title) ?? key;
+	const description = readString(schema.description) ?? "";
+	const required = requiredKeys.has(key);
+	const type = readString(schema.type);
+
+	if (type === "boolean") {
+		return {
+			kind: "boolean",
+			key,
+			label,
+			description,
+			required,
+			defaultValue: readBoolean(schema.default),
+		};
+	}
+
+	if (type === "string") {
+		const options = normalizeEnumOptions(schema);
+		if (options.length > 0) {
+			return {
+				kind: "single-select",
+				key,
+				label,
+				description,
+				required,
+				options,
+				defaultValue: readString(schema.default),
+				allowOther: isRecord(schema) && schema["x-allow-other"] === true,
+			};
+		}
+
+		const format = readString(schema.format);
+		return {
+			kind: "string",
+			key,
+			label,
+			description,
+			required,
+			format:
+				format === "email" ||
+				format === "uri" ||
+				format === "date" ||
+				format === "date-time"
+					? format
+					: null,
+			minLength: readNumber(schema.minLength),
+			maxLength: readNumber(schema.maxLength),
+			defaultValue: readString(schema.default) ?? "",
+		};
+	}
+
+	if (type === "number" || type === "integer") {
+		const defaultValue = readNumber(schema.default);
+		return {
+			kind: type,
+			key,
+			label,
+			description,
+			required,
+			minimum: readNumber(schema.minimum),
+			maximum: readNumber(schema.maximum),
+			defaultValue: defaultValue === null ? "" : defaultValue.toString(),
+		};
+	}
+
+	if (type === "array") {
+		const options = normalizeMultiSelectOptions(schema);
+		if (options.length === 0) {
+			return null;
+		}
+
+		return {
+			kind: "multi-select",
+			key,
+			label,
+			description,
+			required,
+			options,
+			minItems: readNumber(schema.minItems),
+			maxItems: readNumber(schema.maxItems),
+			defaultValue: readStringArray(schema.default),
+		};
+	}
+
+	return null;
+}
+
+/**
+ * Build the elicitation view model the form / URL renderers consume,
+ * from a unified `PendingUserInput`. The `payload.kind` discriminator
+ * picks form vs URL; the on-the-wire `userInputId` / `source` /
+ * `message` map onto the view model's `elicitationId` / `serverName`
+ * / `message` fields (renaming kept internal so the existing renderer
+ * logic doesn't have to change).
+ */
+export function normalizeElicitation(
+	userInput: PendingUserInput,
+): ElicitationViewModel {
+	const elicitationId = userInput.userInputId;
+	const serverName = userInput.source;
+	const message = userInput.message;
+
+	if (userInput.payload.kind === "url") {
+		const url = userInput.payload.url.trim();
+		if (!url) {
+			return {
+				kind: "unsupported",
+				elicitationId,
+				serverName,
+				message,
+				reason: "Missing URL for URL-mode user input.",
+			};
+		}
+
+		let host: string | null = null;
+		try {
+			host = new URL(url).host;
+		} catch {
+			host = null;
+		}
+
+		return { kind: "url", elicitationId, serverName, message, url, host };
+	}
+
+	if (userInput.payload.kind !== "form") {
+		return {
+			kind: "unsupported",
+			elicitationId,
+			serverName,
+			message,
+			reason: translateSource("composerExpectedFormOrUrl"),
+		};
+	}
+
+	const schema = isRecord(userInput.payload.schema)
+		? userInput.payload.schema
+		: null;
+	if (!schema || readString(schema.type) !== "object") {
+		return {
+			kind: "unsupported",
+			elicitationId,
+			serverName,
+			message,
+			reason: translateSource("composerUnsupportedFormSchema"),
+		};
+	}
+
+	const properties = isRecord(schema.properties) ? schema.properties : null;
+	if (!properties) {
+		return {
+			kind: "unsupported",
+			elicitationId,
+			serverName,
+			message,
+			reason: translateSource("composerFormMissingProperties"),
+		};
+	}
+
+	const requiredKeys = new Set(readStringArray(schema.required));
+	const entries = Object.entries(properties);
+	const normalizedFields = entries
+		.map(([key, value]) => normalizeFormField(key, value, requiredKeys))
+		.filter((field): field is ElicitationFormField => field !== null);
+
+	// Codex MCP tool-call approval — route to dedicated panel, not `unsupported` (#639).
+	const meta = isRecord(userInput.payload.meta) ? userInput.payload.meta : null;
+	const isMcpToolCallApproval =
+		meta?.codex_approval_kind === "mcp_tool_call" && entries.length === 0;
+	if (isMcpToolCallApproval) {
+		const persist = meta?.persist;
+		const persistValues = Array.isArray(persist)
+			? persist.filter((v): v is string => typeof v === "string")
+			: typeof persist === "string"
+				? [persist]
+				: [];
+		const allowSession = persistValues.includes("session");
+		const allowAlways = persistValues.includes("always");
+		return {
+			kind: "tool-approval",
+			elicitationId,
+			serverName,
+			message,
+			allowSession,
+			allowAlways,
+		};
+	}
+	const supportedKeys = new Set(normalizedFields.map((field) => field.key));
+	const unsupportedRequiredKeys = Array.from(requiredKeys).filter(
+		(key) => key in properties && !supportedKeys.has(key),
+	);
+
+	if (unsupportedRequiredKeys.length > 0) {
+		return {
+			kind: "unsupported",
+			elicitationId,
+			serverName,
+			message,
+			reason: translateSource("composerFormUnsupportedRequired"),
+		};
+	}
+
+	if (normalizedFields.length === 0) {
+		return {
+			kind: "unsupported",
+			elicitationId,
+			serverName,
+			message,
+			reason: translateSource("composerFormNoSupportedFields"),
+		};
+	}
+
+	return {
+		kind: "form",
+		elicitationId,
+		serverName,
+		message,
+		fields: normalizedFields,
+	};
+}

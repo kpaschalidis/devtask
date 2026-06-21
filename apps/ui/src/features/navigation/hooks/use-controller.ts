@@ -1,0 +1,1813 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { open } from "@tauri-apps/plugin-dialog";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { closeAllTerminalsForWorkspace } from "@/features/inspector/terminal-store";
+import {
+	type AddRepositoryResponse,
+	addRepositoryFromLocalPath,
+	cloneRepositoryFromUrl,
+	finalizeWorkspaceFromRepo,
+	listenArchiveExecutionFailed,
+	listenArchiveExecutionSucceeded,
+	loadAddRepositoryDefaults,
+	markWorkspaceUnread,
+	moveRepositoryInSidebar,
+	moveWorkspaceInSidebar,
+	permanentlyDeleteWorkspace,
+	pinWorkspace,
+	prepareArchiveWorkspace,
+	prepareWorkspaceFromRepo,
+	restoreWorkspace,
+	setWorkspaceStatus,
+	startArchiveWorkspace,
+	unpinWorkspace,
+	validateRestoreWorkspace,
+	type WorkspaceDetail,
+	type WorkspaceGroup,
+	type WorkspaceRow,
+	type WorkspaceSessionSummary,
+	type WorkspaceStatus,
+} from "@/lib/api";
+import { extractError, isRecoverableByPurge } from "@/lib/errors";
+import { formatSource, translateSource } from "@/lib/i18n";
+import {
+	archivedWorkspacesQueryOptions,
+	helmorQueryKeys,
+	repositoriesQueryOptions,
+	sessionThreadMessagesQueryOptions,
+	workspaceDetailQueryOptions,
+	workspaceGitActionStatusQueryOptions,
+	workspaceGroupsQueryOptions,
+	workspaceSessionsQueryOptions,
+} from "@/lib/query-client";
+import { useSettings } from "@/lib/settings";
+import {
+	createScopedSidebarGate,
+	holdSidebarMutation,
+	requestSidebarReconcile,
+} from "@/lib/sidebar-mutation-gate";
+import {
+	applyRepoReorder,
+	createOptimisticCreatingWorkspaceDetail,
+	describeUnknownError,
+	findInitialWorkspaceId,
+	findReplacementWorkspaceIdAfterRemoval,
+	hasWorkspaceId,
+	insertRowBySidebarOrder,
+	reorderWorkspaceInSidebar,
+	rowToWorkspaceSummary,
+	summaryToArchivedRow,
+	workspaceGroupIdFromStatus,
+} from "@/lib/workspace-helpers";
+import { useShellEvent } from "@/shell/event-bus";
+import {
+	type PendingArchiveEntry,
+	type PendingCreationEntry,
+	projectVisualSidebar,
+	shouldReconcilePendingArchive,
+	shouldReconcilePendingCreation,
+} from "../sidebar-projection";
+import {
+	createOptimisticWorkspaceSession,
+	createPreparedWorkspaceRow,
+} from "./controller/optimistic-rows";
+
+type WorkspaceToastVariant = "default" | "destructive";
+
+type WorkspaceToastFn = (
+	description: string,
+	title?: string,
+	variant?: WorkspaceToastVariant,
+	opts?: {
+		action?: { label: string; onClick: () => void; destructive?: boolean };
+		persistent?: boolean;
+	},
+) => void;
+
+type UseWorkspacesSidebarControllerArgs = {
+	selectedWorkspaceId: string | null;
+	autoSelectEnabled?: boolean;
+	onSelectWorkspace: (workspaceId: string | null) => void;
+	onOpenNewWorkspace?: () => void;
+	/**
+	 * Called after a successful add-repo when the backend hands us a
+	 * `selectedWorkspaceId: null` — newly added repo, or re-add with only
+	 * archived workspaces. UI lands on the start page with this repo
+	 * preselected.
+	 */
+	onAddRepositoryNeedsStart?: (repositoryId: string) => void;
+	pushWorkspaceToast: WorkspaceToastFn;
+};
+
+const WORKSPACE_GROUPS_INITIAL_DATA = workspaceGroupsQueryOptions().initialData;
+
+export function useWorkspacesSidebarController({
+	selectedWorkspaceId,
+	autoSelectEnabled = true,
+	onSelectWorkspace,
+	onOpenNewWorkspace,
+	onAddRepositoryNeedsStart,
+	pushWorkspaceToast,
+}: UseWorkspacesSidebarControllerArgs) {
+	const queryClient = useQueryClient();
+	const { settings, updateSettings } = useSettings();
+	const [addingRepository, setAddingRepository] = useState(false);
+	const [isCloneDialogOpen, setIsCloneDialogOpen] = useState(false);
+	const [cloneDefaultDirectory, setCloneDefaultDirectory] = useState<
+		string | null
+	>(null);
+	const [creatingWorkspaceRepoId, setCreatingWorkspaceRepoId] = useState<
+		string | null
+	>(null);
+	const [archivingWorkspaceIds, setArchivingWorkspaceIds] = useState<
+		Set<string>
+	>(() => new Set());
+	const [pendingArchives, setPendingArchives] = useState<
+		Map<string, PendingArchiveEntry>
+	>(() => new Map());
+	const [pendingCreations, setPendingCreations] = useState<
+		Map<
+			string,
+			{
+				entry: PendingCreationEntry;
+				// Workspace id selected before the creation started — used
+				// by the Phase 2 failure path to restore selection when the
+				// user is still sitting on the failing workspace.
+				previousSelection: string | null;
+			}
+		>
+	>(() => new Map());
+	// Live mirror of `selectedWorkspaceId` so async callbacks (Phase 2
+	// finalize catch, archive/restore handlers, etc.) can read the
+	// current selection rather than a stale closure snapshot.
+	const selectedWorkspaceIdRef = useRef(selectedWorkspaceId);
+	selectedWorkspaceIdRef.current = selectedWorkspaceId;
+
+	// Archive is fire-and-forget: `startArchiveWorkspace` resolves once
+	// the worker has been launched, not when the DB row is actually
+	// archived. The gate must stay live until the
+	// `archive-execution-succeeded` / `-failed` event arrives, so
+	// concurrent flushes don't refetch the still-pre-archive groups
+	// and clobber the optimistic move. `createScopedSidebarGate` makes
+	// per-workspace begin/end idempotent so duplicate or
+	// out-of-sequence events never imbalance the counter.
+	const archiveGateRef = useRef(createScopedSidebarGate(queryClient));
+	const archiveGate = archiveGateRef.current;
+	useEffect(() => {
+		// If the controller unmounts mid-archive (HMR, Tauri webview
+		// reload, future route change), release any outstanding holds
+		// so the module-level counter doesn't permanently silence
+		// `requestSidebarReconcile` for the next mount.
+		return () => archiveGate.disposeAll();
+	}, [archiveGate]);
+
+	const groupsQuery = useQuery(workspaceGroupsQueryOptions());
+	const archivedQuery = useQuery(archivedWorkspacesQueryOptions());
+	const repositoriesQuery = useQuery(repositoriesQueryOptions());
+
+	const baseGroups = groupsQuery.data ?? [];
+	const baseArchivedSummaries = archivedQuery.data ?? [];
+	const availableRepoIds = useMemo(
+		() => (repositoriesQuery.data ?? []).map((repository) => repository.id),
+		[repositoriesQuery.data],
+	);
+	const projectedSidebar = useMemo(
+		() =>
+			projectVisualSidebar(
+				{
+					baseGroups,
+					baseArchivedSummaries,
+					pendingArchives,
+					pendingCreations: new Map(
+						Array.from(pendingCreations.entries()).map(
+							([workspaceId, pendingCreation]) => [
+								workspaceId,
+								pendingCreation.entry,
+							],
+						),
+					),
+				},
+				settings.sidebarGrouping,
+				{
+					availableRepoIds,
+					repoFilterIds: settings.sidebarRepoFilterIds,
+					sort: settings.sidebarSort,
+				},
+			),
+		[
+			availableRepoIds,
+			baseArchivedSummaries,
+			baseGroups,
+			pendingArchives,
+			pendingCreations,
+			settings.sidebarGrouping,
+			settings.sidebarRepoFilterIds,
+			settings.sidebarSort,
+		],
+	);
+	const groups = projectedSidebar.groups;
+	const archivedSummaries = useMemo(
+		() =>
+			projectedSidebar.archivedRows.map((row) => rowToWorkspaceSummary(row)),
+		[projectedSidebar.archivedRows],
+	);
+	const archivedRows = useMemo(
+		() => projectedSidebar.archivedRows,
+		[projectedSidebar.archivedRows],
+	);
+
+	const updateArchivingWorkspaceId = useCallback(
+		(workspaceId: string, active: boolean) => {
+			setArchivingWorkspaceIds((current) => {
+				const next = new Set(current);
+				if (active) {
+					next.add(workspaceId);
+				} else {
+					next.delete(workspaceId);
+				}
+				return next;
+			});
+		},
+		[],
+	);
+
+	// Forward-ref into `handleDeleteWorkspace` so early callbacks
+	// (e.g. `pushWorkspaceErrorToast`) can wire up the "Permanently Delete"
+	// recovery action without creating a circular useCallback dependency.
+	const handleDeleteWorkspaceRef = useRef<(workspaceId: string) => void>(
+		() => {},
+	);
+
+	/**
+	 * Destructive workspace toast that auto-upgrades to the "Permanently Delete"
+	 * recovery action when the backend's error code indicates the workspace is
+	 * orphaned (missing on disk / DB row gone / git worktree corrupt).
+	 */
+	const pushWorkspaceErrorToast = useCallback(
+		(
+			workspaceId: string,
+			title: string,
+			error: unknown,
+			fallbackMessage: string,
+		) => {
+			const { code, message } = extractError(error, fallbackMessage);
+			if (isRecoverableByPurge(code)) {
+				pushWorkspaceToast(message, title, "destructive", {
+					persistent: true,
+					action: {
+						label: translateSource("permanentlyDelete"),
+						destructive: true,
+						onClick: () => handleDeleteWorkspaceRef.current(workspaceId),
+					},
+				});
+				return;
+			}
+			pushWorkspaceToast(message, title, "destructive");
+		},
+		[pushWorkspaceToast],
+	);
+
+	// Forward-ref so the rollback can call into the recovery toast helper that
+	// is defined below (they form a cycle: the helper depends on
+	// `handleDeleteWorkspace`, which is defined later still).
+	const pushPermanentDeleteRecoveryToastRef = useRef<
+		(
+			workspaceId: string,
+			title: string,
+			error: unknown,
+			fallbackMessage: string,
+		) => void
+	>(() => {});
+
+	const rollbackArchivedWorkspace = useCallback(
+		(workspaceId: string, error: unknown, fallbackMessage: string) => {
+			updateArchivingWorkspaceId(workspaceId, false);
+			let rollback: PendingArchiveEntry | null = null;
+			setPendingArchives((current) => {
+				const existing = current.get(workspaceId) ?? null;
+				if (!existing) {
+					return current;
+				}
+				rollback = existing;
+				const next = new Map(current);
+				next.delete(workspaceId);
+				return next;
+			});
+
+			// Release the gate this archive opened — covers both the
+			// startArchive.catch path and the listenArchiveExecutionFailed
+			// listener path. `archiveGate.end` is idempotent, so calling
+			// it here when no gate was acquired (e.g. failed event with
+			// no pending entry) is safe.
+			archiveGate.end(workspaceId);
+
+			if (!rollback) {
+				requestSidebarReconcile(queryClient);
+			}
+
+			// Always offer the permanent-delete escape hatch on archive failure —
+			// matches the restore-failure path. The user already chose to drop
+			// this workspace; if cleanup hits a snag (e.g. trash-dir collision,
+			// stale worktree) they need a way out without restarting the app.
+			pushPermanentDeleteRecoveryToastRef.current(
+				workspaceId,
+				translateSource("navArchiveFailed"),
+				error,
+				fallbackMessage,
+			);
+		},
+		[archiveGate, queryClient, updateArchivingWorkspaceId],
+	);
+
+	useEffect(() => {
+		let disposed = false;
+		let unlistenFailure: (() => void) | undefined;
+		let unlistenSuccess: (() => void) | undefined;
+
+		void listenArchiveExecutionFailed((payload) => {
+			if (disposed) {
+				return;
+			}
+			// Auto-archive has no pendingArchives / gate to roll back, and the
+			// destructive "Permanently Delete" recovery toast is wrong for a
+			// failure the user didn't initiate. Surface a calm notice instead.
+			if (payload.origin === "autoAfterMerge") {
+				const { message } = extractError(
+					payload,
+					translateSource("navUnableAutoArchiveWorkspace"),
+				);
+				pushWorkspaceToast(
+					message,
+					translateSource("navAutoArchiveFailed"),
+					"default",
+				);
+				return;
+			}
+			rollbackArchivedWorkspace(
+				payload.workspaceId,
+				payload,
+				translateSource("navUnableArchiveWorkspace"),
+			);
+		}).then((cleanup) => {
+			if (disposed) {
+				cleanup();
+				return;
+			}
+			unlistenFailure = cleanup;
+		});
+
+		void listenArchiveExecutionSucceeded((payload) => {
+			if (disposed) {
+				return;
+			}
+			// Auto-archive bypasses the optimistic pendingArchives flow, so the
+			// regular gate.end -> reconcile path is a no-op for it. Trigger the
+			// sidebar reconcile ourselves; otherwise the row stays in its
+			// pre-archive group until something else refetches.
+			if (payload.origin === "autoAfterMerge") {
+				requestSidebarReconcile(queryClient);
+				void queryClient.invalidateQueries({
+					queryKey: helmorQueryKeys.archivedWorkspaces,
+				});
+				return;
+			}
+			setPendingArchives((current) => {
+				const existing = current.get(payload.workspaceId);
+				if (!existing || existing.stage === "confirmed") {
+					return current;
+				}
+				const next = new Map(current);
+				next.set(payload.workspaceId, {
+					...existing,
+					stage: "confirmed",
+				});
+				return next;
+			});
+			// `archiveGate.end` reconciles sidebar lists when the gate
+			// counter hits zero, which already invalidates workspaceGroups
+			// and archivedWorkspaces. Avoid an extra duplicate invalidation
+			// pair here — it would cause a redundant refetch.
+			archiveGate.end(payload.workspaceId);
+		}).then((cleanup) => {
+			if (disposed) {
+				cleanup();
+				return;
+			}
+			unlistenSuccess = cleanup;
+		});
+
+		return () => {
+			disposed = true;
+			unlistenFailure?.();
+			unlistenSuccess?.();
+		};
+	}, [archiveGate, pushWorkspaceToast, queryClient, rollbackArchivedWorkspace]);
+
+	useEffect(() => {
+		if (pendingArchives.size === 0) {
+			return;
+		}
+
+		const resolvedIds: string[] = [];
+		for (const [workspaceId, pendingArchive] of pendingArchives) {
+			if (
+				pendingArchive.stage === "confirmed" &&
+				shouldReconcilePendingArchive(
+					workspaceId,
+					baseGroups,
+					baseArchivedSummaries,
+				)
+			) {
+				resolvedIds.push(workspaceId);
+			}
+		}
+
+		if (resolvedIds.length === 0) {
+			return;
+		}
+
+		setPendingArchives((current) => {
+			let changed = false;
+			const next = new Map(current);
+			for (const workspaceId of resolvedIds) {
+				changed = next.delete(workspaceId) || changed;
+			}
+			return changed ? next : current;
+		});
+	}, [baseArchivedSummaries, baseGroups, pendingArchives]);
+
+	useEffect(() => {
+		if (pendingCreations.size === 0) {
+			return;
+		}
+
+		const resolvedIds: string[] = [];
+		for (const [workspaceId, pendingCreation] of pendingCreations) {
+			if (shouldReconcilePendingCreation(pendingCreation.entry, baseGroups)) {
+				resolvedIds.push(workspaceId);
+			}
+		}
+
+		if (resolvedIds.length === 0) {
+			return;
+		}
+
+		setPendingCreations((current) => {
+			let changed = false;
+			const next = new Map(current);
+			for (const workspaceId of resolvedIds) {
+				changed = next.delete(workspaceId) || changed;
+			}
+			return changed ? next : current;
+		});
+	}, [baseGroups, pendingCreations]);
+
+	useEffect(() => {
+		if (!autoSelectEnabled) {
+			return;
+		}
+
+		if (
+			selectedWorkspaceId === null &&
+			groupsQuery.data === undefined &&
+			archivedQuery.data === undefined
+		) {
+			return;
+		}
+
+		if (
+			selectedWorkspaceId === null &&
+			groupsQuery.isFetching &&
+			groupsQuery.data === WORKSPACE_GROUPS_INITIAL_DATA
+		) {
+			return;
+		}
+
+		// A freshly-created workspace lands here BEFORE `groupsQuery`
+		// refetches it from the backend, so `hasWorkspaceId` returns false
+		// and the fallback below would otherwise jump us to whatever sits
+		// in `archivedSummaries[0]` — clobbering the user's brand-new
+		// workspace selection. Hold off until the refetch settles.
+		if (
+			selectedWorkspaceId &&
+			!hasWorkspaceId(selectedWorkspaceId, groups, archivedSummaries) &&
+			groupsQuery.isFetching
+		) {
+			return;
+		}
+
+		// Only restore archived workspaces if they were the live selection
+		// (runtime state). Never auto-restore archived from persisted
+		// `lastWorkspaceId` — the directory may be gone, which would spam
+		// git/editor errors on every poll. Fall through to an active group.
+		const isInActiveGroups = (id: string) =>
+			groups.some((group) => group.rows.some((row) => row.id === id));
+
+		let nextWorkspaceId: string | null;
+		if (
+			selectedWorkspaceId &&
+			hasWorkspaceId(selectedWorkspaceId, groups, archivedSummaries)
+		) {
+			nextWorkspaceId = selectedWorkspaceId;
+		} else if (
+			settings.lastWorkspaceId &&
+			isInActiveGroups(settings.lastWorkspaceId)
+		) {
+			nextWorkspaceId = settings.lastWorkspaceId;
+		} else {
+			nextWorkspaceId =
+				findInitialWorkspaceId(groups) ?? archivedSummaries[0]?.id ?? null;
+		}
+
+		if (nextWorkspaceId !== selectedWorkspaceId) {
+			onSelectWorkspace(nextWorkspaceId);
+		}
+	}, [
+		autoSelectEnabled,
+		archivedQuery.data,
+		archivedSummaries,
+		groups,
+		groupsQuery.data,
+		groupsQuery.isFetching,
+		onSelectWorkspace,
+		selectedWorkspaceId,
+		settings.lastWorkspaceId,
+	]);
+
+	const prefetchWorkspace = useCallback(
+		(workspaceId: string) => {
+			void (async () => {
+				// Kick off the git-status prefetch immediately — it's the single
+				// data source that gates the sidebar hover card and runs `git
+				// status` synchronously, which can take 100–500ms. Starting it
+				// in parallel with the detail/session prefetch means by the
+				// time the HoverCard's openDelay (~400ms) elapses, the data is
+				// usually already cached.
+				void queryClient.prefetchQuery(
+					workspaceGitActionStatusQueryOptions(workspaceId),
+				);
+				const [workspaceDetail, workspaceSessions] = await Promise.all([
+					queryClient.ensureQueryData(workspaceDetailQueryOptions(workspaceId)),
+					queryClient.ensureQueryData(
+						workspaceSessionsQueryOptions(workspaceId),
+					),
+				]);
+				const sessionId =
+					workspaceDetail?.activeSessionId ??
+					workspaceSessions.find((session) => session.active)?.id ??
+					workspaceSessions[0]?.id ??
+					null;
+
+				if (sessionId) {
+					await queryClient.prefetchQuery(
+						sessionThreadMessagesQueryOptions(sessionId),
+					);
+				}
+			})();
+		},
+		[queryClient],
+	);
+
+	const refetchNavigation = useCallback(async () => {
+		// Sidebar lists are reconciled through the gate so a concurrent
+		// archive / restore / pin can't be clobbered by this refresh.
+		// The fetchQuery calls below still pull canonical data — they're
+		// what wires the loadedGroups / loadedArchived return values.
+		requestSidebarReconcile(queryClient);
+		await queryClient.invalidateQueries({
+			queryKey: helmorQueryKeys.repositories,
+		});
+
+		const [loadedGroups, loadedArchived] = await Promise.all([
+			queryClient.fetchQuery(workspaceGroupsQueryOptions()),
+			queryClient.fetchQuery(archivedWorkspacesQueryOptions()),
+		]);
+
+		return {
+			loadedGroups,
+			loadedArchived,
+		};
+	}, [queryClient]);
+
+	const invalidateWorkspaceSummary = useCallback(
+		async (workspaceId: string, opts?: { skipSidebarFlush?: boolean }) => {
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: helmorQueryKeys.workspaceDetail(workspaceId),
+				}),
+				queryClient.invalidateQueries({
+					queryKey: helmorQueryKeys.workspaceSessions(workspaceId),
+				}),
+			]);
+			if (!opts?.skipSidebarFlush) {
+				// `requestSidebarReconcile` is itself gated, so callers
+				// that hold a sidebar mutation will see this turn into a
+				// no-op until the active mutation releases the gate.
+				requestSidebarReconcile(queryClient);
+			}
+		},
+		[queryClient],
+	);
+
+	const handleSelectWorkspace = useCallback(
+		(workspaceId: string) => {
+			onSelectWorkspace(workspaceId);
+		},
+		[onSelectWorkspace],
+	);
+
+	const handleMarkWorkspaceUnread = useCallback(
+		(workspaceId: string) => {
+			const previousGroups = queryClient.getQueryData(
+				helmorQueryKeys.workspaceGroups,
+			);
+			const previousArchived = queryClient.getQueryData(
+				helmorQueryKeys.archivedWorkspaces,
+			);
+			const previousDetail = queryClient.getQueryData(
+				helmorQueryKeys.workspaceDetail(workspaceId),
+			);
+
+			// Optimistic flash of the red dot. The backend sets
+			// `workspaces.unread = 1` directly without touching sessions, so
+			// mirror that here: flip `workspaceUnread` + `hasUnread`, leave
+			// `unreadSessionCount` alone. The post-IPC invalidation backfills.
+			queryClient.setQueryData(helmorQueryKeys.workspaceGroups, (current) =>
+				Array.isArray(current)
+					? (current as typeof groups).map((group) => ({
+							...group,
+							rows: group.rows.map((row) =>
+								row.id === workspaceId
+									? { ...row, hasUnread: true, workspaceUnread: 1 }
+									: row,
+							),
+						}))
+					: current,
+			);
+			queryClient.setQueryData(helmorQueryKeys.archivedWorkspaces, (current) =>
+				Array.isArray(current)
+					? (current as typeof archivedSummaries).map((summary) =>
+							summary.id === workspaceId
+								? { ...summary, hasUnread: true, workspaceUnread: 1 }
+								: summary,
+						)
+					: current,
+			);
+			queryClient.setQueryData(
+				helmorQueryKeys.workspaceDetail(workspaceId),
+				(current) =>
+					current
+						? {
+								...(current as Record<string, unknown>),
+								hasUnread: true,
+								workspaceUnread: 1,
+							}
+						: current,
+			);
+
+			void markWorkspaceUnread(workspaceId)
+				.then(() =>
+					invalidateWorkspaceSummary(workspaceId, {
+						skipSidebarFlush: true,
+					}),
+				)
+				.catch((error) => {
+					queryClient.setQueryData(
+						helmorQueryKeys.workspaceGroups,
+						previousGroups,
+					);
+					queryClient.setQueryData(
+						helmorQueryKeys.archivedWorkspaces,
+						previousArchived,
+					);
+					queryClient.setQueryData(
+						helmorQueryKeys.workspaceDetail(workspaceId),
+						previousDetail,
+					);
+					pushWorkspaceToast(
+						describeUnknownError(
+							error,
+							translateSource("navUnableMarkWorkspaceUnread"),
+						),
+					);
+				});
+		},
+		[invalidateWorkspaceSummary, pushWorkspaceToast, queryClient],
+	);
+
+	const handleTogglePin = useCallback(
+		async (workspaceId: string, currentlyPinned: boolean) => {
+			// Gate sidebar flushes so concurrent mark-read / mark-unread don't
+			// refetch workspaceGroups mid-flight and clobber the optimistic
+			// pin/unpin move (the row migrates between Pinned and its status
+			// group).
+			const releaseSidebar = holdSidebarMutation(queryClient);
+			queryClient.setQueryData(helmorQueryKeys.workspaceGroups, (current) => {
+				if (!Array.isArray(current)) {
+					return current;
+				}
+				const groupsCopy = current as typeof groups;
+
+				type Row = (typeof groups)[number]["rows"][number];
+				let foundRow: Row | null = null;
+				const withoutRow = groupsCopy.map((group) => {
+					const index = group.rows.findIndex((row) => row.id === workspaceId);
+					if (index === -1) {
+						return group;
+					}
+					foundRow = group.rows[index];
+					return {
+						...group,
+						rows: [
+							...group.rows.slice(0, index),
+							...group.rows.slice(index + 1),
+						],
+					};
+				});
+
+				if (!foundRow) {
+					return current;
+				}
+				const row = foundRow as Row;
+				const updatedRow: Row = {
+					...row,
+					pinnedAt: currentlyPinned ? null : new Date().toISOString(),
+				};
+
+				const targetGroupId = workspaceGroupIdFromStatus(
+					updatedRow.status,
+					updatedRow.pinnedAt,
+				);
+
+				return withoutRow.map((group) =>
+					group.id === targetGroupId
+						? { ...group, rows: [updatedRow, ...group.rows] }
+						: group,
+				);
+			});
+
+			try {
+				if (currentlyPinned) {
+					await unpinWorkspace(workspaceId);
+				} else {
+					await pinWorkspace(workspaceId);
+				}
+				await invalidateWorkspaceSummary(workspaceId);
+			} catch (error) {
+				// Error rollback — gate is still held; releasing below
+				// reconciles, which pulls the canonical post-failure
+				// state from the server.
+				pushWorkspaceToast(
+					describeUnknownError(
+						error,
+						translateSource("navUnableUpdatePinState"),
+					),
+				);
+			} finally {
+				releaseSidebar();
+			}
+		},
+		[invalidateWorkspaceSummary, pushWorkspaceToast, queryClient],
+	);
+
+	const handleSetWorkspaceStatus = useCallback(
+		async (workspaceId: string, status: WorkspaceStatus) => {
+			try {
+				await setWorkspaceStatus(workspaceId, status);
+				requestSidebarReconcile(queryClient);
+			} catch (error) {
+				pushWorkspaceToast(
+					describeUnknownError(error, translateSource("navUnableSetStatus")),
+				);
+			}
+		},
+		[pushWorkspaceToast, queryClient],
+	);
+
+	const handleMoveRepositoryInSidebar = useCallback(
+		async (repoId: string, beforeRepoId: string | null) => {
+			// Optimistic: rewrite `repoSidebarOrder` on every row whose repo
+			// participates in the reorder, so `regroupByRepo` re-buckets in
+			// the new order immediately.
+			//
+			// On success we deliberately do NOT invalidate the sidebar query —
+			// the optimistic cache already mirrors the final state. A refetch
+			// here only swaps the array reference, which is what users see as
+			// a flicker right after dropping. The next natural refetch (focus
+			// / mount / another mutation) reconciles `repos.display_order` to
+			// the canonical sparse values; the relative order is identical.
+			queryClient.setQueryData(
+				helmorQueryKeys.workspaceGroups,
+				(current: WorkspaceGroup[] | undefined) =>
+					applyRepoReorder(current, repoId, beforeRepoId),
+			);
+
+			try {
+				await moveRepositoryInSidebar(repoId, beforeRepoId);
+			} catch (error) {
+				void queryClient.invalidateQueries({
+					queryKey: helmorQueryKeys.workspaceGroups,
+				});
+				pushWorkspaceToast(
+					describeUnknownError(
+						error,
+						translateSource("navUnableReorderRepository"),
+					),
+				);
+			}
+		},
+		[pushWorkspaceToast, queryClient],
+	);
+
+	const handleMoveWorkspaceInSidebar = useCallback(
+		async (
+			workspaceId: string,
+			targetGroupId: string,
+			beforeWorkspaceId: string | null,
+		) => {
+			queryClient.setQueryData(
+				helmorQueryKeys.workspaceGroups,
+				(current: WorkspaceGroup[] | undefined) =>
+					reorderWorkspaceInSidebar(
+						current,
+						workspaceId,
+						targetGroupId,
+						beforeWorkspaceId,
+					),
+			);
+
+			try {
+				await moveWorkspaceInSidebar(
+					workspaceId,
+					targetGroupId,
+					beforeWorkspaceId,
+				);
+				// Detail invalidate is fine — it only affects the inspector,
+				// not the sidebar list — but we skip the sidebar flush so the
+				// optimistic cache stays in place and the row doesn't visibly
+				// jump when the refetch returns the same relative ordering
+				// with different display_order values.
+				await invalidateWorkspaceSummary(workspaceId, {
+					skipSidebarFlush: true,
+				});
+			} catch (error) {
+				void queryClient.invalidateQueries({
+					queryKey: helmorQueryKeys.workspaceGroups,
+				});
+				pushWorkspaceToast(
+					describeUnknownError(
+						error,
+						translateSource("navUnableMoveWorkspace"),
+					),
+				);
+			}
+		},
+		[invalidateWorkspaceSummary, pushWorkspaceToast, queryClient],
+	);
+
+	const handleCreateWorkspaceFromRepo = useCallback(
+		async (repoId: string) => {
+			if (creatingWorkspaceRepoId) {
+				return;
+			}
+
+			const repository = (repositoriesQuery.data ?? []).find(
+				(item) => item.id === repoId,
+			);
+			if (!repository) {
+				pushWorkspaceToast(
+					translateSource("navUnableResolveRepositoryForCreation"),
+				);
+				return;
+			}
+
+			const previousSelection = selectedWorkspaceId;
+			setCreatingWorkspaceRepoId(repoId);
+
+			let prepareResponse: Awaited<ReturnType<typeof prepareWorkspaceFromRepo>>;
+			try {
+				// Phase 1 — fast backend prep (<20ms). Blocks until we have
+				// the real workspace/session ids, directory name, branch,
+				// and repo scripts. Nothing is painted yet; the sidebar +
+				// panel are still showing the previously selected workspace.
+				prepareResponse = await prepareWorkspaceFromRepo(repoId);
+			} catch (error) {
+				setCreatingWorkspaceRepoId(null);
+				pushWorkspaceToast(
+					describeUnknownError(
+						error,
+						translateSource("navUnableCreateWorkspace"),
+					),
+				);
+				return;
+			}
+
+			// Phase 1 succeeded. Paint immediately using the real metadata —
+			// no optimistic title, no optimistic scripts, no placeholder.
+			const createdAt = new Date().toISOString();
+			const preparedRow = createPreparedWorkspaceRow(
+				repository,
+				prepareResponse,
+			);
+			const preparedSession = createOptimisticWorkspaceSession(
+				prepareResponse.workspaceId,
+				prepareResponse.initialSessionId,
+				createdAt,
+			);
+			setPendingCreations((current) => {
+				const next = new Map(current);
+				next.set(prepareResponse.workspaceId, {
+					entry: {
+						repoId,
+						row: preparedRow,
+						stage: "creating",
+						resolvedWorkspaceId: prepareResponse.workspaceId,
+					},
+					previousSelection,
+				});
+				return next;
+			});
+			queryClient.setQueryData<WorkspaceDetail | null>(
+				helmorQueryKeys.workspaceDetail(prepareResponse.workspaceId),
+				() => ({
+					...createOptimisticCreatingWorkspaceDetail(
+						preparedRow,
+						repoId,
+						prepareResponse.initialSessionId,
+					),
+					// Populate branch/remote fields from Phase 1's real
+					// values — the helper defaults these to null, but the
+					// inspector computes `workspaceTargetBranch` from them
+					// (`${remote}/${intendedTargetBranch || defaultBranch}`)
+					// and the ChangesSection flips `branchSwitching=true`
+					// whenever `workspaceTargetBranch` changes within the
+					// same workspace. Leaving these null during Phase 1
+					// means the value flips `null → "origin/main"` when the
+					// real detail lands, briefly flashing the "Remote"
+					// BranchDiffSection header. Fresh workspace points at
+					// `defaultBranch` for both initialization parent and
+					// intended target, matching what Phase 2 writes.
+					remote: repository.remote ?? "origin",
+					defaultBranch: prepareResponse.defaultBranch,
+					initializationParentBranch: prepareResponse.defaultBranch,
+					intendedTargetBranch: prepareResponse.defaultBranch,
+				}),
+			);
+			queryClient.setQueryData<WorkspaceSessionSummary[]>(
+				helmorQueryKeys.workspaceSessions(prepareResponse.workspaceId),
+				[preparedSession],
+			);
+			// Empty thread array — the panel renders the final "nothing here
+			// yet" state from the first frame instead of falling through to
+			// the cold placeholder.
+			queryClient.setQueryData(
+				[
+					...helmorQueryKeys.sessionMessages(prepareResponse.initialSessionId),
+					"thread",
+				],
+				[],
+			);
+			// Real repo scripts delivered by Phase 1 — the EmptyState shows
+			// the correct "missing script" button count immediately.
+			queryClient.setQueryData(
+				helmorQueryKeys.repoScripts(repoId, prepareResponse.workspaceId),
+				prepareResponse.repoScripts,
+			);
+			// Seed git + PR statuses so the inspector's Actions section
+			// paints its final "fresh workspace" empty rows from the first
+			// frame — otherwise the query is in-flight, `data` is undefined
+			// and the UI falls back to `EMPTY_*_STATUS` which shows the
+			// misleading "Sync status unavailable" / "Waiting for PR review"
+			// placeholders until the short-circuited backend responds a few
+			// ms later. Values mirror the Rust short-circuits in
+			// `get_workspace_git_action_status` and
+			// `get_workspace_forge_action_status` — keep them in sync.
+			queryClient.setQueryData(
+				helmorQueryKeys.workspaceGitActionStatus(prepareResponse.workspaceId),
+				{
+					uncommittedCount: 0,
+					conflictCount: 0,
+					syncTargetBranch: prepareResponse.defaultBranch,
+					syncStatus: "upToDate",
+					behindTargetCount: 0,
+					remoteTrackingRef: null,
+					aheadOfRemoteCount: 0,
+					pushStatus: "unpublished",
+				},
+			);
+			queryClient.setQueryData(
+				helmorQueryKeys.workspaceChangeRequest(prepareResponse.workspaceId),
+				null,
+			);
+			queryClient.setQueryData(
+				helmorQueryKeys.workspaceForgeActionStatus(prepareResponse.workspaceId),
+				{
+					changeRequest: null,
+					reviewDecision: null,
+					mergeable: null,
+					deployments: [],
+					checks: [],
+					remoteState: "noPr",
+					message: null,
+				},
+			);
+			onSelectWorkspace(prepareResponse.workspaceId);
+
+			// Phase 2 — slow git worktree creation (~200ms-2s). Runs in the
+			// background so the UI is already interactive. State flips from
+			// "initializing" → "ready"/"setup_pending" when it completes;
+			// the only visible change is the composer enabling.
+			finalizeWorkspaceFromRepo(prepareResponse.workspaceId)
+				.then((finalized) => {
+					queryClient.setQueryData<WorkspaceDetail | null>(
+						helmorQueryKeys.workspaceDetail(prepareResponse.workspaceId),
+						(current) =>
+							current ? { ...current, state: finalized.finalState } : current,
+					);
+					setPendingCreations((current) => {
+						const pending = current.get(prepareResponse.workspaceId);
+						if (!pending) {
+							return current;
+						}
+						const next = new Map(current);
+						next.set(prepareResponse.workspaceId, {
+							...pending,
+							entry: {
+								...pending.entry,
+								row: { ...pending.entry.row, state: finalized.finalState },
+								stage: "confirmed",
+							},
+						});
+						return next;
+					});
+					void queryClient.invalidateQueries({
+						queryKey: helmorQueryKeys.workspaceDetail(
+							prepareResponse.workspaceId,
+						),
+					});
+					// Phase 1 probed helmor.json at the source repo root, which
+					// matches the worktree for a fresh clone. If the user had
+					// uncommitted local edits to helmor.json the two can
+					// diverge — invalidate so the canonical worktree-side
+					// probe runs once the dir exists.
+					void queryClient.invalidateQueries({
+						queryKey: helmorQueryKeys.repoScripts(
+							repoId,
+							prepareResponse.workspaceId,
+						),
+					});
+					// Same story for git status — we seeded 0/0/UpToDate
+					// during Phase 1, but once the worktree is on disk the
+					// canonical git query returns the real tree state (still
+					// 0/0 in practice for a fresh clone, but invalidate so
+					// any divergence — e.g. a setup script that edited
+					// files — shows up promptly).
+					void queryClient.invalidateQueries({
+						queryKey: helmorQueryKeys.workspaceGitActionStatus(
+							prepareResponse.workspaceId,
+						),
+					});
+					prefetchWorkspace(prepareResponse.workspaceId);
+					void refetchNavigation();
+				})
+				.catch((error) => {
+					// Rust already cleaned up the DB row + worktree. Tear
+					// down the frontend mirror so the sidebar doesn't show
+					// a ghost "initializing" workspace.
+					setPendingCreations((current) => {
+						if (!current.has(prepareResponse.workspaceId)) {
+							return current;
+						}
+						const next = new Map(current);
+						next.delete(prepareResponse.workspaceId);
+						return next;
+					});
+					queryClient.removeQueries({
+						queryKey: helmorQueryKeys.workspaceDetail(
+							prepareResponse.workspaceId,
+						),
+						exact: true,
+					});
+					queryClient.removeQueries({
+						queryKey: helmorQueryKeys.workspaceSessions(
+							prepareResponse.workspaceId,
+						),
+						exact: true,
+					});
+					queryClient.removeQueries({
+						queryKey: [
+							...helmorQueryKeys.sessionMessages(
+								prepareResponse.initialSessionId,
+							),
+							"thread",
+						],
+						exact: true,
+					});
+					queryClient.removeQueries({
+						queryKey: helmorQueryKeys.repoScripts(
+							repoId,
+							prepareResponse.workspaceId,
+						),
+						exact: true,
+					});
+					queryClient.removeQueries({
+						queryKey: helmorQueryKeys.workspaceGitActionStatus(
+							prepareResponse.workspaceId,
+						),
+						exact: true,
+					});
+					queryClient.removeQueries({
+						queryKey: helmorQueryKeys.workspaceChangeRequest(
+							prepareResponse.workspaceId,
+						),
+						exact: true,
+					});
+					queryClient.removeQueries({
+						queryKey: helmorQueryKeys.workspaceForge(
+							prepareResponse.workspaceId,
+						),
+						exact: true,
+					});
+					queryClient.removeQueries({
+						queryKey: helmorQueryKeys.workspaceForgeActionStatus(
+							prepareResponse.workspaceId,
+						),
+						exact: true,
+					});
+					// Read current selection via ref — the closure's
+					// `selectedWorkspaceId` is the value from when the user
+					// clicked create, which is before `onSelectWorkspace`
+					// landed the new id, so comparing against the captured
+					// value would always miss.
+					if (selectedWorkspaceIdRef.current === prepareResponse.workspaceId) {
+						onSelectWorkspace(
+							previousSelection ?? findInitialWorkspaceId(groups),
+						);
+					}
+					pushWorkspaceToast(
+						describeUnknownError(
+							error,
+							translateSource("navUnableCreateWorkspace"),
+						),
+					);
+					void refetchNavigation();
+				})
+				.finally(() => {
+					setCreatingWorkspaceRepoId(null);
+				});
+		},
+		[
+			creatingWorkspaceRepoId,
+			groups,
+			onSelectWorkspace,
+			prefetchWorkspace,
+			pushWorkspaceToast,
+			queryClient,
+			repositoriesQuery.data,
+			refetchNavigation,
+			selectedWorkspaceId,
+		],
+	);
+
+	const applyAddRepositoryResponse = useCallback(
+		async (response: AddRepositoryResponse) => {
+			await refetchNavigation();
+			if (response.selectedWorkspaceId) {
+				// Re-add of an existing repo with a visible workspace —
+				// jump straight to it, same as before.
+				prefetchWorkspace(response.selectedWorkspaceId);
+				onSelectWorkspace(response.selectedWorkspaceId);
+				if (!response.createdRepository) {
+					pushWorkspaceToast(
+						translateSource("navSwitchedToExistingWorkspace"),
+						translateSource("navRepositoryAlreadyAdded"),
+						"default",
+					);
+				}
+				return;
+			}
+			// No visible workspace to focus → land on the start page with
+			// the new repo selected so the user picks branch + mode.
+			onAddRepositoryNeedsStart?.(response.repositoryId);
+			if (!response.createdRepository) {
+				pushWorkspaceToast(
+					translateSource("navRepositoryAlreadyAddedOpenedStart"),
+					translateSource("navRepositoryAlreadyAdded"),
+					"default",
+				);
+			}
+		},
+		[
+			onAddRepositoryNeedsStart,
+			onSelectWorkspace,
+			prefetchWorkspace,
+			pushWorkspaceToast,
+			refetchNavigation,
+		],
+	);
+
+	const handleAddRepository = useCallback(async () => {
+		if (addingRepository) {
+			return;
+		}
+
+		setAddingRepository(true);
+
+		try {
+			const defaults = await loadAddRepositoryDefaults();
+			setCloneDefaultDirectory(defaults.lastCloneDirectory ?? null);
+			const selection = await open({
+				directory: true,
+				multiple: false,
+				defaultPath: defaults.lastCloneDirectory ?? undefined,
+			});
+			const selectedPath = Array.isArray(selection) ? selection[0] : selection;
+
+			if (!selectedPath) {
+				return;
+			}
+
+			const response = await addRepositoryFromLocalPath(selectedPath);
+			await applyAddRepositoryResponse(response);
+		} catch (error) {
+			pushWorkspaceToast(
+				describeUnknownError(error, translateSource("navUnableAddRepository")),
+			);
+		} finally {
+			setAddingRepository(false);
+		}
+	}, [addingRepository, applyAddRepositoryResponse, pushWorkspaceToast]);
+
+	const handleOpenCloneDialog = useCallback(() => {
+		setIsCloneDialogOpen(true);
+		// Lazy-load the last-used clone directory so the dialog pre-fills it.
+		// Errors here are non-fatal — the dialog still works without a default.
+		void loadAddRepositoryDefaults()
+			.then((defaults) => {
+				setCloneDefaultDirectory(defaults.lastCloneDirectory ?? null);
+			})
+			.catch(() => {
+				/* swallow: dialog will just have an empty default */
+			});
+	}, []);
+
+	const handleCloneFromUrl = useCallback(
+		async (args: { gitUrl: string; cloneDirectory: string }) => {
+			const response = await cloneRepositoryFromUrl(args);
+			await applyAddRepositoryResponse(response);
+			setCloneDefaultDirectory(args.cloneDirectory);
+		},
+		[applyAddRepositoryResponse],
+	);
+
+	const handleDeleteWorkspace = useCallback(
+		(workspaceId: string) => {
+			// Tear down any live terminal shells in this workspace so they
+			// don't keep running in the background after the workspace is
+			// gone from the UI.
+			closeAllTerminalsForWorkspace(workspaceId);
+			const wasSelected = selectedWorkspaceId === workspaceId;
+			setPendingArchives((current) => {
+				if (!current.has(workspaceId)) {
+					return current;
+				}
+				const next = new Map(current);
+				next.delete(workspaceId);
+				return next;
+			});
+			const previousGroups = queryClient.getQueryData(
+				helmorQueryKeys.workspaceGroups,
+			);
+			const previousArchived = queryClient.getQueryData(
+				helmorQueryKeys.archivedWorkspaces,
+			);
+
+			queryClient.setQueryData(helmorQueryKeys.workspaceGroups, (current) =>
+				Array.isArray(current)
+					? (current as typeof groups).map((group) => ({
+							...group,
+							rows: group.rows.filter((row) => row.id !== workspaceId),
+						}))
+					: current,
+			);
+			queryClient.setQueryData(helmorQueryKeys.archivedWorkspaces, (current) =>
+				Array.isArray(current)
+					? (current as typeof archivedSummaries).filter(
+							(summary) => summary.id !== workspaceId,
+						)
+					: current,
+			);
+
+			if (selectedWorkspaceId === workspaceId) {
+				// Pick the neighbour so virtualizer doesn't fling to the top.
+				const optimisticGroups =
+					(queryClient.getQueryData(
+						helmorQueryKeys.workspaceGroups,
+					) as typeof groups) ?? [];
+				const nextArchivedRows = archivedRows.filter(
+					(row) => row.id !== workspaceId,
+				);
+				const nextWorkspaceId = findReplacementWorkspaceIdAfterRemoval({
+					currentGroups: groups,
+					currentArchivedRows: archivedRows,
+					nextGroups: optimisticGroups,
+					nextArchivedRows,
+					removedWorkspaceId: workspaceId,
+				});
+				if (nextWorkspaceId) {
+					prefetchWorkspace(nextWorkspaceId);
+				}
+				onSelectWorkspace(nextWorkspaceId);
+			}
+
+			const releaseSidebar = holdSidebarMutation(queryClient);
+			void permanentlyDeleteWorkspace(workspaceId)
+				.catch((error) => {
+					queryClient.setQueryData(
+						helmorQueryKeys.workspaceGroups,
+						previousGroups,
+					);
+					queryClient.setQueryData(
+						helmorQueryKeys.archivedWorkspaces,
+						previousArchived,
+					);
+					if (wasSelected) {
+						onSelectWorkspace(workspaceId);
+					}
+					pushWorkspaceToast(
+						describeUnknownError(
+							error,
+							translateSource("navUnableDeleteWorkspace"),
+						),
+						translateSource("navDeleteFailed"),
+						"destructive",
+					);
+				})
+				.finally(releaseSidebar);
+		},
+		[
+			archivedRows,
+			groups,
+			onSelectWorkspace,
+			prefetchWorkspace,
+			pushWorkspaceToast,
+			queryClient,
+			selectedWorkspaceId,
+		],
+	);
+
+	const pushPermanentDeleteRecoveryToast = useCallback(
+		(
+			workspaceId: string,
+			title: string,
+			error: unknown,
+			fallbackMessage: string,
+		) => {
+			pushWorkspaceToast(
+				describeUnknownError(error, fallbackMessage),
+				title,
+				"destructive",
+				{
+					persistent: true,
+					action: {
+						label: translateSource("permanentlyDelete"),
+						destructive: true,
+						onClick: () => {
+							handleDeleteWorkspace(workspaceId);
+						},
+					},
+				},
+			);
+		},
+		[handleDeleteWorkspace, pushWorkspaceToast],
+	);
+
+	const notifyTargetBranchRestore = useCallback(
+		(targetBranch: string | null) => {
+			if (!targetBranch) {
+				return;
+			}
+			pushWorkspaceToast(
+				formatSource("navRestoredFromTargetBranchDetail", { targetBranch }),
+				translateSource("navRestoredFromTargetBranch"),
+				"default",
+			);
+		},
+		[pushWorkspaceToast],
+	);
+
+	// Keep the forward-ref used by `pushWorkspaceErrorToast` in sync.
+	useEffect(() => {
+		handleDeleteWorkspaceRef.current = handleDeleteWorkspace;
+	}, [handleDeleteWorkspace]);
+
+	// Keep the forward-ref used by `rollbackArchivedWorkspace` in sync.
+	useEffect(() => {
+		pushPermanentDeleteRecoveryToastRef.current =
+			pushPermanentDeleteRecoveryToast;
+	}, [pushPermanentDeleteRecoveryToast]);
+
+	const notifyBranchRename = useCallback(
+		(rename: { original: string; actual: string }) => {
+			pushWorkspaceToast(
+				formatSource("navBranchTakenRestoredOn", {
+					original: rename.original,
+					actual: rename.actual,
+				}),
+				translateSource("navBranchRenamed"),
+			);
+		},
+		[pushWorkspaceToast],
+	);
+
+	const handleArchiveWorkspace = useCallback(
+		(workspaceId: string) => {
+			void (async () => {
+				if (archivingWorkspaceIds.has(workspaceId)) {
+					return;
+				}
+
+				updateArchivingWorkspaceId(workspaceId, true);
+
+				try {
+					await prepareArchiveWorkspace(workspaceId);
+				} catch (error) {
+					updateArchivingWorkspaceId(workspaceId, false);
+					pushWorkspaceErrorToast(
+						workspaceId,
+						translateSource("navArchiveFailed"),
+						error,
+						translateSource("navUnableArchiveWorkspace"),
+					);
+					return;
+				}
+
+				const previousGroups =
+					queryClient.getQueryData(helmorQueryKeys.workspaceGroups) ?? groups;
+
+				const moved = {
+					row: null as WorkspaceRow | null,
+					groupId: null as string | null,
+					index: -1,
+				};
+				const optimisticGroups = Array.isArray(previousGroups)
+					? (previousGroups as typeof groups).map((group) => {
+							const index = group.rows.findIndex(
+								(row) => row.id === workspaceId,
+							);
+							if (index === -1) {
+								return group;
+							}
+							moved.row = group.rows[index];
+							moved.groupId = group.id;
+							moved.index = index;
+							return {
+								...group,
+								rows: [
+									...group.rows.slice(0, index),
+									...group.rows.slice(index + 1),
+								],
+							};
+						})
+					: undefined;
+
+				if (
+					!moved.row ||
+					!optimisticGroups ||
+					moved.groupId === null ||
+					moved.index < 0
+				) {
+					updateArchivingWorkspaceId(workspaceId, false);
+					pushWorkspaceToast(
+						translateSource("navUnableFindWorkspaceCache"),
+						translateSource("navArchiveFailed"),
+						"destructive",
+					);
+					return;
+				}
+
+				const sortTimestamp = Date.now();
+				const pendingArchive: PendingArchiveEntry = {
+					row: {
+						...moved.row,
+						state: "archived",
+					},
+					sourceGroupId: moved.groupId,
+					sourceIndex: moved.index,
+					stage: "running",
+					sortTimestamp,
+				};
+				setPendingArchives((current) => {
+					const next = new Map(current);
+					next.set(workspaceId, pendingArchive);
+					return next;
+				});
+
+				// Gate concurrent mark-read / mark-unread flushes so they don't
+				// clobber the optimistic move-to-archived while the backend
+				// archive worker is in flight. The gate lives until the
+				// matching `archive-execution-succeeded` / `-failed` event
+				// fires (see listener effect) or the .catch path rolls back.
+				archiveGate.begin(workspaceId);
+				queryClient.setQueryData(
+					helmorQueryKeys.workspaceGroups,
+					optimisticGroups,
+				);
+
+				// Project the post-archive snapshot through the same visual
+				// pipeline used for the live sidebar so the replacement search
+				// below compares apples to apples — without this, repo-mode
+				// flattens the "before" view by repo bucket and the "after"
+				// view by status bucket, and selection jumps to whichever
+				// workspace happens to share the removed row's flat index in
+				// the wrong layout.
+				const optimisticVisual = projectVisualSidebar(
+					{
+						baseGroups: optimisticGroups,
+						baseArchivedSummaries,
+						pendingArchives: new Map([
+							...pendingArchives,
+							[workspaceId, pendingArchive],
+						]),
+						pendingCreations: new Map(
+							Array.from(pendingCreations.entries()).map(
+								([optimisticWorkspaceId, pendingCreation]) => [
+									optimisticWorkspaceId,
+									pendingCreation.entry,
+								],
+							),
+						),
+					},
+					settings.sidebarGrouping,
+				);
+				const shouldNavigate =
+					!selectedWorkspaceId || selectedWorkspaceId === workspaceId;
+				if (shouldNavigate) {
+					// Advance to the neighbour in the same group (then next group,
+					// then archived) — same as delete. Only fall back to the start
+					// page when nothing is left to select.
+					const nextWorkspaceId = findReplacementWorkspaceIdAfterRemoval({
+						currentGroups: groups,
+						currentArchivedRows: archivedRows,
+						nextGroups: optimisticVisual.groups,
+						nextArchivedRows: optimisticVisual.archivedRows,
+						removedWorkspaceId: workspaceId,
+					});
+					if (nextWorkspaceId) {
+						prefetchWorkspace(nextWorkspaceId);
+						onSelectWorkspace(nextWorkspaceId);
+					} else if (onOpenNewWorkspace) {
+						onOpenNewWorkspace();
+					} else {
+						onSelectWorkspace(null);
+					}
+				}
+
+				void startArchiveWorkspace(workspaceId)
+					.catch((error) => {
+						rollbackArchivedWorkspace(
+							workspaceId,
+							error,
+							translateSource("navUnableArchiveWorkspace"),
+						);
+					})
+					.finally(() => {
+						updateArchivingWorkspaceId(workspaceId, false);
+					});
+			})();
+		},
+		[
+			archivedRows,
+			archiveGate,
+			archivingWorkspaceIds,
+			baseArchivedSummaries,
+			groups,
+			onSelectWorkspace,
+			onOpenNewWorkspace,
+			pendingArchives,
+			pendingCreations,
+			prefetchWorkspace,
+			pushWorkspaceErrorToast,
+			pushWorkspaceToast,
+			queryClient,
+			rollbackArchivedWorkspace,
+			selectedWorkspaceId,
+			settings.sidebarGrouping,
+			updateArchivingWorkspaceId,
+		],
+	);
+
+	const executeRestore = useCallback(
+		(workspaceId: string, targetBranchOverride?: string) => {
+			// Acquire the gate BEFORE any cache writes / selection changes,
+			// so concurrent flushes (mark-read on selection change, git
+			// watcher refs events on worktree (re)appearance, etc.) skip
+			// instead of refetching the still-pre-restore server state and
+			// clobbering the optimistic move from archived → active.
+			const releaseSidebar = holdSidebarMutation(queryClient);
+
+			const previousGroups = queryClient.getQueryData(
+				helmorQueryKeys.workspaceGroups,
+			);
+			const previousArchived = queryClient.getQueryData(
+				helmorQueryKeys.archivedWorkspaces,
+			);
+
+			const archivedSummary = Array.isArray(previousArchived)
+				? (previousArchived as typeof archivedSummaries).find(
+						(summary) => summary.id === workspaceId,
+					)
+				: undefined;
+
+			if (!archivedSummary) {
+				void restoreWorkspace(workspaceId, targetBranchOverride)
+					.then((response) => {
+						prefetchWorkspace(workspaceId);
+						onSelectWorkspace(workspaceId);
+						notifyTargetBranchRestore(response.restoredFromTargetBranch);
+						if (response.branchRename) {
+							notifyBranchRename(response.branchRename);
+						}
+					})
+					.catch((error) => {
+						pushPermanentDeleteRecoveryToast(
+							workspaceId,
+							translateSource("navRestoreFailed"),
+							error,
+							translateSource("navUnableRestoreWorkspace"),
+						);
+					})
+					.finally(releaseSidebar);
+				return;
+			}
+
+			queryClient.setQueryData(helmorQueryKeys.archivedWorkspaces, (current) =>
+				Array.isArray(current)
+					? (current as typeof archivedSummaries).filter(
+							(summary) => summary.id !== workspaceId,
+						)
+					: current,
+			);
+
+			const placeholderRow = summaryToArchivedRow({
+				...archivedSummary,
+				state: "ready",
+			});
+			const targetGroupId = workspaceGroupIdFromStatus(
+				archivedSummary.status,
+				archivedSummary.pinnedAt,
+			);
+			// Sorted insert by `display_order ASC, created_at DESC` (same key the
+			// backend uses for live groups) so the row lands where the refetch
+			// will place it — avoids the reorder flicker we'd get from a naive
+			// prepend or a createdAt-only sort. The archived summary carries
+			// `displayOrder`, which restore_workspace_impl does NOT reset.
+			queryClient.setQueryData(helmorQueryKeys.workspaceGroups, (current) =>
+				Array.isArray(current)
+					? (current as typeof groups).map((group) =>
+							group.id === targetGroupId
+								? {
+										...group,
+										rows: insertRowBySidebarOrder(group.rows, placeholderRow),
+									}
+								: group,
+						)
+					: current,
+			);
+
+			// Defer prefetch + selection until backend restore completes.
+			// The sidebar row already moved to its target group via the
+			// optimistic cache writes above (and shows a spinner via
+			// `restoringWorkspaceId`), so the user gets immediate visual
+			// feedback. Selecting before restore_impl finishes triggers a
+			// fan-out of queries against a still-archived workspace — git
+			// status against a missing worktree, slash-command prewarm
+			// that spawns a fresh `claude-code` subprocess (~4s),
+			// per-workspace fetch, forge HTTP, avatar lookup — and that
+			// fan-out is what freezes the webview for several seconds.
+			// Waiting until the worktree exists means every downstream
+			// query sees a real workspace and resolves in a single
+			// frame's worth of work.
+			void restoreWorkspace(workspaceId, targetBranchOverride)
+				.then(async (response) => {
+					await Promise.all([
+						queryClient.invalidateQueries({
+							queryKey: helmorQueryKeys.workspaceDetail(workspaceId),
+						}),
+						queryClient.invalidateQueries({
+							queryKey: helmorQueryKeys.workspaceSessions(workspaceId),
+						}),
+					]);
+					prefetchWorkspace(workspaceId);
+					onSelectWorkspace(workspaceId);
+					if (response.branchRename) {
+						notifyBranchRename(response.branchRename);
+					}
+					notifyTargetBranchRestore(response.restoredFromTargetBranch);
+				})
+				.catch((error) => {
+					queryClient.setQueryData(
+						helmorQueryKeys.workspaceGroups,
+						previousGroups,
+					);
+					queryClient.setQueryData(
+						helmorQueryKeys.archivedWorkspaces,
+						previousArchived,
+					);
+					pushPermanentDeleteRecoveryToast(
+						workspaceId,
+						translateSource("navRestoreFailed"),
+						error,
+						translateSource("navUnableRestoreWorkspace"),
+					);
+				})
+				.finally(releaseSidebar);
+		},
+		[
+			notifyBranchRename,
+			notifyTargetBranchRestore,
+			onSelectWorkspace,
+			pendingCreations,
+			prefetchWorkspace,
+			pushPermanentDeleteRecoveryToast,
+			queryClient,
+		],
+	);
+
+	// Bridge for surfaces outside the controller (e.g. composer triage Dismiss).
+	useShellEvent("request-archive-workspace", (event) => {
+		handleArchiveWorkspace(event.workspaceId);
+	});
+
+	const handleRestoreWorkspace = useCallback(
+		(workspaceId: string) => {
+			void (async () => {
+				try {
+					const validation = await validateRestoreWorkspace(workspaceId);
+					if (validation.targetBranchConflict) {
+						const { currentBranch, suggestedBranch, remote } =
+							validation.targetBranchConflict;
+						pushWorkspaceToast(
+							formatSource("navBranchNoLongerExistsSwitchTarget", {
+								currentBranch,
+								remote,
+								suggestedBranch,
+							}),
+							translateSource("navTargetBranchChanged"),
+							"default",
+							{
+								persistent: true,
+								action: {
+									label: formatSource("navSwitchToBranch", { suggestedBranch }),
+									onClick: () => executeRestore(workspaceId, suggestedBranch),
+								},
+							},
+						);
+						return;
+					}
+				} catch (error) {
+					pushPermanentDeleteRecoveryToast(
+						workspaceId,
+						translateSource("navRestoreFailed"),
+						error,
+						translateSource("navUnableRestoreWorkspace"),
+					);
+					return;
+				}
+
+				executeRestore(workspaceId);
+			})();
+		},
+		[executeRestore, pushPermanentDeleteRecoveryToast, pushWorkspaceToast],
+	);
+
+	return {
+		addingRepository,
+		archivingWorkspaceIds,
+		archivedRows,
+		availableRepositories: repositoriesQuery.data ?? [],
+		creatingWorkspaceRepoId,
+		cloneDefaultDirectory,
+		groups,
+		sidebarGrouping: settings.sidebarGrouping,
+		sidebarRepoFilterIds: settings.sidebarRepoFilterIds,
+		sidebarSort: settings.sidebarSort,
+		updateSettings,
+		handleAddRepository,
+		handleArchiveWorkspace,
+		handleCloneFromUrl,
+		handleCreateWorkspaceFromRepo,
+		handleDeleteWorkspace,
+		handleMarkWorkspaceUnread,
+		handleOpenCloneDialog,
+		handleRestoreWorkspace,
+		handleSelectWorkspace,
+		handleMoveWorkspaceInSidebar,
+		handleMoveRepositoryInSidebar,
+		handleSetWorkspaceStatus,
+		handleTogglePin,
+		isCloneDialogOpen,
+		prefetchWorkspace,
+		setIsCloneDialogOpen,
+	};
+}

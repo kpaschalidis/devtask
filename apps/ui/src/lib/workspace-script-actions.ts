@@ -1,0 +1,199 @@
+export type WorkspaceScriptType = "setup" | "run" | "archive";
+
+export const WORKSPACE_SCRIPT_PROMPTS: Record<WorkspaceScriptType, string> = {
+	setup: `Please help me initialize the Helmor setup script for this workspace and write the final result into the current workspace's helmor.json.
+
+Context:
+- This setup script runs automatically right after a new workspace is created.
+- Its job is to prepare this worktree so I can start working.
+- It should be used for dependency install, bootstrap, codegen, hooks setup, or filling in local config that the new worktree is missing.
+- It should not start a dev server, enter watch mode, or become a long-running process.
+
+Rules:
+1. Inspect the repository first before asking questions.
+2. Your goal is to actually create or update scripts.setup in helmor.json, not just give advice.
+3. This is a worktree-based workspace. Use the environment variables correctly:
+   - HELMOR_ROOT_PATH: the original repository root, not this workspace worktree path.
+   - HELMOR_WORKSPACE_PATH: the current workspace's worktree path, and the directory where the script runs.
+   - HELMOR_WORKSPACE_NAME: the current workspace name.
+   - HELMOR_DEFAULT_BRANCH: the repository default branch.
+   - HELMOR_PORT: the first port in this workspace's stable, non-overlapping port range.
+   - HELMOR_PORT_COUNT: how many ports are reserved starting at HELMOR_PORT.
+4. Migration from conductor.json:
+   - If helmor.json does not exist but conductor.json exists, copy conductor.json to helmor.json.
+   - Rename every CONDUCTOR_* environment variable reference in helmor.json to its Helmor equivalent. Cover both $VAR and \${VAR} forms. Do this whether helmor.json was just copied or an earlier incomplete migration left stale references:
+     - CONDUCTOR_WORKSPACE_NAME → HELMOR_WORKSPACE_NAME
+     - CONDUCTOR_WORKSPACE_PATH → HELMOR_WORKSPACE_PATH
+     - CONDUCTOR_ROOT_PATH → HELMOR_ROOT_PATH
+     - CONDUCTOR_DEFAULT_BRANCH → HELMOR_DEFAULT_BRANCH
+     - CONDUCTOR_PORT → HELMOR_PORT
+   - After this step, only work on helmor.json.
+5. If the migrated helmor.json already contains scripts.setup, stop and tell me the migration is complete.
+6. Keep setup minimal and idempotent.
+7. Do not hardcode absolute local paths.
+8. Ask at most 3 rounds of questions, and only when they materially change the script design.
+
+What to inspect:
+- helmor.json, conductor.json
+- README and developer docs
+- package.json, lockfiles, workspace config, Cargo.toml, pyproject.toml, go.mod, Gemfile
+- Makefile, justfile
+- .env*, .env.example, .env.local*
+- .gitignore
+- git status --short --ignored
+
+Pay special attention to ignored or untracked local files that a fresh worktree may be missing. If some of them are likely required, identify them clearly before deciding whether setup should copy them from HELMOR_ROOT_PATH into HELMOR_WORKSPACE_PATH.
+
+Your flow:
+1. Inspect silently first.
+2. Tell me:
+   - where you plan to write the setup script
+   - what command(s) you plan to use
+   - why
+   - which local files look like likely migration candidates
+3. Only ask concise blocking questions if needed.
+4. Then create or update helmor.json.
+5. End with a short summary:
+   - which file you changed
+   - the final scripts.setup
+   - any local files that still need confirmation
+   - your key assumptions`,
+	run: `Please help me initialize the Helmor run actions for this workspace and write the final result into the current workspace's helmor.json.
+
+Context:
+- Run actions are named commands I can pick from the Inspector's Run dropdown. Cmd+R fires whichever action is currently selected.
+- One workspace can have several run actions (e.g. "Dev", "Tests", "Lint", "DB"). Each runs in its own PTY, independently startable / stoppable.
+- They are configured via the \`scripts.run\` array in helmor.json. Every entry must have a non-blank \`name\` and a non-blank \`command\` — entries missing either are silently ignored.
+- An entry may also carry an optional \`stopCommand\`: a short cleanup shell snippet that runs (same env + cwd as \`command\`) when I click Stop, before Helmor signals the main process. Use it when the main command leaves external state behind (containers up, services running, ports held by detached children). A second Stop click force-kills, so \`stopCommand\` should be short and non-interactive.
+- An entry may also carry an optional \`mode\`: \`"concurrent"\` (default) or \`"non-concurrent"\`. \`"non-concurrent"\` makes starting a new run of this action stop any other run of the same action across workspaces in the repo — the Exclusive toggle in the UI. Use it when the command binds a fixed port, holds a single named resource (a DB socket, a debugger port, a unique container name), or otherwise can't safely coexist with itself across workspaces.
+
+Required shape (use the array form, even when there is only one action):
+\`\`\`
+{
+  "scripts": {
+    "run": [
+      { "name": "Dev",   "command": "npm run dev" },
+      { "name": "Tests", "command": "npm test" },
+      { "name": "DB",    "command": "docker compose up", "stopCommand": "docker compose down", "mode": "non-concurrent" }
+    ]
+  }
+}
+\`\`\`
+
+A legacy string form (\`"run": "npm dev"\`) is still parsed for backwards compatibility, but DO NOT emit it for new configs — always write the array form so the user can extend the list later without restructuring.
+
+Rules:
+1. Inspect the repository first before asking questions.
+2. Your goal is to actually create or update \`scripts.run\` (the array) in helmor.json, not just give advice.
+3. This is a worktree-based workspace. Use the environment variables correctly:
+   - HELMOR_ROOT_PATH: the original repository root.
+   - HELMOR_WORKSPACE_PATH: the current workspace's worktree path, and the directory where the script runs.
+   - HELMOR_WORKSPACE_NAME: the current workspace name.
+   - HELMOR_DEFAULT_BRANCH: the repository default branch.
+   - HELMOR_PORT: the first port in this workspace's stable, non-overlapping port range.
+   - HELMOR_PORT_COUNT: how many ports are reserved starting at HELMOR_PORT.
+4. Migration from conductor.json:
+   - If helmor.json does not exist but conductor.json exists, copy conductor.json to helmor.json.
+   - Rename every CONDUCTOR_* environment variable reference in helmor.json to its Helmor equivalent. Cover both $VAR and \${VAR} forms. Do this whether helmor.json was just copied or an earlier incomplete migration left stale references:
+     - CONDUCTOR_WORKSPACE_NAME → HELMOR_WORKSPACE_NAME
+     - CONDUCTOR_WORKSPACE_PATH → HELMOR_WORKSPACE_PATH
+     - CONDUCTOR_ROOT_PATH → HELMOR_ROOT_PATH
+     - CONDUCTOR_DEFAULT_BRANCH → HELMOR_DEFAULT_BRANCH
+     - CONDUCTOR_PORT → HELMOR_PORT
+   - After this step, only work on helmor.json.
+   - If the migrated \`scripts.run\` is still in the legacy string form, convert it to the array form (\`[{"name": "Default", "command": "<old string>"}]\`) before writing.
+5. If \`scripts.run\` already exists with one or more valid array entries, stop and tell me the configuration is complete.
+6. Do not overfit any single action to the current task, a single test file, or a one-off command.
+7. Do not quietly choose a heavy, destructive, or highly opinionated command when multiple reasonable defaults exist.
+8. For dev servers or local services, prefer HELMOR_PORT over hardcoded defaults so parallel workspaces do not collide. If the project needs multiple ports, use the range from HELMOR_PORT through HELMOR_PORT + HELMOR_PORT_COUNT - 1.
+9. Action names should be short, capitalized, and describe intent (e.g. "Dev", "Tests", "Lint", "DB"). Avoid duplicates.
+10. Add \`stopCommand\` only for actions whose \`command\` leaves external state behind that won't be cleaned up by killing the process tree — typical cases are \`docker compose up\`, \`supabase start\`, or long-running services that detach. Skip \`stopCommand\` for plain dev servers, test runners, lint, and anything that exits cleanly on SIGTERM.
+11. Set \`"mode": "non-concurrent"\` only when the command can't safely run twice at once in the same repo — it binds a fixed port that doesn't read \`HELMOR_PORT\`, attaches to a single shared resource (named container, exclusive DB lock, debugger port), or otherwise has cross-workspace contention. Leave \`mode\` off (defaulting to concurrent) for everything that reads \`HELMOR_PORT\` or has no shared state — parallel workspaces are the whole point.
+12. Ask at most 3 rounds of questions, and only when they materially change the lineup.
+
+What to inspect:
+- helmor.json, conductor.json
+- README and developer docs
+- package.json, workspace config, Cargo.toml
+- Makefile, justfile
+- docker-compose files
+- existing dev / start / test / serve / worker commands
+
+Your flow:
+1. Inspect silently first.
+2. Find the best 2 to 5 run candidates.
+3. Show me the candidates in a concise list. For each one, explain:
+   - what it likely does
+   - who or what workflow it suits
+   - whether it deserves to be its own named action, or could be folded into another
+   - whether it needs a \`stopCommand\` (per rule 10) and, if so, what that would be
+   - whether it needs \`"mode": "non-concurrent"\` (per rule 11)
+4. Recommend a lineup:
+   - If only ONE candidate genuinely fits, propose a single-entry array (\`[{ "name": "Default", "command": "…" }]\`).
+   - If 2+ fit, propose them all as named entries (\`[{ "name": "Dev", … }, { "name": "Tests", … }]\`).
+5. Ask me to confirm, ideally so I can answer with A / B / C / "all".
+6. After I confirm, create or update helmor.json with the ARRAY form.
+7. End with a short summary:
+   - which file you changed
+   - the final \`scripts.run\` array (formatted JSON)
+   - what each entry does
+   - reminder that I can add or rename actions later by editing helmor.json (or via the repo's Scripts settings panel)`,
+	archive: `Please help me initialize the Helmor archive script for this workspace and write the final result into the current workspace's helmor.json.
+
+Context:
+- This archive script runs when this workspace is archived.
+- Its job is to do light, safe, clearly-scoped cleanup or save a small amount of context before archive.
+- It should not perform dangerous deletion or take over workspace lifecycle management.
+
+Rules:
+1. Inspect the repository and workspace context first before asking questions.
+2. Your goal is to actually create or update scripts.archive in helmor.json, not just give advice.
+3. This is a worktree-based workspace. Use the environment variables correctly:
+   - HELMOR_ROOT_PATH: the original repository root.
+   - HELMOR_WORKSPACE_PATH: the current workspace's worktree path, and the directory where the script runs.
+   - HELMOR_WORKSPACE_NAME: the current workspace name.
+   - HELMOR_DEFAULT_BRANCH: the repository default branch.
+   - HELMOR_PORT: the first port in this workspace's stable, non-overlapping port range.
+   - HELMOR_PORT_COUNT: how many ports are reserved starting at HELMOR_PORT.
+4. Migration from conductor.json:
+   - If helmor.json does not exist but conductor.json exists, copy conductor.json to helmor.json.
+   - Rename every CONDUCTOR_* environment variable reference in helmor.json to its Helmor equivalent. Cover both $VAR and \${VAR} forms. Do this whether helmor.json was just copied or an earlier incomplete migration left stale references:
+     - CONDUCTOR_WORKSPACE_NAME → HELMOR_WORKSPACE_NAME
+     - CONDUCTOR_WORKSPACE_PATH → HELMOR_WORKSPACE_PATH
+     - CONDUCTOR_ROOT_PATH → HELMOR_ROOT_PATH
+     - CONDUCTOR_DEFAULT_BRANCH → HELMOR_DEFAULT_BRANCH
+     - CONDUCTOR_PORT → HELMOR_PORT
+   - After this step, only work on helmor.json.
+5. If the migrated helmor.json already contains scripts.archive, stop and tell me the migration is complete.
+6. Default to conservative behavior.
+7. Ask at most 3 rounds of questions, and only when they materially change the script design.
+8. Without my explicit confirmation, do not write any destructive action such as deleting databases, volumes, caches, build outputs, secrets, logs, screenshots, files outside the workspace, remote resources, or broad rm -rf / git clean behavior.
+
+What to inspect:
+- helmor.json, conductor.json
+- README and developer docs
+- package.json, Cargo.toml
+- Makefile, justfile
+- docker-compose files
+- .env*
+- .gitignore
+- anything suggesting local services, containers, exports, or archive context
+
+Your flow:
+1. Inspect silently first.
+2. Tell me:
+   - where you plan to write the archive script
+   - which candidate archive actions you found
+   - which ones are safe by default
+   - which ones need confirmation
+   - which ones are too risky to write by default
+3. Only ask concise blocking questions if needed.
+4. Then create or update helmor.json.
+5. End with a short summary:
+   - which file you changed
+   - the final scripts.archive
+   - which higher-risk actions you intentionally left out
+   - your key assumptions
+
+If this project does not appear to need an automated archive script, say so clearly and choose the smallest safe result instead of inventing risky behavior.`,
+};
