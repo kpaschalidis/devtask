@@ -59,6 +59,24 @@ describe("work execute", () => {
     expect(getWorkItem(paths, "WORK-123").status).toBe("executing");
   });
 
+  it("injects global and repo-specific implementation knowledge into the execution task", async () => {
+    const { paths } = await createMaterializedWork();
+    const globalMemoryPath = path.join(paths.sharedDir, "improvement", "implementation.md");
+    const repoMemoryPath = path.join(paths.localDir, "improvement", "repos", "backend", "implementation.md");
+    fs.mkdirSync(path.dirname(globalMemoryPath), { recursive: true });
+    fs.mkdirSync(path.dirname(repoMemoryPath), { recursive: true });
+    fs.writeFileSync(globalMemoryPath, "# Implementation\nPreserve public contracts.\n");
+    fs.writeFileSync(repoMemoryPath, "# Backend\nUse repository transactions.\n");
+    vi.mocked(tmux.tmuxSessionExists).mockImplementation((session) => session === "devtask-test-work-123-backend");
+
+    await executeWork(paths, "WORK-123");
+
+    const meta = readTaskMeta(taskMetaPath(paths, "work-123-backend"));
+    const executionTask = fs.readFileSync(path.join(path.dirname(meta.taskPath), "task.execute.md"), "utf8");
+    expect(executionTask).toContain("Preserve public contracts.");
+    expect(executionTask).toContain("Use repository transactions.");
+  });
+
   it("reattaches to an existing active execution session", async () => {
     const { paths, repo } = await createMaterializedWork();
     const metaPath = taskMetaPath(paths, "work-123-backend");

@@ -17,6 +17,7 @@ import { readRunningPhaseRun, updateRunningPhaseRun } from "../infra/session-run
 import { tmuxSessionExists, tmuxSessionName } from "../infra/tmux.js";
 import { loadInstruction } from "../instructions/loader.js";
 import { copySkillsToDir } from "../skills/loader.js";
+import { collectPhaseMemory } from "../improvement-memory.js";
 import { getWorkItem } from "../storage/work-item.js";
 import {
   launchPhaseFresh,
@@ -60,6 +61,7 @@ export const orchestratorPhase: RoleConfig = {
     const contractPath = workItemValidationContractPath(paths, workId);
     const planPath = workItemPlanPath(paths, workId);
     const graphPath = workItemGraphPath(paths, workId);
+    const memory = collectPhaseMemory(paths, "planning");
     return {
       scope: {
         tmuxSession: tmuxSessionName(paths, `orchestrate-${workId}`),
@@ -79,6 +81,7 @@ export const orchestratorPhase: RoleConfig = {
         CONTRACT_PATH: contractPath,
         PLAN_PATH: planPath,
         GRAPH_PATH: graphPath,
+        MEMORY: memory ? `${memory}\n\n` : "",
         ACCEPT_RECOMMENDED_PREAMBLE: opts?.acceptRecommended ? ACCEPT_RECOMMENDED_PREAMBLE : ""
       }),
       startOptions: {

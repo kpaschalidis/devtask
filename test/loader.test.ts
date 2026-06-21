@@ -26,13 +26,15 @@ describe("loadInstruction", () => {
       SPEC_PATH: "/tmp/spec.md",
       CONTRACT_PATH: "/tmp/contract.md",
       PLAN_PATH: "/tmp/plan.md",
-      GRAPH_PATH: "/tmp/graph.json"
+      GRAPH_PATH: "/tmp/graph.json",
+      MEMORY: "planning guidance"
     });
     expect(result).toContain("WORK-42");
     expect(result).not.toContain("{{WORK_ID}}");
     expect(result).not.toContain("{{SOURCE_TYPE}}");
     expect(result).not.toContain("{{PLAN_PATH}}");
     expect(result).not.toContain("{{GRAPH_PATH}}");
+    expect(result).toContain("planning guidance");
   });
 
   it("instructs the orchestrator to write repo context before starting repo-plan workers", () => {
@@ -44,7 +46,8 @@ describe("loadInstruction", () => {
       SPEC_PATH: "/tmp/spec.md",
       CONTRACT_PATH: "/tmp/contract.md",
       PLAN_PATH: "/tmp/plan.md",
-      GRAPH_PATH: "/tmp/graph.json"
+      GRAPH_PATH: "/tmp/graph.json",
+      MEMORY: ""
     });
 
     const contextStep = result.indexOf("--- Step 4: Write per-repo context ---");
@@ -61,11 +64,13 @@ describe("loadInstruction", () => {
       REPO_ID: "backend",
       WORKTREE_PATH: "/tmp/worktree",
       CONTRACT_PATH: "/tmp/contract.md",
-      RESULT_PATH: "/tmp/result.json"
+      RESULT_PATH: "/tmp/result.json",
+      MEMORY: "review guidance"
     });
     expect(result).not.toContain("{{WORK_ID}}");
     expect(result).not.toContain("{{RESULT_PATH}}");
     expect(result).not.toContain("{{CONTRACT_PATH}}");
+    expect(result).toContain("review guidance");
   });
 
   it("throws when the instruction file does not exist", () => {

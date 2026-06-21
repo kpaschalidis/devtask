@@ -22,7 +22,7 @@ Source:
 - artifact: {{SOURCE_ARTIFACT}}
 {{SOURCE_URL_LINE}}
 
---- Step 1: Write the spec ---
+{{MEMORY}}--- Step 1: Write the spec ---
 
 Write the spec to: {{SPEC_PATH}}
 

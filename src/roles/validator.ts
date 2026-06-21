@@ -13,6 +13,7 @@ import { tmuxSessionExists, tmuxSessionName } from "../infra/tmux.js";
 import { loadInstruction } from "../instructions/loader.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { DevtaskError } from "../infra/errors.js";
+import { collectPhaseMemory } from "../improvement-memory.js";
 import {
   launchPhaseFresh,
   launchPhaseResume,
@@ -55,6 +56,7 @@ export const reviewPhase: RoleConfig = {
     const reviewPath = `${reviewDir}/${repoId}.md`;
     const resultPath = `${reviewDir}/${repoId}.json`;
     const contractPath = workItemValidationContractPath(paths, workId);
+    const memory = collectPhaseMemory(paths, "review", { repoId });
     return {
       scope: {
         tmuxSession: tmuxSessionName(resolvePaths(task.repoPath), `review-${workId}-${repoId}`),
@@ -70,7 +72,8 @@ export const reviewPhase: RoleConfig = {
         REPO_ID: task.repoId,
         WORKTREE_PATH: task.worktreePath,
         CONTRACT_PATH: contractPath,
-        RESULT_PATH: resultPath
+        RESULT_PATH: resultPath,
+        MEMORY: memory ? `${memory}\n\n` : ""
       }),
       startOptions: {
         workspacePath: task.worktreePath,
