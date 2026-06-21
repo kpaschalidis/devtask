@@ -35,6 +35,25 @@ describe("loadInstruction", () => {
     expect(result).not.toContain("{{GRAPH_PATH}}");
   });
 
+  it("instructs the orchestrator to write repo context before starting repo-plan workers", () => {
+    const result = loadInstruction("orchestrator", {
+      WORK_ID: "WORK-42",
+      SOURCE_TYPE: "manual",
+      SOURCE_TITLE: "My Feature",
+      SOURCE_ARTIFACT: "/tmp/source.md",
+      SPEC_PATH: "/tmp/spec.md",
+      CONTRACT_PATH: "/tmp/contract.md",
+      PLAN_PATH: "/tmp/plan.md",
+      GRAPH_PATH: "/tmp/graph.json"
+    });
+
+    const contextStep = result.indexOf("--- Step 4: Write per-repo context ---");
+    const workerStep = result.indexOf("--- Step 5: Spawn repo-plan workers ---");
+    expect(contextStep).toBeGreaterThan(-1);
+    expect(workerStep).toBeGreaterThan(contextStep);
+    expect(result).toContain("consumed by the repo-plan and execution workers");
+  });
+
   it("interpolates all placeholders in the validator instruction", () => {
     const result = loadInstruction("validator", {
       WORK_ID: "WORK-99",
