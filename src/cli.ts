@@ -3,6 +3,7 @@ import { registerAgentCommands } from "./cli/agent.js";
 import { registerBoardCommands } from "./cli/board.js";
 import { registerConfigCommands } from "./cli/config.js";
 import { registerRepoCommands } from "./cli/repo.js";
+import { registerServeCommands } from "./cli/serve.js";
 import { registerWorkCommands } from "./cli/work.js";
 import { registerWorkspaceCommands } from "./cli/workspace.js";
 import { registerWorktreeCommands } from "./cli/worktree.js";
@@ -18,6 +19,7 @@ export function createCli(): Command {
   registerAgentCommands(program);
   registerWorkspaceCommands(program);
   registerRepoCommands(program);
+  registerServeCommands(program);
   registerWorkCommands(program);
   registerBoardCommands(program);
   registerWorktreeCommands(program);
