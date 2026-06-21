@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveWorkspacePathsForInit, phaseRunDir, workItemSpecPath } from "../src/infra/paths.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
-import { createManualWorkItem } from "../src/storage/work-store.js";
+import { createManualWorkItem, updateWorkItemStatus } from "../src/storage/work-store.js";
 import { writeRunningPhaseRun } from "../src/infra/session-run.js";
 import { startApiServer, type ApiServerHandle } from "../src/server/api.js";
 import { createDevtaskKernel } from "../src/kernel/devtask-kernel.js";
@@ -121,6 +121,80 @@ describe("api server", () => {
       process.chdir(previousCwd);
     }
   });
+
+  it("streams work and session updates over SSE", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-api-stream-"));
+    const paths = resolveWorkspacePathsForInit(workspace);
+    initializeWorkspace(paths);
+    const item = createManualWorkItem(paths, {
+      id: "WORK-456",
+      title: "Streaming work",
+      body: "Observe live updates",
+    });
+    fs.writeFileSync(workItemSpecPath(paths, item.id), "# Spec\n\nInitial.\n");
+
+    const kernel = createDevtaskKernel(paths, readConfig(paths));
+    let threadId: string;
+    try {
+      const thread = kernel.sessionHistory.openThread({
+        owner: { type: "work", id: item.id, parent: null },
+        labels: { phase: "orchestrate", workId: item.id },
+        agentName: "codex",
+        runtimeSessionId: "devtask-stream",
+        metadata: { workId: item.id, phase: "orchestrate" },
+      });
+      threadId = thread.id;
+    } finally {
+      kernel.close();
+    }
+
+    const previousCwd = process.cwd();
+    process.chdir(workspace);
+    try {
+      const server = await startApiServer();
+      servers.push(server);
+
+      const workStream = await fetch(`${server.url}/api/work/WORK-456/stream`);
+      expect(workStream.ok).toBe(true);
+      const workEvents = createSseReader(workStream);
+      const firstWorkEvent = await workEvents.read();
+      expect(firstWorkEvent.event).toBe("snapshot");
+      expect(firstWorkEvent.data.detail.item.id).toBe("WORK-456");
+
+      updateWorkItemStatus(paths, item.id, "blocked");
+      const changedWorkEvent = await workEvents.read({ event: "snapshot" });
+      expect(changedWorkEvent.data.detail.item.status).toBe("blocked");
+
+      const sessionStream = await fetch(`${server.url}/api/sessions/${encodeURIComponent(threadId)}/stream`);
+      expect(sessionStream.ok).toBe(true);
+      const sessionEvents = createSseReader(sessionStream);
+      const firstSessionEvent = await sessionEvents.read();
+      expect(firstSessionEvent.event).toBe("snapshot");
+      expect(firstSessionEvent.data.thread.threadId).toBe(threadId);
+
+      const kernelWriter = createDevtaskKernel(paths, readConfig(paths));
+      try {
+        kernelWriter.sessionHistory.append(threadId, {
+          source: "agent",
+          category: "message",
+          type: "message.delta",
+          runtimeSessionId: "devtask-stream",
+          payload: { role: "assistant", text: "Live update" },
+        });
+      } finally {
+        kernelWriter.close();
+      }
+
+      const appendedEvent = await sessionEvents.read({ event: "event" });
+      expect(appendedEvent.data.type).toBe("message.delta");
+      expect(appendedEvent.data.payload.text).toBe("Live update");
+
+      await workEvents.close();
+      await sessionEvents.close();
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
 });
 
 async function getJson<T>(url: string): Promise<T> {
@@ -129,4 +203,85 @@ async function getJson<T>(url: string): Promise<T> {
     throw new Error(`Unexpected response ${response.status} for ${url}`);
   }
   return response.json() as Promise<T>;
+}
+
+function createSseReader(response: Response): {
+  read(options?: { event?: string }): Promise<{ id: string | null; event: string; data: any }>;
+  close(): Promise<void>;
+} {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Response body is not readable");
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  return {
+    async read(options: { event?: string } = {}): Promise<{ id: string | null; event: string; data: any }> {
+      const deadline = Date.now() + 5000;
+
+      while (Date.now() < deadline) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+
+        while (true) {
+          const boundary = buffer.indexOf("\n\n");
+          if (boundary < 0) {
+            break;
+          }
+          const chunk = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const parsed = parseSseChunk(chunk);
+          if (!parsed) {
+            continue;
+          }
+          if (options.event && parsed.event !== options.event) {
+            continue;
+          }
+          return parsed;
+        }
+      }
+
+      throw new Error(`Timed out waiting for SSE event${options.event ? ` ${options.event}` : ""}`);
+    },
+    async close(): Promise<void> {
+      await reader.cancel();
+    },
+  };
+}
+
+function parseSseChunk(chunk: string): { id: string | null; event: string; data: any } | null {
+  let id: string | null = null;
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const line of chunk.split("\n")) {
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+    if (line.startsWith("id:")) {
+      id = line.slice(3).trim();
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  return {
+    id,
+    event,
+    data: JSON.parse(dataLines.join("\n")),
+  };
 }
