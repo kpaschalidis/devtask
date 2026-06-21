@@ -86,6 +86,10 @@ Examples:
 - `work/<workId>/plan.md`
 - `work/<workId>/graph.json`
 - `work/<workId>/repo-plans/<repoId>.md`
+- `work/<workId>/repo-plans/<repoId>.context.md`
+- `work/<workId>/learnings.md`
+- `improvement/<phase>.md`
+- `improvement/repos/<repoId>/<phase>.md`
 
 ### Local
 
@@ -112,6 +116,17 @@ Examples:
 - `work/<workId>/plans/`
 - `work/<workId>/spec-runs/`
 - `work/<workId>/phase-runs/<phase>/...`
+- `improvement/<phase>.md`
+- `improvement/repos/<repoId>/<phase>.md`
+
+The `planning.md`, `implementation.md`, and `review.md` files under the shared
+and local `improvement/` directories are active knowledge. They are maintained
+as normal Markdown files. Only these explicit global and repo-specific files
+are loaded into agent prompts.
+
+Work context, `learnings.md`, validation results, and historical improvement
+archives are artifacts, not active knowledge. They are never loaded by the
+knowledge loader.
 
 Observability-relevant local artifacts include:
 - task metadata with runtime state, paused/blocked reasons, tmux session name, and execution/runtime identifiers

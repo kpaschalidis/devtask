@@ -13,9 +13,7 @@ export function collectPhaseMemory(
     path.join(paths.sharedDir, "improvement", `${phase}.md`),
     path.join(paths.localDir, "improvement", `${phase}.md`),
     options.repoId ? path.join(paths.sharedDir, "improvement", "repos", options.repoId, `${phase}.md`) : null,
-    options.repoId ? path.join(paths.localDir, "improvement", "repos", options.repoId, `${phase}.md`) : null,
-    ...listArchiveFiles(path.join(paths.sharedDir, "improvement", "archive"), `${phase}.md`),
-    ...listArchiveFiles(path.join(paths.localDir, "improvement", "archive"), `${phase}.md`)
+    options.repoId ? path.join(paths.localDir, "improvement", "repos", options.repoId, `${phase}.md`) : null
   ].filter((value): value is string => Boolean(value));
 
   const sections = filePaths
@@ -34,23 +32,4 @@ export function collectPhaseMemory(
   }
 
   return ["Guidance memory:", ...sections.flatMap((section) => ["", section])].join("\n");
-}
-
-function listArchiveFiles(root: string, fileName: string): string[] {
-  if (!fs.existsSync(root)) {
-    return [];
-  }
-
-  const matches: string[] = [];
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const currentPath = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      matches.push(...listArchiveFiles(currentPath, fileName));
-      continue;
-    }
-    if (entry.isFile() && entry.name === fileName) {
-      matches.push(currentPath);
-    }
-  }
-  return matches.sort();
 }

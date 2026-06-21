@@ -19,6 +19,7 @@ describe("work CLI", () => {
     expect(subcommandNames).toContain("runs");
     expect(subcommandNames).toContain("diagnose");
     expect(subcommandNames).toContain("inspect");
+    expect(subcommandNames).not.toContain("lessons");
     expect(subcommandNames).not.toContain("implement");
   });
 });

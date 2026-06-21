@@ -9,7 +9,7 @@ Worktree: {{WORKTREE_PATH}}
 Validation contract: {{CONTRACT_PATH}}
 Result output: {{RESULT_PATH}}
 
---- Step 0: Ensure dependencies are installed ---
+{{MEMORY}}--- Step 0: Ensure dependencies are installed ---
 
 Before running any build or test commands, install project dependencies so that tools like tsc, vitest, and eslint are available.
 

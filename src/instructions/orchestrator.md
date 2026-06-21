@@ -22,7 +22,7 @@ Source:
 - artifact: {{SOURCE_ARTIFACT}}
 {{SOURCE_URL_LINE}}
 
---- Step 1: Write the spec ---
+{{MEMORY}}--- Step 1: Write the spec ---
 
 Write the spec to: {{SPEC_PATH}}
 
@@ -117,7 +117,25 @@ Rules:
 - Set validationRequired: true for features that touch business logic, APIs, or UI. Set false for pure infrastructure or documentation changes.
 - The graph file must contain JSON only, with no Markdown fences.
 
---- Step 4: Spawn repo-plan workers ---
+--- Step 4: Write per-repo context ---
+
+After writing graph.json, read the tasks array and write a context artifact for each unique repoId alongside its future repo-plan. The context artifact path is:
+
+  <repo-plans-dir>/<REPO_ID>.context.md
+
+where `<repo-plans-dir>` is the directory containing the repo-plan files. Write the context artifact in Markdown with these sections:
+
+1. **Key Decisions** — architectural choices made and the reasoning behind them
+2. **Rejected Alternatives** — approaches considered but not chosen, and why
+3. **Identified Risks** — edge cases, known unknowns, or areas likely to need care
+4. **Codebase Gotchas** — repo-specific patterns, constraints, or conventions discovered during planning
+5. **Assumptions** — anything assumed true that the worker should verify or flag if incorrect
+6. **Escalation Triggers** — conditions under which the worker should stop and surface a question rather than proceeding
+
+Keep each section concise. The context artifact is consumed by the repo-plan and execution workers to avoid re-deriving planning reasoning. Omit sections that are not applicable for this repo.
+If graph.json has no tasks, skip this step.
+
+--- Step 5: Spawn repo-plan workers ---
 
 After writing graph.json, read the tasks array. For each unique repoId, spawn a headless repo-plan worker:
 
@@ -134,21 +152,6 @@ If graph.json has no tasks, skip this step.
 
 A non-zero exit from a worker means that repo-plan failed for that repo. Note the failure in your Gate 1 summary but do not stop other workers. If all workers fail, describe the errors at Gate 1 so the human can intervene before execution begins.
 
-After all workers complete (or fail), write a context artifact for each repoId alongside its repo-plan. The context artifact path is:
-
-  <repo-plans-dir>/<REPO_ID>.context.md
-
-where `<repo-plans-dir>` is the directory containing the repo-plan files. Write the context artifact in Markdown with these sections:
-
-1. **Key Decisions** — architectural choices made and the reasoning behind them
-2. **Rejected Alternatives** — approaches considered but not chosen, and why
-3. **Identified Risks** — edge cases, known unknowns, or areas likely to need care
-4. **Codebase Gotchas** — repo-specific patterns, constraints, or conventions discovered during planning
-5. **Assumptions** — anything assumed true that the worker should verify or flag if incorrect
-6. **Escalation Triggers** — conditions under which the worker should stop and surface a question rather than proceeding
-
-Keep each section concise. The context artifact is consumed by the execution worker to avoid re-deriving planning reasoning. Omit sections that are not applicable for this repo.
-
 --- Gate 1: Awaiting approval ---
 
 Planning is complete. Before waiting, print a brief summary:
@@ -158,13 +161,13 @@ Planning is complete. Before waiting, print a brief summary:
 
 Then wait. Do not proceed until you receive an approval message.
 
-On approval: proceed to Step 5.
+On approval: proceed to Step 6.
 
-Do NOT skip to Step 6 or create pull requests — Gate 2 has not happened yet and no code has been written.
+Do NOT skip to Step 7 or create pull requests — Gate 2 has not happened yet and no code has been written.
 
 On feedback: update the relevant artifacts and re-run any affected repo-plan workers, then return to this gate.
 
---- Step 5: Materialize and execute ---
+--- Step 6: Materialize and execute ---
 
 Run the materializer:
 
@@ -210,10 +213,10 @@ Before waiting, print a summary of outcomes:
 
 Then wait. Do not proceed until you receive an approval message.
 
-On approval: proceed to Step 6.
+On approval: proceed to Step 7.
 On feedback: address it for the specific repos mentioned, re-run validation, and return to this gate.
 
---- Step 6: Create pull requests ---
+--- Step 7: Create pull requests ---
 
 You must not reach this step unless Gate 2 was explicitly approved in this session. If you are unsure, run:
 
