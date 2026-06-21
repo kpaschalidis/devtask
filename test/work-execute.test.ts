@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/infra/tmux.js", () => ({
   createBareSession: vi.fn(),
+  killTmuxSession: vi.fn(),
   sendLaunchCommand: vi.fn(),
   tmuxSessionExists: vi.fn(() => false),
   tmuxSessionName: vi.fn((_paths, taskId: string) => `devtask-test-${taskId}`),

@@ -13,10 +13,10 @@ import {
   startPipePane,
   startTmuxSession,
   tmuxSessionExists,
-  waitForTmuxSession,
   writeLaunchScript
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
+import { resumeKernelPhaseSession, startKernelPhaseSession } from "../kernel/devtask-phase-session.js";
 import { getLatestWorkPhaseRun } from "../services/session-run-service.js";
 import type { RoleConfig, RoleLaunchResult, FreshScopeOpts } from "./types.js";
 
@@ -48,21 +48,24 @@ export async function launchPhaseFresh(
 ): Promise<RoleLaunchResult> {
   ensureNoLiveSession(paths, workId, phase, repoId);
   const runId = newRunId();
-  const devtaskConfig = readConfig(paths);
-  const runner = createDefaultAgentRunner(devtaskConfig);
   const { scope, prompt, startOptions } = await config.freshScope(paths, workId, repoId, runId, opts);
   const completionCommand = buildManagedCompletionCommand(paths, phase, workId, repoId, runId);
-  const start = await runner.buildInteractiveStartCommand?.(
-    { ...startOptions, managedCompletionCommand: completionCommand },
-    prompt
-  );
-  if (!start) {
-    throw new DevtaskError(`Provider ${devtaskConfig.agent.provider} does not support interactive ${phase} sessions`);
-  }
   fs.mkdirSync(path.dirname(scope.promptPath), { recursive: true });
   fs.writeFileSync(scope.promptPath, `${prompt}\n`);
-  launchInteractiveSession(scope.cwd, scope.tmuxSession, start.command);
-  await startPipePane(scope.tmuxSession, scope.outputPath);
+  const launch = await startKernelPhaseSession({
+    paths,
+    phase,
+    workId,
+    repoId,
+    taskId: scope.taskId,
+    workspacePath: scope.cwd,
+    prompt,
+    tmuxSession: scope.tmuxSession,
+    managedCompletionCommand: completionCommand,
+    addDirs: startOptions.addDirs,
+    taskDir: startOptions.env?.DEVTASK_TASK_DIR ?? null,
+  });
+  await startPipePane(launch.tmuxSession, scope.outputPath);
   const startedAt = new Date().toISOString();
   writeRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
     phase,
@@ -70,17 +73,18 @@ export async function launchPhaseFresh(
     repoId,
     taskId: scope.taskId,
     runId,
-    tmuxSession: scope.tmuxSession,
+    tmuxSession: launch.tmuxSession,
     startedAt,
     promptPath: scope.promptPath,
     outputPath: scope.outputPath,
     artifacts: scope.artifacts,
     session: {
-      ...start.session,
-      transportId: scope.tmuxSession,
+      ...launch.session,
+      transportId: launch.tmuxSession,
       summary: `${phase} session started`,
       summaryIsFallback: true
-    }
+    },
+    kernelSession: launch.kernelSession
   });
   return {
     phase,
@@ -88,7 +92,7 @@ export async function launchPhaseFresh(
     repoId,
     taskId: scope.taskId,
     status: "started",
-    tmuxSession: scope.tmuxSession,
+    tmuxSession: launch.tmuxSession,
     promptPath: scope.promptPath,
     outputPath: scope.outputPath
   };
@@ -106,45 +110,48 @@ export async function launchPhaseResume(
   ensureNoLiveSession(paths, workId, phase, repoId);
   const previous = readPreviousSession(paths, workId, phase, repoId);
   const runId = newRunId();
-  const devtaskConfig = readConfig(paths);
-  const runner = createDefaultAgentRunner(devtaskConfig);
   const scope = config.resumeScope(paths, workId, repoId, runId);
   const completionCommand = trackCompletion
     ? buildManagedCompletionCommand(paths, phase, workId, repoId, runId)
     : null;
-  runner.installCompletionHook?.(previous.session, completionCommand);
-  const command = runner.buildInteractiveResumeCommand?.(previous.session, {
-    workspacePath: scope.cwd,
-    model: devtaskConfig.codex.model ?? null,
-    prompt: prompt ?? null,
-    managedCompletionCommand: completionCommand
-  });
-  if (!command) {
-    throw new DevtaskError(`Provider ${previous.session.provider} does not support interactive resume for ${phase}`);
+  if (!previous.kernelSession) {
+    return launchLegacyPhaseResume(config, paths, workId, phase, repoId, scope, previous.session, completionCommand, prompt);
   }
   const startedAt = new Date().toISOString();
   const resolvedPrompt = prompt ?? buildResumePrompt(phase, previous.session);
   fs.mkdirSync(path.dirname(scope.promptPath), { recursive: true });
   fs.writeFileSync(scope.promptPath, `${resolvedPrompt}\n`);
-  launchInteractiveSession(scope.cwd, scope.tmuxSession, command);
-  await startPipePane(scope.tmuxSession, scope.outputPath);
+  const launch = await resumeKernelPhaseSession({
+    paths,
+    phase,
+    workId,
+    repoId,
+    taskId: scope.taskId,
+    workspacePath: scope.cwd,
+    tmuxSession: scope.tmuxSession,
+    kernelSession: previous.kernelSession,
+    managedCompletionCommand: completionCommand,
+    prompt: prompt ?? null
+  });
+  await startPipePane(launch.tmuxSession, scope.outputPath);
   writeRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
     phase,
     workId,
     repoId,
     taskId: scope.taskId,
     runId,
-    tmuxSession: scope.tmuxSession,
+    tmuxSession: launch.tmuxSession,
     startedAt,
     promptPath: scope.promptPath,
     outputPath: scope.outputPath,
     artifacts: scope.artifacts,
     session: {
-      ...previous.session,
-      transportId: scope.tmuxSession,
+      ...launch.session,
+      transportId: launch.tmuxSession,
       summary: `${phase} resume session started`,
       summaryIsFallback: true
-    }
+    },
+    kernelSession: launch.kernelSession
   });
   return {
     phase,
@@ -152,7 +159,7 @@ export async function launchPhaseResume(
     repoId,
     taskId: scope.taskId,
     status: "started",
-    tmuxSession: scope.tmuxSession,
+    tmuxSession: launch.tmuxSession,
     promptPath: scope.promptPath,
     outputPath: scope.outputPath
   };
@@ -163,14 +170,14 @@ export function readPreviousSession(
   workId: string,
   phase: SessionPhase,
   repoId: string | null
-): { session: AgentSessionRef; taskId: string | null } {
+): { session: AgentSessionRef; taskId: string | null; kernelSession: NonNullable<SessionRun["kernelSession"]> | null } {
   const current = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId));
   if (current && hasResumeContext(current.session)) {
-    return { session: current.session, taskId: current.taskId };
+    return { session: current.session, taskId: current.taskId, kernelSession: current.kernelSession ?? null };
   }
   const latest = getLatestWorkPhaseRun(paths, workId, phase, repoId ?? undefined);
   if (latest && hasResumeContext(latest.session)) {
-    return { session: latest.session, taskId: latest.taskId };
+    return { session: latest.session, taskId: latest.taskId, kernelSession: latest.kernelSession ?? null };
   }
   throw new DevtaskError(
     `No resumable ${phase} session exists for ${repoId ? `${workId}/${repoId}` : workId}`
@@ -229,15 +236,73 @@ function hasResumeContext(session: AgentSessionRef): boolean {
   return Object.values(session.resumeContext).some((v) => v !== null);
 }
 
+async function launchLegacyPhaseResume(
+  config: RoleConfig,
+  paths: DevtaskPaths,
+  workId: string,
+  phase: SessionPhase,
+  repoId: string | null,
+  scope: ReturnType<RoleConfig["resumeScope"]>,
+  session: AgentSessionRef,
+  completionCommand: string | null,
+  prompt?: string,
+): Promise<RoleLaunchResult> {
+  const runId = path.basename(scope.promptPath).replace(/\.prompt\.md$/, "");
+  const devtaskConfig = readConfig(paths);
+  const runner = createDefaultAgentRunner(devtaskConfig);
+  runner.installCompletionHook?.(session, completionCommand);
+  const command = runner.buildInteractiveResumeCommand?.(session, {
+    workspacePath: scope.cwd,
+    model: devtaskConfig.codex.model ?? null,
+    prompt: prompt ?? null,
+    managedCompletionCommand: completionCommand
+  });
+  if (!command) {
+    throw new DevtaskError(`Provider ${session.provider} does not support interactive resume for ${phase}`);
+  }
+  const startedAt = new Date().toISOString();
+  const resolvedPrompt = prompt ?? buildResumePrompt(phase, session);
+  fs.mkdirSync(path.dirname(scope.promptPath), { recursive: true });
+  fs.writeFileSync(scope.promptPath, `${resolvedPrompt}\n`);
+  launchInteractiveSession(scope.cwd, scope.tmuxSession, command);
+  await startPipePane(scope.tmuxSession, scope.outputPath);
+  writeRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
+    phase,
+    workId,
+    repoId,
+    taskId: scope.taskId,
+    runId,
+    tmuxSession: scope.tmuxSession,
+    startedAt,
+    promptPath: scope.promptPath,
+    outputPath: scope.outputPath,
+    artifacts: scope.artifacts,
+    session: {
+      ...session,
+      transportId: scope.tmuxSession,
+      summary: `${phase} resume session started`,
+      summaryIsFallback: true
+    },
+    kernelSession: null
+  });
+  return {
+    phase,
+    workId,
+    repoId,
+    taskId: scope.taskId,
+    status: "started",
+    tmuxSession: scope.tmuxSession,
+    promptPath: scope.promptPath,
+    outputPath: scope.outputPath
+  };
+}
+
 function launchInteractiveSession(cwd: string, tmuxSession: string, command: string): void {
   if (tmuxSessionExists(tmuxSession)) {
     killTmuxSession(tmuxSession);
   }
   const scriptPath = writeLaunchScript([`cd ${shellEscape(cwd)}`, command].join("\n"));
   startTmuxSession(tmuxSession, ["bash", scriptPath], cwd);
-  if (!waitForTmuxSession(tmuxSession, { attempts: 5, intervalMs: 200 })) {
-    throw new DevtaskError(`Phase session ${tmuxSession} failed to start`);
-  }
 }
 
 function buildDevtaskCommand(args: string[]): string {

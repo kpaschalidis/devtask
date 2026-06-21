@@ -4,6 +4,13 @@ import type { AgentSessionRef } from "../agent-session.js";
 
 export type SessionPhase = "orchestrate" | "repo-plan" | "review" | "execute" | "ci-fix" | "compound";
 
+export interface KernelSessionRef {
+  runtimeSessionId: string;
+  runtimeName: string;
+  threadId: string | null;
+  data: Record<string, unknown>;
+}
+
 // Unified session run — covers both live sessions and completed records.
 // Live sessions are stored as running.json; completed ones as {runId}.json.
 export interface SessionRun {
@@ -19,6 +26,7 @@ export interface SessionRun {
   outputPath: string;
   artifacts: Record<string, string>;
   session: AgentSessionRef;
+  kernelSession?: KernelSessionRef | null;
   startedAt: string;
   updatedAt: string;
   finishedAt: string | null;
@@ -39,6 +47,7 @@ export interface SessionRunRecord {
   startedAt: string;
   finishedAt: string;
   session: AgentSessionRef;
+  kernelSession?: KernelSessionRef | null;
   artifacts: Record<string, string>;
   exitCode: number | null;
 }
@@ -66,7 +75,7 @@ export function readRunningPhaseRun(dir: string): SessionRun | null {
   if (!fs.existsSync(p)) {
     return null;
   }
-  return JSON.parse(fs.readFileSync(p, "utf8")) as SessionRun;
+  return normalizeSessionRun(JSON.parse(fs.readFileSync(p, "utf8")) as SessionRun);
 }
 
 // Patch the running session in place.
@@ -109,5 +118,19 @@ export function readLatestPhaseRunRecord(dir: string): SessionRunRecord | null {
     return null;
   }
 
-  return JSON.parse(fs.readFileSync(path.join(dir, latest), "utf8")) as SessionRunRecord;
+  return normalizeSessionRunRecord(JSON.parse(fs.readFileSync(path.join(dir, latest), "utf8")) as SessionRunRecord);
+}
+
+function normalizeSessionRun(run: SessionRun): SessionRun {
+  return {
+    ...run,
+    kernelSession: run.kernelSession ?? null
+  };
+}
+
+function normalizeSessionRunRecord(run: SessionRunRecord): SessionRunRecord {
+  return {
+    ...run,
+    kernelSession: run.kernelSession ?? null
+  };
 }

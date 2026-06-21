@@ -480,7 +480,7 @@ function copyCodexHomeFileIfPresent(sourceHome: string, targetHome: string, rela
   fs.copyFileSync(source, target);
 }
 
-function prepareIsolatedCodexHome(taskDir: string | null, sessionName: string, sourceRoot?: string | null): string {
+export function prepareIsolatedCodexHome(taskDir: string | null, sessionName: string, sourceRoot?: string | null): string {
   const sourceHome = defaultCodexHome(sourceRoot);
   const targetRoot = taskDir
     ? join(taskDir, "codex-sessions", sessionName)
@@ -575,7 +575,7 @@ function buildSessionCacheKey(sessionsDir: string, workspacePath: string, starte
   return `${sessionsDir}::${workspacePath}::${startedAtMs ?? "none"}`;
 }
 
-async function findSessionFileCached(sessionsDir: string, workspacePath: string, startedAtMs?: number): Promise<string | null> {
+export async function findSessionFileCached(sessionsDir: string, workspacePath: string, startedAtMs?: number): Promise<string | null> {
   const cacheKey = buildSessionCacheKey(sessionsDir, workspacePath, startedAtMs);
   const cached = sessionFileCache.get(cacheKey);
   if (cached && Date.now() < cached.expiry) {
@@ -772,7 +772,7 @@ export async function findCodexSessionFileInDirForTest(
   return findCodexSessionFileInDir(sessionsDir, workspacePath, startedAtMs);
 }
 
-async function extractThreadId(filePath: string): Promise<string | null> {
+export async function extractThreadId(filePath: string): Promise<string | null> {
   try {
     const reader = createInterface({
       input: createReadStream(filePath, { encoding: "utf8" }),
@@ -837,7 +837,7 @@ function extractAssistantText(entry: CodexJsonlLine, payload: CodexJsonlPayload)
   return null;
 }
 
-async function extractAssistantSummary(filePath: string): Promise<string | null> {
+export async function extractAssistantSummary(filePath: string): Promise<string | null> {
   try {
     const lines = await readJsonlTailLines(filePath, 200);
     for (let index = lines.length - 1; index >= 0; index -= 1) {

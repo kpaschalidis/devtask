@@ -209,16 +209,11 @@ describe("work phase feedback", () => {
     const launch = await startOrchestrateWork(paths, item.id);
 
     expect(launch.tmuxSession).toBe("devtask-test-orchestrate-WORK-123");
-    expect(tmux.startTmuxSession).toHaveBeenCalledTimes(1);
+    expect(tmux.createBareSession).toHaveBeenCalledWith("devtask-test-orchestrate-WORK-123", paths.root);
+    expect(tmux.sendLaunchCommand).toHaveBeenCalledTimes(1);
     expect(tmux.startPipePane).toHaveBeenCalledWith("devtask-test-orchestrate-WORK-123", launch.outputPath);
     expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.status).toBe("running");
-    const runner = vi.mocked(agent.createDefaultAgentRunner).mock.results.at(-1)?.value;
-    expect(runner?.buildInteractiveStartCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        managedCompletionCommand: expect.stringContaining("work _phase-finalize-hook orchestrate WORK-123")
-      }),
-      expect.any(String)
-    );
+    expect(vi.mocked(agent.createDefaultAgentRunner)).not.toHaveBeenCalled();
   });
 
   it("finalizes the matching managed phase run from the hook callback and closes tmux", async () => {

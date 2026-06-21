@@ -26,6 +26,8 @@ import {
   writeLaunchScript
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
+import type { KernelSessionRef } from "../infra/session-run.js";
+import { DevtaskTmuxRuntime } from "../kernel/runtime/devtask-tmux-runtime.js";
 import type { TaskMeta } from "../types.js";
 import type { RoleConfig, RoleFreshScope, RoleResult, RoleScope } from "./types.js";
 
@@ -260,10 +262,7 @@ async function executeMaterializedTask(
 
   const previousStatus = meta.status;
   const sessionName = meta.tmuxSession ?? tmuxSessionName(repoPaths, task.taskId);
-  launchExecutionSession(workspacePaths, task.repoId, sessionName, meta);
-  if (!waitForTmuxSession(sessionName, { attempts: 5, intervalMs: 200 })) {
-    throw new DevtaskError(`Execution session ${sessionName} failed to start for ${task.taskId}`);
-  }
+  const kernelSession = await launchExecutionSession(workspacePaths, task.repoId, sessionName, meta);
 
   meta = persistExecutionMeta(metaPath, {
     ...meta,
@@ -287,7 +286,8 @@ async function executeMaterializedTask(
     summary: meta.resultSummary,
     provider: readConfig(workspacePaths).agent.provider,
     providerSessionId: meta.agentSessionId,
-    conversationId: meta.agentThreadId
+    conversationId: meta.agentThreadId,
+    kernelSession
   });
   return {
     repoId: task.repoId,
@@ -300,9 +300,29 @@ async function executeMaterializedTask(
   };
 }
 
-function launchExecutionSession(workspacePaths: DevtaskPaths, repoId: string, sessionName: string, meta: TaskMeta): void {
+async function launchExecutionSession(
+  workspacePaths: DevtaskPaths,
+  repoId: string,
+  sessionName: string,
+  meta: TaskMeta
+): Promise<KernelSessionRef> {
   const executionTaskPath = buildExecutionTaskPath(workspacePaths, repoId, meta);
-  createBareSession(sessionName, meta.worktreePath);
+  const runtime = new DevtaskTmuxRuntime();
+  const handle = await runtime.create({
+    sessionId: sessionName,
+    workspacePath: meta.worktreePath,
+    launchCommand: buildExecutionLaunchCommand(meta, executionTaskPath),
+    environment: {}
+  });
+  return {
+    runtimeSessionId: handle.id,
+    runtimeName: handle.runtimeName,
+    threadId: null,
+    data: { ...handle.data }
+  };
+}
+
+function buildExecutionLaunchCommand(meta: TaskMeta, executionTaskPath: string): string {
   const scriptPath = writeLaunchScript([
     `cd ${shellEscape(meta.worktreePath)}`,
     `export DEVTASK_TASK_DIR=${shellEscape(path.dirname(meta.taskPath))}`,
@@ -311,7 +331,7 @@ function launchExecutionSession(workspacePaths: DevtaskPaths, repoId: string, se
     `export DEVTASK_RESULT_PATH=${shellEscape(meta.resultPath)}`,
     `exec ${meta.command}`
   ].join("\n"));
-  sendLaunchCommand(sessionName, `bash ${shellEscape(scriptPath)}`);
+  return `bash ${shellEscape(scriptPath)}`;
 }
 
 function buildExecutionTaskPath(workspacePaths: DevtaskPaths, repoId: string, meta: TaskMeta): string {
@@ -414,6 +434,7 @@ function recordExecutePhaseSession(
     provider: AgentSessionRef["provider"];
     providerSessionId: string | null;
     conversationId: string | null;
+    kernelSession?: KernelSessionRef | null;
   }
 ): void {
   const dir = phaseRunDir(paths, workId, "execute", repoId);
@@ -450,7 +471,8 @@ function recordExecutePhaseSession(
     promptPath: meta.promptPath,
     outputPath: meta.outputPath,
     artifacts: { taskPath: meta.promptPath, statePath: meta.outputPath, resultPath: meta.resultPath },
-    session: sessionRef
+    session: sessionRef,
+    kernelSession: meta.kernelSession ?? current?.kernelSession ?? null
   };
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "running.json"), `${JSON.stringify(updated, null, 2)}\n`);
