@@ -96,7 +96,7 @@ devtask work review <work-id> [--repo <id>]     # agent-backed review
 devtask work pr <work-id> --ready               # open pull requests
 devtask work pr-watch <work-id>                 # route /devtask PR comments into session
 devtask work ci-watch <work-id>                 # watch CI, inject failures, push fixes
-devtask work compound <work-id>                 # capture reusable lessons into workspace memory
+devtask work compound <work-id>                 # write a human-readable learning report
 ```
 
 Attach to or send feedback into a running session:

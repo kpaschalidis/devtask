@@ -109,7 +109,7 @@ Notes:
 - `review` is agent-backed
 - `pr-watch` polls open PR comments for `/devtask ...` instructions and routes them to the orchestrator session
 - `ci-watch` polls provider CI for existing PRs, captures bounded failure output, runs scoped `ci-fix` agent attempts, reruns deterministic validation, and pushes validated fixes back to the existing PR branch
-- `compound` writes reusable guidance and local notes into file-backed improvement artifacts
+- `compound` writes `shared/work/<workId>/learnings.md`; it never changes active knowledge
 
 ## Board
 
