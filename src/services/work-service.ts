@@ -14,7 +14,8 @@ import {
   workItemRepoPlanPath,
   workItemRepoContextPath,
   workItemRepoPlansDir,
-  workItemLessonProposalsPath,
+  workItemLearningsPath,
+  workItemValidationContractPath,
   phaseRunDir,
   resultJsonPath
 } from "../infra/paths.js";
@@ -44,6 +45,7 @@ import { orchestratorPhase } from "../roles/orchestrator.js";
 import { reviewPhase } from "../roles/validator.js";
 import { collectPhaseMemory } from "../improvement-memory.js";
 import { loadInstruction } from "../instructions/loader.js";
+import { buildCompoundPrompt } from "../prompts/compound.js";
 import { getWorkspaceRepo } from "../storage/workspace-repos.js";
 import type { WorkspaceRepo } from "../storage/workspace-repos.js";
 import {
@@ -193,11 +195,7 @@ export interface CompoundWorkResult {
   status: "completed" | "failed";
   promptPath: string;
   outputPath: string;
-  sharedPlanningPath: string;
-  sharedImplementationPath: string;
-  sharedReviewPath: string;
-  sharedPatternsPath: string;
-  localNotesPath: string;
+  learningsPath: string;
   generatedAt: string;
 }
 
@@ -437,41 +435,29 @@ export async function materializeWork(paths: DevtaskPaths, workId: string): Prom
 export async function compoundWork(paths: DevtaskPaths, workId: string): Promise<CompoundWorkResult> {
   const config = readConfig(paths);
   const item = getWorkItem(paths, workId);
-  const archiveDir = path.join(paths.sharedDir, "improvement", "archive", workId);
-  const localArchiveDir = path.join(paths.localDir, "improvement", "archive", workId);
-  fs.mkdirSync(archiveDir, { recursive: true });
-  fs.mkdirSync(localArchiveDir, { recursive: true });
   const runsDir = phaseRunDir(paths, workId, "compound", null);
   fs.mkdirSync(runsDir, { recursive: true });
   const runId = newRunId();
   const promptPath = path.join(runsDir, `${runId}.prompt.md`);
   const outputPath = path.join(runsDir, `${runId}.md`);
-  const sharedPlanningPath = path.join(archiveDir, "planning.md");
-  const sharedImplementationPath = path.join(archiveDir, "implementation.md");
-  const sharedReviewPath = path.join(archiveDir, "review.md");
-  const sharedPatternsPath = path.join(archiveDir, "patterns.md");
-  const localNotesPath = path.join(localArchiveDir, "notes.md");
+  const learningsPath = workItemLearningsPath(paths, workId);
   const specFile = path.join(paths.workDir, workId, "spec.md");
   const specPath = fs.existsSync(specFile) ? specFile : null;
+  const contractFile = workItemValidationContractPath(paths, workId);
+  const contractPath = fs.existsSync(contractFile) ? contractFile : null;
   const planPath = fs.existsSync(path.join(paths.workDir, workId, "plan.md")) ? path.join(paths.workDir, workId, "plan.md") : null;
   const graphPath = fs.existsSync(path.join(paths.workDir, workId, "graph.json")) ? path.join(paths.workDir, workId, "graph.json") : null;
-  const proposalsPath = workItemLessonProposalsPath(paths, workId);
-  fs.mkdirSync(path.dirname(proposalsPath), { recursive: true });
-  const prompt = loadInstruction("compound", {
-    WORK_ID: workId,
-    SOURCE_PATH: item.source.artifact,
-    SPEC_PATH: specPath ?? "-",
-    PLAN_PATH: planPath ?? "-",
-    GRAPH_PATH: graphPath ?? "-",
-    REPO_PLANS_DIR: path.join(paths.workDir, workId, "repo-plans"),
-    RESULTS_DIR: workItemResultsDir(paths, workId),
-    REVIEWS_DIR: workItemReviewDir(paths, workId),
-    SHARED_PLANNING_PATH: sharedPlanningPath,
-    SHARED_IMPLEMENTATION_PATH: sharedImplementationPath,
-    SHARED_REVIEW_PATH: sharedReviewPath,
-    SHARED_PATTERNS_PATH: sharedPatternsPath,
-    LOCAL_NOTES_PATH: localNotesPath,
-    PROPOSALS_PATH: proposalsPath
+  const prompt = buildCompoundPrompt({
+    workId,
+    sourcePath: item.source.artifact,
+    specPath,
+    contractPath,
+    planPath,
+    graphPath,
+    repoPlansDir: workItemRepoPlansDir(paths, workId),
+    resultsDir: workItemResultsDir(paths, workId),
+    reviewsDir: workItemReviewDir(paths, workId),
+    learningsPath
   });
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
@@ -481,7 +467,7 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
     model: config.codex.model,
     fullAuto: config.codex.fullAuto,
     skipGitRepoCheck: true,
-    addDirs: [workItemDir(paths, workId), archiveDir, localArchiveDir],
+    addDirs: [workItemDir(paths, workId)],
     env: {
       ...process.env,
       DEVTASK_TASK_DIR: workItemDir(paths, workId),
@@ -491,7 +477,8 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
   const startedAt = new Date().toISOString();
   const result = await runAgentPrompt(runner, startOptions, prompt, { outputPath });
   const finishedAt = new Date().toISOString();
-  const status: CompoundWorkResult["status"] = result.status === "completed" ? "completed" : "failed";
+  const status: CompoundWorkResult["status"] =
+    result.status === "completed" && isFreshNonEmptyFile(learningsPath, startedAt) ? "completed" : "failed";
   writePhaseRunRecord(phaseRunDir(paths, workId, "compound", null), {
     schemaVersion: 1,
     phase: "compound",
@@ -506,25 +493,16 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
     finishedAt,
     session: result.session,
     artifacts: {
-      sharedPlanningPath,
-      sharedImplementationPath,
-      sharedReviewPath,
-      sharedPatternsPath,
-      localNotesPath,
-      proposalsPath
+      learningsPath
     },
-    exitCode: result.status === "completed" ? 0 : null
+    exitCode: status === "completed" ? 0 : null
   });
   const compoundResult: CompoundWorkResult = {
     workId,
     status,
     promptPath,
     outputPath,
-    sharedPlanningPath,
-    sharedImplementationPath,
-    sharedReviewPath,
-    sharedPatternsPath,
-    localNotesPath,
+    learningsPath,
     generatedAt: finishedAt
   };
   writeWorkResult(paths, workId, "compound", compoundResult);
@@ -1513,6 +1491,15 @@ function removeIfExists(filePath: string): void {
     fs.unlinkSync(filePath);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+}
+
+function isFreshNonEmptyFile(filePath: string, startedAt: string): boolean {
+  try {
+    return fs.readFileSync(filePath, "utf8").trim().length > 0 &&
+      fs.statSync(filePath).mtimeMs >= Date.parse(startedAt);
+  } catch {
+    return false;
   }
 }
 

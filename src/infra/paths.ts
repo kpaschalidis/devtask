@@ -267,12 +267,8 @@ export function workItemRepoContextPath(paths: DevtaskPaths, id: string, repoId:
   return path.join(workItemRepoPlansDir(paths, id), `${repoId}.context.md`);
 }
 
-export function workItemLessonProposalsPath(paths: DevtaskPaths, id: string): string {
-  return path.join(workItemLocalDir(paths, id), "lessons", "proposals.jsonl");
-}
-
-export function lessonProposalsArchivePath(paths: DevtaskPaths): string {
-  return path.join(paths.localDir, "improvement", "proposals-archive.jsonl");
+export function workItemLearningsPath(paths: DevtaskPaths, id: string): string {
+  return path.join(workItemDir(paths, id), "learnings.md");
 }
 
 export const GLOBAL_PHASES = new Set(["orchestrate", "compound"]);
