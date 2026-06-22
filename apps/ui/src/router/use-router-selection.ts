@@ -57,3 +57,17 @@ export function useRouterIsEditor(): boolean {
 			(state.location.search as { view?: string }).view === "editor",
 	});
 }
+
+export function useRouterNavView(): string | null {
+	return useRouterState({
+		select: (state) =>
+			(state.location.search as { navView?: string }).navView ?? null,
+	});
+}
+
+export function useRouterProject(): string | null {
+	return useRouterState({
+		select: (state) =>
+			(state.location.search as { project?: string }).project ?? null,
+	});
+}

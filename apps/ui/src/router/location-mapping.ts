@@ -209,6 +209,9 @@ export type LocationSelection = {
 	// Deprecated compatibility alias for legacy shell code.
 	sessionId: string | null;
 	viewMode: ShellViewMode;
+	// Work-list navigation: which view filter and project are active.
+	navView: string | null;
+	project: string | null;
 };
 
 export function locationToSelection({
@@ -216,7 +219,7 @@ export function locationToSelection({
 	search,
 }: {
 	pathname: string;
-	search: { view?: string } | Record<string, unknown>;
+	search: { view?: string; navView?: string; project?: string } | Record<string, unknown>;
 }): LocationSelection {
 	const { isStart, isEditor } = locationToViewInfo({ pathname, search });
 	const { workspaceId, workId, sessionThreadId, artifactId, sessionId } =
@@ -226,6 +229,7 @@ export function locationToSelection({
 		: isEditor
 			? "editor"
 			: "conversation";
+	const s = search as { view?: string; navView?: string; project?: string };
 	return {
 		workspaceId,
 		workId,
@@ -233,6 +237,8 @@ export function locationToSelection({
 		artifactId,
 		sessionId,
 		viewMode,
+		navView: s.navView ?? null,
+		project: s.project ?? null,
 	};
 }
 

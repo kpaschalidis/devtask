@@ -1,4 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { spawn } from "node:child_process";
 import { resolveWorkspacePaths } from "../infra/paths.js";
 import { DevtaskError } from "../infra/errors.js";
 import { readSessionDetail, readWorkDetail, readWorkList, readWorkRuns } from "./read-models.js";
@@ -61,13 +62,58 @@ export async function startApiServer(options: StartApiServerOptions = {}): Promi
 }
 
 async function handleApiRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const url = new URL(request.url ?? "/", "http://localhost");
+  const pathname = url.pathname;
+
+  if (request.method === "POST" && pathname === "/api/open-path") {
+    const body = await readJsonBody(request) as { path?: unknown };
+    const filePath = typeof body.path === "string" ? body.path : null;
+    if (!filePath) {
+      response.statusCode = 400;
+      response.end(JSON.stringify({ error: "path is required" }));
+      return;
+    }
+    const cmd = process.platform === "win32" ? "explorer" : process.platform === "darwin" ? "open" : "xdg-open";
+    spawn(cmd, [filePath], { detached: true, stdio: "ignore" }).unref();
+    return respondJson(response, { ok: true });
+  }
+
   if (request.method !== "GET") {
     throw new DevtaskError(`Unsupported method: ${request.method ?? "unknown"}`);
   }
-
-  const url = new URL(request.url ?? "/", "http://localhost");
-  const pathname = url.pathname;
   const paths = resolveWorkspacePaths();
+
+  if (pathname === "/api/file-content") {
+    const filePath = url.searchParams.get("path");
+    if (!filePath) {
+      response.statusCode = 400;
+      response.end(JSON.stringify({ error: "path is required" }));
+      return;
+    }
+    try {
+      const { readFileSync, readdirSync, statSync, existsSync } = await import("node:fs");
+      const nodePath = await import("node:path");
+      if (!existsSync(filePath)) {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ error: "File not found" }));
+        return;
+      }
+      const stat = statSync(filePath);
+      if (stat.isDirectory()) {
+        const entries = readdirSync(filePath, { withFileTypes: true }).map((entry) => ({
+          name: entry.name,
+          path: nodePath.join(filePath, entry.name),
+          isDirectory: entry.isDirectory(),
+        }));
+        return respondJson(response, { type: "directory", path: filePath, entries });
+      }
+      return respondJson(response, { type: "file", path: filePath, content: readFileSync(filePath, "utf8") });
+    } catch {
+      response.statusCode = 500;
+      response.end(JSON.stringify({ error: "Failed to read path" }));
+      return;
+    }
+  }
 
   if (pathname === "/api/health") {
     return respondJson(response, { ok: true, generatedAt: new Date().toISOString() });
@@ -145,6 +191,21 @@ function respondJson(response: ServerResponse, body: unknown): void {
   response.statusCode = 200;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(`${JSON.stringify(body, null, 2)}\n`);
+}
+
+function readJsonBody(request: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
+      } catch {
+        reject(new DevtaskError("Invalid JSON body"));
+      }
+    });
+    request.on("error", reject);
+  });
 }
 
 function streamWorkList(request: IncomingMessage, response: ServerResponse, paths: ReturnType<typeof resolveWorkspacePaths>): void {

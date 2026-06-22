@@ -36,9 +36,18 @@ interface RouterContext {
 // `ShellViewMode` ("conversation" | "editor"). Default is "conversation".
 export type WorkspaceViewParam = "conversation" | "editor";
 
+// `navView` encodes the active work-list filter (absent = all work).
+// `project` encodes the selected project id (absent = no project filter).
+// Both are optional and only meaningful on the workspace-level route.
+export type NavViewParam = "active" | "needs-you" | "shipped";
+
 export type WorkspaceSearch = {
 	view: WorkspaceViewParam;
+	navView?: NavViewParam;
+	project?: string;
 };
+
+const VALID_NAV_VIEWS: NavViewParam[] = ["active", "needs-you", "shipped"];
 
 // Hand-written validator (the frontend has NO zod dependency — do not add one).
 // Anything other than "editor" collapses to the "conversation" default, so a
@@ -48,7 +57,15 @@ export type WorkspaceSearch = {
 function validateWorkspaceSearch(
 	search: Record<string, unknown>,
 ): WorkspaceSearch {
-	return { view: search.view === "editor" ? "editor" : "conversation" };
+	const view = search.view === "editor" ? "editor" : "conversation";
+	const navView = VALID_NAV_VIEWS.includes(search.navView as NavViewParam)
+		? (search.navView as NavViewParam)
+		: undefined;
+	const project =
+		typeof search.project === "string" && search.project
+			? search.project
+			: undefined;
+	return { view, navView, project };
 }
 
 // Keep the default ("conversation") OUT of the URL so round-trips stay clean

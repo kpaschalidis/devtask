@@ -13,6 +13,7 @@ export interface WorkDiagnostic {
   waitingOn: string;
   reason: string;
   missingArtifacts: string[];
+  warnings: string[];
   tasks: RepoTaskDiagnostic[];
 }
 
@@ -20,6 +21,11 @@ export interface RepoTaskDiagnostic {
   repoId: string;
   taskId: string;
   status: string;
+  branch: string;
+  prUrl: string | null;
+  resultSummary: string | null;
+  failCount: number;
+  maxRetries: number;
   next: string;
   waitingOn: string;
   reason: string;
@@ -59,6 +65,7 @@ export function getWorkDiagnostics(paths: DevtaskPaths, workId: string): WorkDia
         hasPlan && !hasRepoPlans ? "repo-plans/*.md" : null,
         hasRepoPlans ? "local/work/<work-id>/materialization.json" : null
       ].filter((value): value is string => Boolean(value)),
+      warnings: [],
       tasks: []
     };
   }
@@ -72,7 +79,18 @@ export function getWorkDiagnostics(paths: DevtaskPaths, workId: string): WorkDia
     const hasRepoPlan = hasTaskPlan(storagePaths, task.taskId);
     const review = reviewResults.get(task.repoId) ?? "-";
     const ci = ciWatchResults.get(task.repoId) ?? ciResults.get(task.repoId) ?? "-";
-    return buildRepoTaskDiagnostic(workId, task.repoId, task.taskId, meta.status, meta.runtime?.reason ?? meta.resultSummary, hasRepoPlan, meta.prUrl !== null, review, ci);
+    const logic = buildRepoTaskDiagnosticLogic(workId, task.repoId, task.taskId, meta.status, meta.runtime?.reason ?? meta.resultSummary, hasRepoPlan, meta.prUrl !== null, review, ci);
+    return {
+      repoId: task.repoId,
+      taskId: task.taskId,
+      status: meta.status,
+      branch: meta.branch,
+      prUrl: meta.prUrl,
+      resultSummary: meta.resultSummary,
+      failCount: meta.failCount,
+      maxRetries: meta.maxRetries,
+      ...logic,
+    };
   });
 
   const waiting = diagnostics.find((entry) => entry.status === "blocked" || entry.status === "failed")
@@ -86,11 +104,14 @@ export function getWorkDiagnostics(paths: DevtaskPaths, workId: string): WorkDia
     waitingOn: waiting?.waitingOn ?? "complete",
     reason: waiting?.reason ?? "No pending diagnostic signals.",
     missingArtifacts: waiting?.missingArtifacts ?? [],
+    warnings: [],
     tasks: diagnostics
   };
 }
 
-function buildRepoTaskDiagnostic(
+type TaskDiagnosticLogic = { next: string; waitingOn: string; reason: string; missingArtifacts: string[] };
+
+function buildRepoTaskDiagnosticLogic(
   workId: string,
   repoId: string,
   taskId: string,
@@ -100,12 +121,9 @@ function buildRepoTaskDiagnostic(
   hasPr: boolean,
   review: string,
   ci: string
-): RepoTaskDiagnostic {
+): TaskDiagnosticLogic {
   if (!hasRepoPlan) {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work repo-plan ${shellQuote(workId)}`,
       waitingOn: "repo-plan",
       reason: "The repo task plan artifact is missing.",
@@ -114,9 +132,6 @@ function buildRepoTaskDiagnostic(
   }
   if (status === "created" || status === "planned" || status === "ready") {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work execute ${shellQuote(workId)}`,
       waitingOn: "execution",
       reason: "The repo task is planned but execution has not started yet.",
@@ -125,9 +140,6 @@ function buildRepoTaskDiagnostic(
   }
   if (status === "running") {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work execute attach ${shellQuote(workId)} ${shellQuote(repoId)}`,
       waitingOn: "execution",
       reason: runtimeReason ?? "An execution session is active.",
@@ -136,9 +148,6 @@ function buildRepoTaskDiagnostic(
   }
   if (status === "paused") {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work execute ${shellQuote(workId)}`,
       waitingOn: "execution",
       reason: runtimeReason ?? "Execution is paused and must be resumed.",
@@ -147,9 +156,6 @@ function buildRepoTaskDiagnostic(
   }
   if (status === "blocked" || status === "failed") {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work inspect ${shellQuote(workId)}`,
       waitingOn: "unblock",
       reason: runtimeReason ?? `The repo task is ${status}.`,
@@ -158,9 +164,6 @@ function buildRepoTaskDiagnostic(
   }
   if (review === "-") {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work review ${shellQuote(workId)}`,
       waitingOn: "review",
       reason: "Execution completed, but no review result exists yet.",
@@ -169,9 +172,6 @@ function buildRepoTaskDiagnostic(
   }
   if (!hasPr) {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work pr ${shellQuote(workId)}`,
       waitingOn: "pr",
       reason: "Review exists, but no pull request is recorded yet.",
@@ -180,9 +180,6 @@ function buildRepoTaskDiagnostic(
   }
   if (ci === "-" || ci === "skipped") {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work ci-watch ${shellQuote(workId)}`,
       waitingOn: "ci",
       reason: "The pull request exists, but CI has not been recorded yet.",
@@ -191,9 +188,6 @@ function buildRepoTaskDiagnostic(
   }
   if (ci === "running") {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work ci-watch ${shellQuote(workId)}`,
       waitingOn: "ci",
       reason: "CI watch is still polling for a terminal provider result.",
@@ -202,9 +196,6 @@ function buildRepoTaskDiagnostic(
   }
   if (ci === "max-attempts" || ci === "fix-failed" || ci === "validation-failed" || ci === "unknown") {
     return {
-      repoId,
-      taskId,
-      status,
       next: `devtask work inspect ${shellQuote(workId)}`,
       waitingOn: "unblock",
       reason: `CI watch reached a terminal non-success state: ${ci}.`,
@@ -212,9 +203,6 @@ function buildRepoTaskDiagnostic(
     };
   }
   return {
-    repoId,
-    taskId,
-    status,
     next: `devtask work board ${shellQuote(workId)}`,
     waitingOn: "complete",
     reason: `The repo task has reached CI state: ${ci}.`,

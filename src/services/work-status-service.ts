@@ -7,11 +7,20 @@ import { tmuxSessionExists } from "../infra/tmux.js";
 import { readGateState } from "../mission/gates.js";
 import type { GateState } from "../mission/gates.js";
 
+export interface ValidatorAssertion {
+  id: string;
+  status: "passed" | "failed" | "skipped";
+  evidence: string;
+  attribution: "spec-gap" | "implementation-gap" | "environment" | "wrong-repo" | "inconclusive" | null;
+  attributionReason: string | null;
+}
+
 export interface ValidatorRepoResult {
   repoId: string;
   status: "passed" | "failed" | "unknown";
   totalAssertions: number;
   failedAssertions: number;
+  assertions: ValidatorAssertion[];
 }
 
 export interface WorkStatus {
@@ -57,15 +66,32 @@ function readValidatorResults(paths: DevtaskPaths, workId: string): ValidatorRep
       try {
         const raw = JSON.parse(fs.readFileSync(path.join(reviewDir, f), "utf8")) as {
           status?: unknown;
-          assertions?: Array<{ status?: unknown }>;
+          assertions?: Array<{
+            id?: unknown;
+            status?: unknown;
+            evidence?: unknown;
+            attribution?: unknown;
+            attributionReason?: unknown;
+          }>;
         };
         const status =
           raw.status === "passed" || raw.status === "failed" ? raw.status : "unknown";
-        const assertions = Array.isArray(raw.assertions) ? raw.assertions : [];
+        const rawAssertions = Array.isArray(raw.assertions) ? raw.assertions : [];
+        const assertions: ValidatorAssertion[] = rawAssertions.map((a) => ({
+          id: typeof a.id === "string" ? a.id : "?",
+          status: a.status === "failed" || a.status === "skipped" ? a.status : "passed",
+          evidence: typeof a.evidence === "string" ? a.evidence : "",
+          attribution: isValidAttribution(a.attribution) ? a.attribution : null,
+          attributionReason: typeof a.attributionReason === "string" ? a.attributionReason : null,
+        }));
         const failedAssertions = assertions.filter((a) => a.status === "failed").length;
-        return { repoId, status, totalAssertions: assertions.length, failedAssertions };
+        return { repoId, status, totalAssertions: assertions.length, failedAssertions, assertions };
       } catch {
-        return { repoId, status: "unknown" as const, totalAssertions: 0, failedAssertions: 0 };
+        return { repoId, status: "unknown" as const, totalAssertions: 0, failedAssertions: 0, assertions: [] };
       }
     });
+}
+
+function isValidAttribution(value: unknown): value is ValidatorAssertion["attribution"] {
+  return value === "spec-gap" || value === "implementation-gap" || value === "environment" || value === "wrong-repo" || value === "inconclusive";
 }

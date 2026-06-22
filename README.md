@@ -23,6 +23,11 @@ npm link
 devtask --help
 ```
 
+## Run API
+```bash
+node dist/cli.js serve --port 43210
+```
+
 ## Quick Start
 
 ```bash

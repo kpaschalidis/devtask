@@ -1,4 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
+import { workItemGraphSnapshotPath } from "../infra/paths.js";
 import { listWorkItems, type WorkItem } from "../storage/work-store.js";
 import { getWorkStatus } from "../services/work-status-service.js";
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
@@ -11,6 +14,7 @@ import {
   listSessionTimeline,
   listWorkSessionThreads,
 } from "../services/session-history-service.js";
+import { type WorkGraph, readMaterializedWorkGraph, readWorkGraph } from "../work-materializer.js";
 
 export interface WorkListEntry {
   id: string;
@@ -24,6 +28,7 @@ export interface WorkListEntry {
 
 export interface WorkListResponse {
   workspaceId: string | null;
+  workspaceName: string | null;
   work: WorkListEntry[];
   generatedAt: string;
 }
@@ -34,6 +39,7 @@ export interface WorkDetail {
   diagnostics: ReturnType<typeof getWorkDiagnostics>;
   inspection: ReturnType<typeof inspectWork>;
   sessions: ReturnType<typeof listWorkSessionThreads>;
+  graph: WorkGraph | null;
 }
 
 export function readWorkList(paths: DevtaskPaths): WorkListResponse {
@@ -54,9 +60,20 @@ export function readWorkList(paths: DevtaskPaths): WorkListResponse {
 
   return {
     workspaceId: paths.workspaceId,
+    workspaceName: paths.workspaceId ? path.basename(paths.root) : null,
     work,
     generatedAt: new Date().toISOString(),
   };
+}
+
+function readWorkDetailGraph(paths: DevtaskPaths, workId: string): WorkGraph | null {
+  try {
+    const snapshotPath = workItemGraphSnapshotPath(paths, workId);
+    if (fs.existsSync(snapshotPath)) return readMaterializedWorkGraph(paths, workId);
+    return readWorkGraph(paths, workId);
+  } catch {
+    return null;
+  }
 }
 
 export function readWorkDetail(paths: DevtaskPaths, workId: string): WorkDetail {
@@ -66,6 +83,7 @@ export function readWorkDetail(paths: DevtaskPaths, workId: string): WorkDetail 
     diagnostics: getWorkDiagnostics(paths, workId),
     inspection: inspectWork(paths, workId),
     sessions: listWorkSessionThreads(paths, workId),
+    graph: readWorkDetailGraph(paths, workId),
   };
 }
 

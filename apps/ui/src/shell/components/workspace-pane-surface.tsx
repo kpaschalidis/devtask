@@ -26,6 +26,8 @@ import type {
 } from "@/shell/controllers/use-selection-controller";
 import type { StartSurfaceActions } from "@/shell/controllers/use-start-surface-controller";
 import { WorkItemDetail } from "@/features/work-item/detail";
+import { WorkListView } from "@/features/work-list";
+import { openDevtaskFile } from "@/lib/devtask-api";
 import { useRouterSelection } from "@/router/use-router-selection";
 import { StartSurfacePane } from "./start-surface-pane";
 
@@ -133,7 +135,8 @@ export function WorkspacePaneSurface({
 	headerActionsNode,
 }: Props) {
 	const { t } = useI18n();
-	const { workId, sessionThreadId, artifactId } = useRouterSelection();
+	const { workId, sessionThreadId, artifactId, workspaceId, navView, project } =
+		useRouterSelection();
 	void repoId;
 	void sessionSelectionHistory;
 	void workspaceChangeRequest;
@@ -218,17 +221,24 @@ export function WorkspacePaneSurface({
 							headerLeading={headerLeadingNode}
 							composerAtBottom={startComposerAtBottom}
 						/>
-					) : (
+					) : workId ? (
 						<WorkItemDetail
 							workId={workId}
 							selectedSessionThreadId={sessionThreadId}
 							selectedArtifactId={artifactId}
 							onSelectSession={(threadId) => onSelectSession(threadId)}
 							onOpenArtifact={(path) =>
-								editorSessionActions.openFileReference(path)
+								void openDevtaskFile(path)
 							}
 							headerLeading={headerLeadingNode}
 							headerActions={headerActionsNode}
+						/>
+					) : (
+						<WorkListView
+							workspaceId={workspaceId}
+							navView={navView}
+							project={project}
+							headerLeading={headerLeadingNode}
 						/>
 					)}
 				</div>
