@@ -48,6 +48,10 @@ export type SelectionControllers = {
 	startSurface: StartSurfaceState;
 	startSurfaceActions: StartSurfaceActions;
 	handleSelectWorkspace: (workspaceId: string | null) => void;
+	handleSelectWork: (
+		workId: string | null,
+		workspaceId?: string | null,
+	) => void;
 	handleSelectSession: (sessionId: string | null) => void;
 	pendingCreatedWorkspaceSubmit: PendingCreatedWorkspaceSubmit | null;
 	setPendingCreatedWorkspaceSubmit: Dispatch<
@@ -146,6 +150,14 @@ export function useSelectionControllers({
 		[selectionActions],
 	);
 
+	const handleSelectWork = useCallback(
+		(workId: string | null, workspaceId?: string | null) => {
+			contextPanelActions.deactivateWorkspaceContextPreview();
+			selectionActions.selectWork(workId, workspaceId ?? null);
+		},
+		[selectionActions],
+	);
+
 	return {
 		selection,
 		selectionActions,
@@ -155,6 +167,7 @@ export function useSelectionControllers({
 		startSurface,
 		startSurfaceActions,
 		handleSelectWorkspace,
+		handleSelectWork,
 		handleSelectSession,
 		pendingCreatedWorkspaceSubmit,
 		setPendingCreatedWorkspaceSubmit,

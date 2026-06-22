@@ -35,9 +35,25 @@ function dispatch(location: SelectionLocation): void {
 				replace: true,
 			});
 			return;
-		case "/w/$workspaceId/s/$sessionId":
+		case "/w/$workspaceId/work/$workId":
 			void router.navigate({
-				to: "/w/$workspaceId/s/$sessionId",
+				to: "/w/$workspaceId/work/$workId",
+				params: location.params,
+				search: location.search,
+				replace: true,
+			});
+			return;
+		case "/w/$workspaceId/work/$workId/session/$threadId":
+			void router.navigate({
+				to: "/w/$workspaceId/work/$workId/session/$threadId",
+				params: location.params,
+				search: location.search,
+				replace: true,
+			});
+			return;
+		case "/w/$workspaceId/work/$workId/artifact/$artifactId":
+			void router.navigate({
+				to: "/w/$workspaceId/work/$workId/artifact/$artifactId",
 				params: location.params,
 				search: location.search,
 				replace: true,
@@ -63,7 +79,9 @@ function alreadyAtTarget(input: SelectionLocationInput): boolean {
 			const parsed = pathToSelection(current.pathname);
 			return (
 				parsed.workspaceId === input.workspaceId &&
-				parsed.sessionId === input.sessionId
+				parsed.workId === (input.workId ?? input.sessionId ?? null) &&
+				parsed.sessionThreadId === (input.sessionThreadId ?? null) &&
+				parsed.artifactId === (input.artifactId ?? null)
 			);
 		})();
 	if (!samePath) return false;

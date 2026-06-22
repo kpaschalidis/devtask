@@ -81,13 +81,13 @@ describe("WorkspacesSidebarContainer", () => {
 	// must forward the click synchronously so the router/highlight commit stays
 	// inside the input task.
 	it("forwards workspace selection synchronously on click", () => {
-		const onSelectWorkspace = vi.fn();
+		const onSelectWork = vi.fn();
 
 		render(
 			<TooltipProvider delayDuration={0}>
 				<WorkspacesSidebarContainer
 					selectedWorkspaceId="workspace-1"
-					onSelectWorkspace={onSelectWorkspace}
+					onSelectWork={onSelectWork}
 					pushWorkspaceToast={vi.fn()}
 				/>
 			</TooltipProvider>,
@@ -95,7 +95,7 @@ describe("WorkspacesSidebarContainer", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Workspace 2" }));
 
-		expect(onSelectWorkspace).toHaveBeenCalledTimes(1);
-		expect(onSelectWorkspace).toHaveBeenCalledWith("workspace-2");
+		expect(onSelectWork).toHaveBeenCalledTimes(1);
+		expect(onSelectWork).toHaveBeenCalledWith("workspace-2");
 	});
 });

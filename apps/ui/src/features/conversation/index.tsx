@@ -101,6 +101,8 @@ export type PendingCreatedWorkspaceSubmit = {
 export type WorkspaceConversationContainerProps = {
 	selectedWorkspaceId: string | null;
 	displayedWorkspaceId: string | null;
+	selectedWorkId?: string | null;
+	displayedWorkId?: string | null;
 	selectedSessionId: string | null;
 	displayedSessionId: string | null;
 	repoId?: string | null;
@@ -200,6 +202,8 @@ export const WorkspaceConversationContainer = memo(
 	function WorkspaceConversationContainer({
 		selectedWorkspaceId,
 		displayedWorkspaceId,
+		selectedWorkId = null,
+		displayedWorkId = null,
 		selectedSessionId,
 		displayedSessionId,
 		repoId = null,
@@ -244,6 +248,12 @@ export const WorkspaceConversationContainer = memo(
 		composerTerminalModeAvailable = true,
 		composerLinkedDirectoriesController = null,
 	}: WorkspaceConversationContainerProps) {
+		// Transitional alias during the work-first migration. The copied shell is
+		// still session-shaped internally, but the container now accepts the new
+		// primary object explicitly so the center pane can move to work detail
+		// without another broad prop-surface rewrite.
+		void selectedWorkId;
+		void displayedWorkId;
 		const [composerModelSelections, setComposerModelSelections] = useState<
 			Record<string, ModelRef>
 		>({});

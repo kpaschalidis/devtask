@@ -7,7 +7,7 @@ Use this as the practical setup checklist for the current `devtask` control-plan
 - Git with worktree support
 - Git user configured with `user.name` and `user.email`
 - push access to the repo remotes you plan to publish from
-- Node.js 22.x
+- Node.js 20.19+ (current LTS or newer)
 - npm from the same Node installation
 - Codex CLI or Cursor Agent CLI installed and authenticated
 

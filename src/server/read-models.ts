@@ -7,6 +7,7 @@ import { getLatestWorkPhaseRun, listWorkPhaseRuns, listWorkPhaseSessions } from 
 import {
   getSessionThread,
   listSessionEvents,
+  listSessionTranscript,
   listSessionTimeline,
   listWorkSessionThreads,
 } from "../services/session-history-service.js";
@@ -21,6 +22,12 @@ export interface WorkListEntry {
   waitingOn: string;
 }
 
+export interface WorkListResponse {
+  workspaceId: string | null;
+  work: WorkListEntry[];
+  generatedAt: string;
+}
+
 export interface WorkDetail {
   item: WorkItem;
   status: ReturnType<typeof getWorkStatus>;
@@ -29,7 +36,7 @@ export interface WorkDetail {
   sessions: ReturnType<typeof listWorkSessionThreads>;
 }
 
-export function readWorkList(paths: DevtaskPaths): { work: WorkListEntry[]; generatedAt: string } {
+export function readWorkList(paths: DevtaskPaths): WorkListResponse {
   const work = listWorkItems(paths)
     .map((item) => {
       const diagnostics = getWorkDiagnostics(paths, item.id);
@@ -46,6 +53,7 @@ export function readWorkList(paths: DevtaskPaths): { work: WorkListEntry[]; gene
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
   return {
+    workspaceId: paths.workspaceId,
     work,
     generatedAt: new Date().toISOString(),
   };
@@ -77,10 +85,12 @@ export function readSessionDetail(paths: DevtaskPaths, threadId: string, fromSeq
   thread: ReturnType<typeof getSessionThread>;
   events: ReturnType<typeof listSessionEvents>;
   timeline: ReturnType<typeof listSessionTimeline>;
+  transcript: ReturnType<typeof listSessionTranscript>;
 } {
   return {
     thread: getSessionThread(paths, threadId),
     events: listSessionEvents(paths, threadId, fromSeq),
     timeline: listSessionTimeline(paths, threadId),
+    transcript: listSessionTranscript(paths, threadId),
   };
 }

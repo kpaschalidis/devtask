@@ -7,6 +7,9 @@
     "devtask": "./dist/bin/devtask.js"
   },
   "main": "./dist/index.js",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "files": [
     "dist",
     "docs",

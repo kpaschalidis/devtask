@@ -164,6 +164,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	archivingWorkspaceIds,
 	markingUnreadWorkspaceId,
 	restoringWorkspaceId,
+	disableRowHoverCards = false,
 }: {
 	groups: WorkspaceGroup[];
 	archivedRows: WorkspaceRow[];
@@ -217,6 +218,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	archivingWorkspaceIds?: Set<string>;
 	markingUnreadWorkspaceId?: string | null;
 	restoringWorkspaceId?: string | null;
+	disableRowHoverCards?: boolean;
 }) {
 	const { t, f } = useI18n();
 	const [isAddRepositoryMenuOpen, setIsAddRepositoryMenuOpen] = useState(false);
@@ -617,35 +619,36 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			});
 		}
 
-		// Archived section
-		const previousGroup = visibleGroups.at(-1);
-		items.push({
-			kind: "group-gap",
-			size: getGroupGapSize(
-				(previousGroup?.rows.length ?? 0) > 0,
-				archivedRows.length > 0,
-			),
-		});
-		items.push({
-			kind: "group-header",
-			groupId: ARCHIVED_SECTION_ID,
-			group: {
-				id: ARCHIVED_SECTION_ID,
-				label: "Archived",
-				tone: "backlog" as WorkspaceGroup["tone"],
-				rows: archivedRows,
-			},
-			canCollapse: archivedRows.length > 0,
-		});
+		if (archivedRows.length > 0) {
+			const previousGroup = visibleGroups.at(-1);
+			items.push({
+				kind: "group-gap",
+				size: getGroupGapSize(
+					(previousGroup?.rows.length ?? 0) > 0,
+					archivedRows.length > 0,
+				),
+			});
+			items.push({
+				kind: "group-header",
+				groupId: ARCHIVED_SECTION_ID,
+				group: {
+					id: ARCHIVED_SECTION_ID,
+					label: "Archived",
+					tone: "backlog" as WorkspaceGroup["tone"],
+					rows: archivedRows,
+				},
+				canCollapse: true,
+			});
 
-		if (sectionOpenState[ARCHIVED_SECTION_ID] && archivedRows.length > 0) {
-			for (const row of archivedRows) {
-				items.push({
-					kind: "row",
-					groupId: ARCHIVED_SECTION_ID,
-					row,
-					isArchived: true,
-				});
+			if (sectionOpenState[ARCHIVED_SECTION_ID]) {
+				for (const row of archivedRows) {
+					items.push({
+						kind: "row",
+						groupId: ARCHIVED_SECTION_ID,
+						row,
+						isArchived: true,
+					});
+				}
 			}
 		}
 
@@ -1103,7 +1106,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								? startDragGesture
 								: undefined
 						}
-						disableHoverCard={isAnyDragging}
+						disableHoverCard={isAnyDragging || disableRowHoverCards}
 						archivingWorkspaceIds={archivingWorkspaceIds}
 						markingUnreadWorkspaceId={markingUnreadWorkspaceId}
 						restoringWorkspaceId={restoringWorkspaceId}
@@ -1175,7 +1178,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 			<div className="mt-1 flex items-center justify-between px-3">
 				<h2 className="text-title font-medium text-muted-foreground">
-					<I18nText source="workspaces" />
+					Work Items
 				</h2>
 
 				<div className="flex items-center gap-1 text-muted-foreground">
@@ -1298,9 +1301,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							sideOffset={4}
 							className="flex h-[24px] items-center gap-2 rounded-md px-2 text-small leading-none"
 						>
-							<span>
-								<I18nText source="createNewWorkspace" />
-							</span>
+							<span>Create work item</span>
 							{newWorkspaceShortcut ? (
 								<InlineShortcutDisplay
 									hotkey={newWorkspaceShortcut}

@@ -6,6 +6,8 @@ import { defineConfig } from "vite";
 
 const host = process.env.TAURI_DEV_HOST;
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
+const devtaskApiBase =
+	process.env.DEVTASK_API_BASE ?? "http://127.0.0.1:43210";
 
 export default defineConfig({
 	plugins: [react(), tailwindcss()],
@@ -19,5 +21,11 @@ export default defineConfig({
 		port: 1420,
 		strictPort: true,
 		host: host || false,
+		proxy: {
+			"/api": {
+				target: devtaskApiBase,
+				changeOrigin: true,
+			},
+		},
 	},
 });

@@ -152,7 +152,7 @@ export function StartSurfacePane({
 					Boolean(startRepository) || startMode === "chat"
 				}
 				composerContextKeyOverride={startComposerContextKey}
-				composerPlaceholder="miscDescribeWhatYouWantToBuild"
+				composerPlaceholder="Describe the work item"
 				composerCreateContext={startCreateContext}
 				composerFocusScope="start-composer"
 				composerTerminalModeAvailable={startMode !== "chat"}

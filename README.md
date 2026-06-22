@@ -6,7 +6,7 @@ Built for setups with multiple repos per product, vague tickets that need refine
 
 ## Requirements
 
-- Node.js 22.x
+- Node.js 20.19+ (current LTS or newer)
 - Git with worktree support
 - Codex CLI or Cursor Agent CLI installed and authenticated
 - Provider auth for PR/CI operations: `gh` (GitHub), `glab` (GitLab), or `BITBUCKET_EMAIL` + `BITBUCKET_API_TOKEN`

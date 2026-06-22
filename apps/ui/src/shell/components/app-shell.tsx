@@ -112,7 +112,7 @@ export function AppShell({
 				leftSidebarToggleShortcut: chrome.leftSidebarToggleShortcut,
 				appUpdateStatus: s.appUpdateStatus,
 				appSettings: s.appSettings,
-				onSelectWorkspace: sel.handleSelectWorkspace,
+				onSelectWork: sel.handleSelectWork,
 				onOpenNewWorkspace: s.handleOpenWorkspaceStart,
 				onAddRepositoryNeedsStart:
 					sel.startSurfaceActions.addRepositoryNeedsStart,

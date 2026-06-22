@@ -112,9 +112,25 @@ const workspaceRoute = createRoute({
 	search: { middlewares: [stripDefaultView] },
 });
 
-const workspaceSessionRoute = createRoute({
+const workspaceWorkRoute = createRoute({
 	getParentRoute: () => rootRoute,
-	path: "/w/$workspaceId/s/$sessionId",
+	path: "/w/$workspaceId/work/$workId",
+	component: () => null,
+	validateSearch: validateWorkspaceSearch,
+	search: { middlewares: [stripDefaultView] },
+});
+
+const workspaceWorkSessionRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/w/$workspaceId/work/$workId/session/$threadId",
+	component: () => null,
+	validateSearch: validateWorkspaceSearch,
+	search: { middlewares: [stripDefaultView] },
+});
+
+const workspaceWorkArtifactRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/w/$workspaceId/work/$workId/artifact/$artifactId",
 	component: () => null,
 	validateSearch: validateWorkspaceSearch,
 	search: { middlewares: [stripDefaultView] },
@@ -124,7 +140,9 @@ const routeTree = rootRoute.addChildren([
 	indexRoute,
 	startRoute,
 	workspaceRoute,
-	workspaceSessionRoute,
+	workspaceWorkRoute,
+	workspaceWorkSessionRoute,
+	workspaceWorkArtifactRoute,
 ]);
 
 export const router = createRouter({

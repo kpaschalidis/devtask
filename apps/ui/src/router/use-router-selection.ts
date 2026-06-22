@@ -1,12 +1,12 @@
 // Stage 3b: select-narrowed router reads for the panes.
 //
 // The router is now the single source of truth for navigation INTENT
-// (`viewMode`, `selectedWorkspaceId`, `selectedSessionId`). Panes read it
+// (`viewMode`, `selectedWorkspaceId`, `selectedWorkId`). Panes read it
 // through these `useRouterState({ select })` hooks instead of subscribing to
 // the selection store. The router is created with `defaultStructuralSharing:
 // true`, so `useRouterState`'s `replaceEqualDeep` keeps the returned slice
 // referentially stable when the underlying values are unchanged — both for
-// primitive selectors and the combined `{ workspaceId, sessionId, viewMode }`
+// primitive selectors and the combined `{ workspaceId, workId, viewMode }`
 // object. That stability is what preserves the perf model (no re-render when an
 // unrelated location field changes; P1-A header memo identity holds inside the
 // `"use no memo"` conversation subtree).

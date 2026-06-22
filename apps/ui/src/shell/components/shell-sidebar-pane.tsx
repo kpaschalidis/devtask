@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import type { PushWorkspaceToast } from "@/lib/workspace-toast-context";
 import {
 	useRouterIsStart,
-	useRouterSelectedWorkspaceId,
+	useRouterSelection,
 } from "@/router/use-router-selection";
 import { useEdgePeek } from "@/shell/hooks/use-edge-peek";
 import { useEdgeSwipe } from "@/shell/hooks/use-edge-swipe";
@@ -44,7 +44,7 @@ type Props = {
 	leftSidebarToggleShortcut: string | null;
 	appUpdateStatus: AppUpdateStatus | null;
 	appSettings: AppSettings;
-	onSelectWorkspace: (workspaceId: string | null) => void;
+	onSelectWork: (workId: string | null, workspaceId: string | null) => void;
 	onOpenNewWorkspace: () => void;
 	onAddRepositoryNeedsStart: (repositoryId: string) => void;
 	onMoveLocalToWorktree: (workspaceId: string) => void;
@@ -67,7 +67,7 @@ export function ShellSidebarPane({
 	leftSidebarToggleShortcut,
 	appUpdateStatus,
 	appSettings,
-	onSelectWorkspace,
+	onSelectWork,
 	onOpenNewWorkspace,
 	onAddRepositoryNeedsStart,
 	onMoveLocalToWorktree,
@@ -82,11 +82,11 @@ export function ShellSidebarPane({
 	// `start → null` highlight derivation and the auto-select gate stay mutually
 	// consistent — and lag-free, since the router is now authoritative (no
 	// store→router microtask gap that could let auto-select fight openStart).
-	const selectedWorkspaceId = useRouterSelectedWorkspaceId();
+	const { workId: selectedWorkId } = useRouterSelection();
 	const isStart = useRouterIsStart();
 	// In Start mode nothing in the list is the active workspace — drop the
 	// highlight. Mirrors AppShell's old `viewMode === "start" ? null : id` prop.
-	const highlightedWorkspaceId = isStart ? null : selectedWorkspaceId;
+	const highlightedWorkspaceId = isStart ? null : selectedWorkId;
 	// AND the settings-side gate with the live start flag: auto-select must stay
 	// off while the start surface is showing. Same expression AppShell used to
 	// flatten into the `autoSelectEnabled` prop.
@@ -166,7 +166,7 @@ export function ShellSidebarPane({
 							newWorkspaceShortcut={newWorkspaceShortcut}
 							addRepositoryShortcut={addRepositoryShortcut}
 							sidebarFilterShortcut={sidebarFilterShortcut}
-							onSelectWorkspace={onSelectWorkspace}
+							onSelectWork={onSelectWork}
 							onOpenNewWorkspace={onOpenNewWorkspace}
 							onAddRepositoryNeedsStart={onAddRepositoryNeedsStart}
 							onMoveLocalToWorktree={onMoveLocalToWorktree}

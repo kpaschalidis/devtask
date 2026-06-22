@@ -47,6 +47,8 @@ export type OptimisticPendingSubmit = {
 type WorkspacePanelContainerProps = {
 	selectedWorkspaceId: string | null;
 	displayedWorkspaceId: string | null;
+	selectedWorkId?: string | null;
+	displayedWorkId?: string | null;
 	selectedSessionId: string | null;
 	displayedSessionId: string | null;
 	sessionSelectionHistory?: string[];
@@ -80,6 +82,8 @@ type WorkspacePanelContainerProps = {
 export const WorkspacePanelContainer = memo(function WorkspacePanelContainer({
 	selectedWorkspaceId,
 	displayedWorkspaceId,
+	selectedWorkId = null,
+	displayedWorkId = null,
 	selectedSessionId,
 	displayedSessionId,
 	sessionSelectionHistory = [],
@@ -101,6 +105,8 @@ export const WorkspacePanelContainer = memo(function WorkspacePanelContainer({
 	headerLeading,
 	optimisticPendingSubmit = null,
 }: WorkspacePanelContainerProps) {
+	void selectedWorkId;
+	void displayedWorkId;
 	const queryClient = useQueryClient();
 	const { settings } = useSettings();
 

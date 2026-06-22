@@ -25,7 +25,8 @@ import type {
 	ShellViewMode,
 } from "@/shell/controllers/use-selection-controller";
 import type { StartSurfaceActions } from "@/shell/controllers/use-start-surface-controller";
-import { ShellWorkspaceConversation } from "./shell-workspace-conversation";
+import { WorkItemDetail } from "@/features/work-item/detail";
+import { useRouterSelection } from "@/router/use-router-selection";
 import { StartSurfacePane } from "./start-surface-pane";
 
 type ConversationProps = WorkspaceConversationContainerProps;
@@ -132,6 +133,15 @@ export function WorkspacePaneSurface({
 	headerActionsNode,
 }: Props) {
 	const { t } = useI18n();
+	const { workId, sessionThreadId, artifactId } = useRouterSelection();
+	void repoId;
+	void sessionSelectionHistory;
+	void workspaceChangeRequest;
+	void pendingPromptForSession;
+	void pendingCreatedWorkspaceSubmit;
+	void handlePendingCreatedWorkspaceSubmitConsumed;
+	void contextPreviewCard;
+	void contextPreviewActive;
 	return (
 		<section
 			aria-label={t("workspacePanel")}
@@ -209,47 +219,13 @@ export function WorkspacePaneSurface({
 							composerAtBottom={startComposerAtBottom}
 						/>
 					) : (
-						<ShellWorkspaceConversation
-							repoId={repoId}
-							sessionSelectionHistory={sessionSelectionHistory}
-							onSelectSession={onSelectSession}
-							onSelectWorkspace={selectionActions.selectWorkspace}
-							onResolveDisplayedSession={
-								selectionActions.resolveDisplayedSession
-							}
-							onInteractionSessionsChange={
-								readStateActions.onInteractionSessionsChange
-							}
-							activeStreams={activeStreams}
-							busySessionIds={effectiveBusySessionIds}
-							stoppableSessionIds={effectiveStoppableSessionIds}
-							interactionRequiredSessionIds={interactionRequiredSessionIds}
-							onSessionCompleted={readStateActions.onSessionCompleted}
-							workspaceChangeRequest={workspaceChangeRequest}
-							onSessionAborted={readStateActions.onSessionAborted}
-							pendingPromptForSession={pendingPromptForSession}
-							pendingCreatedWorkspaceSubmit={pendingCreatedWorkspaceSubmit}
-							onPendingCreatedWorkspaceSubmitConsumed={
-								handlePendingCreatedWorkspaceSubmitConsumed
-							}
-							onPendingPromptConsumed={handlePendingPromptConsumed}
-							pendingInsertRequests={pendingComposerInserts}
-							onPendingInsertRequestsConsumed={
-								pendingQueueActions.consumeComposerInserts
-							}
-							onQueuePendingPromptForSession={queuePendingPromptForSession}
-							onRequestCloseSession={onRequestCloseSession}
-							workspaceRootPath={workspaceRootPath}
-							onOpenFileReference={editorSessionActions.openFileReference}
-							contextPanelOpen={contextPanelOpen}
-							onToggleContextPanel={contextPanelActions.toggleContextPanel}
-							contextPreviewCard={contextPreviewCard}
-							contextPreviewActive={contextPreviewActive}
-							onSelectContextPreview={
-								contextPanelActions.selectWorkspaceContextPreview
-							}
-							onCloseContextPreview={
-								contextPanelActions.closeWorkspaceContextPreview
+						<WorkItemDetail
+							workId={workId}
+							selectedSessionThreadId={sessionThreadId}
+							selectedArtifactId={artifactId}
+							onSelectSession={(threadId) => onSelectSession(threadId)}
+							onOpenArtifact={(path) =>
+								editorSessionActions.openFileReference(path)
 							}
 							headerLeading={headerLeadingNode}
 							headerActions={headerActionsNode}

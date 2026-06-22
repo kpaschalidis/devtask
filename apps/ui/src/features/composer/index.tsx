@@ -730,25 +730,24 @@ export const WorkspaceComposer = memo(function WorkspaceComposer({
 	);
 	const alternateStartSubmitMode: StartSubmitMode =
 		startSubmitMode === "saveForLater" ? "startNow" : "saveForLater";
-	const preferredStartSubmitKey = !hasContent
-		? "newWorkspace"
+	const preferredStartSubmitLabel = !hasContent
+		? "New Work Item"
 		: startSubmitMode === "saveForLater"
-			? "composerSaveForLater"
-			: "composerStartNow";
-	const preferredStartSubmitLabel = t(preferredStartSubmitKey);
+			? t("composerSaveForLater")
+			: t("composerStartNow");
 	const alternateStartSubmitLabel =
 		alternateStartSubmitMode === "saveForLater"
 			? t("composerSaveForLater")
 			: t("composerStartNow");
 	// Narrow surfaces show a shortened label; the dropdown items keep the
 	// full labels.
-	const compactStartSubmitLabel = t(
-		!hasContent
-			? "composerNewWorkspaceShort"
-			: startSubmitMode === "saveForLater"
-				? "composerSaveForLaterShort"
-				: "composerStartNowShort",
-	);
+	const compactStartSubmitLabel = !hasContent
+		? "New Item"
+		: t(
+				startSubmitMode === "saveForLater"
+					? "composerSaveForLaterShort"
+					: "composerStartNowShort",
+			);
 
 	const handleComposerKeyDownCapture = useCallback(
 		(event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1420,7 +1419,7 @@ export const WorkspaceComposer = memo(function WorkspaceComposer({
 													<Button
 														variant="outline"
 														size="sm"
-														aria-label={preferredStartSubmitKey}
+														aria-label={preferredStartSubmitLabel}
 														onClick={() =>
 															handleStartSubmitMode(startSubmitMode)
 														}

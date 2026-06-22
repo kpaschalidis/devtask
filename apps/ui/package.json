@@ -13,6 +13,7 @@
 	"scripts": {
 		"changeset": "changeset",
 		"dev": "vite --configLoader runner --host 127.0.0.1 --port 1420",
+		"dev:devtask": "node scripts/dev-with-api.mjs",
 		"dev:prepare": "bun run dev:prepare:sidecar && bun run dev:prepare:cli",
 		"dev:prepare:sidecar": "cd sidecar && bun run dev:prepare",
 		"dev:prepare:cli": "node scripts/stage-dev-cli.mjs",

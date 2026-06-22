@@ -1,8 +1,7 @@
+import { useQuery } from "@tanstack/react-query";
 import { memo } from "react";
-import { openWorkspaceInFinder } from "@/lib/api";
-import { extractError } from "@/lib/errors";
-import { translateSource } from "@/lib/i18n";
-import { useWorkspacesSidebarController } from "./hooks/use-controller";
+import type { WorkspaceGroup, WorkspaceRow, WorkspaceStatus } from "@/lib/api";
+import { devtaskWorkListQueryOptions } from "@/lib/devtask-query-client";
 import { WorkspacesSidebar } from "./index";
 
 type WorkspaceToastVariant = "default" | "destructive";
@@ -15,7 +14,7 @@ type WorkspacesSidebarContainerProps = {
 	newWorkspaceShortcut?: string | null;
 	addRepositoryShortcut?: string | null;
 	sidebarFilterShortcut?: string | null;
-	onSelectWorkspace: (workspaceId: string | null) => void;
+	onSelectWork: (workId: string | null, workspaceId: string | null) => void;
 	onOpenNewWorkspace?: () => void;
 	onAddRepositoryNeedsStart?: (repositoryId: string) => void;
 	onMoveLocalToWorktree?: (workspaceId: string) => void;
@@ -33,124 +32,123 @@ type WorkspacesSidebarContainerProps = {
 export const WorkspacesSidebarContainer = memo(
 	function WorkspacesSidebarContainer({
 		selectedWorkspaceId,
-		autoSelectEnabled = true,
+		autoSelectEnabled: _autoSelectEnabled = true,
 		busyWorkspaceIds,
 		interactionRequiredWorkspaceIds,
 		newWorkspaceShortcut,
 		addRepositoryShortcut,
 		sidebarFilterShortcut,
-		onSelectWorkspace,
-		onOpenNewWorkspace,
-		onAddRepositoryNeedsStart,
+		onSelectWork,
+		onOpenNewWorkspace: _onOpenNewWorkspace,
+		onAddRepositoryNeedsStart: _onAddRepositoryNeedsStart,
 		onMoveLocalToWorktree,
-		pushWorkspaceToast,
+		pushWorkspaceToast: _pushWorkspaceToast,
 	}: WorkspacesSidebarContainerProps) {
-		const {
-			addingRepository,
-			archivingWorkspaceIds,
-			archivedRows,
-			availableRepositories,
-			creatingWorkspaceRepoId,
-			cloneDefaultDirectory,
-			groups,
-			sidebarGrouping,
-			sidebarRepoFilterIds,
-			sidebarSort,
-			updateSettings,
-			handleAddRepository,
-			handleArchiveWorkspace,
-			handleCloneFromUrl,
-			handleDeleteWorkspace,
-			handleMarkWorkspaceUnread,
-			handleMoveRepositoryInSidebar,
-			handleMoveWorkspaceInSidebar,
-			handleOpenCloneDialog,
-			handleRestoreWorkspace,
-			handleSelectWorkspace,
-			handleSetWorkspaceStatus,
-			handleTogglePin,
-			isCloneDialogOpen,
-			prefetchWorkspace,
-			setIsCloneDialogOpen,
-		} = useWorkspacesSidebarController({
-			selectedWorkspaceId,
-			autoSelectEnabled,
-			onSelectWorkspace,
-			onOpenNewWorkspace,
-			onAddRepositoryNeedsStart,
-			pushWorkspaceToast,
-		});
+		const { data } = useQuery(devtaskWorkListQueryOptions());
+		const groups = projectWorkGroups(data?.work ?? []);
+		const workspaceId = data?.workspaceId ?? null;
+		const archivedRows: WorkspaceRow[] = [];
+
 		return (
 			<WorkspacesSidebar
 				groups={groups}
 				archivedRows={archivedRows}
-				availableRepositories={availableRepositories}
-				sidebarGrouping={sidebarGrouping}
-				sidebarRepoFilterIds={sidebarRepoFilterIds}
-				sidebarSort={sidebarSort}
-				onSidebarGroupingChange={(sidebarGrouping) => {
-					void updateSettings({ sidebarGrouping });
-				}}
-				onSidebarRepoFilterChange={(sidebarRepoFilterIds) => {
-					void updateSettings({ sidebarRepoFilterIds });
-				}}
-				onSidebarSortChange={(sidebarSort) => {
-					void updateSettings({ sidebarSort });
-				}}
-				addingRepository={addingRepository}
-				archivingWorkspaceIds={archivingWorkspaceIds}
+				sidebarGrouping="status"
+				sidebarRepoFilterIds={[]}
+				sidebarSort="custom"
+				addingRepository={false}
+				archivingWorkspaceIds={new Set()}
 				selectedWorkspaceId={selectedWorkspaceId}
 				busyWorkspaceIds={busyWorkspaceIds}
 				interactionRequiredWorkspaceIds={interactionRequiredWorkspaceIds}
 				newWorkspaceShortcut={newWorkspaceShortcut}
 				addRepositoryShortcut={addRepositoryShortcut}
 				sidebarFilterShortcut={sidebarFilterShortcut}
-				creatingWorkspaceRepoId={creatingWorkspaceRepoId}
-				onAddRepository={() => {
-					void handleAddRepository();
-				}}
-				onOpenCloneDialog={handleOpenCloneDialog}
-				isCloneDialogOpen={isCloneDialogOpen}
-				onCloneDialogOpenChange={setIsCloneDialogOpen}
-				cloneDefaultDirectory={cloneDefaultDirectory}
-				onSubmitClone={handleCloneFromUrl}
-				onSelectWorkspace={handleSelectWorkspace}
-				onPrefetchWorkspace={prefetchWorkspace}
-				onOpenNewWorkspace={onOpenNewWorkspace}
-				onCreateWorkspaceForRepo={onAddRepositoryNeedsStart}
-				onArchiveWorkspace={handleArchiveWorkspace}
+				onSelectWorkspace={(workId) => onSelectWork(workId, workspaceId)}
 				onMoveLocalToWorktree={onMoveLocalToWorktree}
-				onMarkWorkspaceUnread={handleMarkWorkspaceUnread}
-				onRestoreWorkspace={handleRestoreWorkspace}
-				onDeleteWorkspace={handleDeleteWorkspace}
-				onOpenInFinder={(workspaceId) => {
-					void openWorkspaceInFinder(workspaceId).catch((error) => {
-						const finderError = translateSource("navFailedToOpenFinder");
-						const { message } = extractError(error, finderError);
-						pushWorkspaceToast(message, finderError, "destructive");
-					});
-				}}
-				onTogglePin={(workspaceId, pinned) => {
-					void handleTogglePin(workspaceId, pinned);
-				}}
-				onMoveWorkspaceInSidebar={(
-					workspaceId,
-					targetGroupId,
-					beforeWorkspaceId,
-				) => {
-					void handleMoveWorkspaceInSidebar(
-						workspaceId,
-						targetGroupId,
-						beforeWorkspaceId,
-					);
-				}}
-				onMoveRepositoryInSidebar={(repoId, beforeRepoId) => {
-					void handleMoveRepositoryInSidebar(repoId, beforeRepoId);
-				}}
-				onSetWorkspaceStatus={(workspaceId, status) => {
-					void handleSetWorkspaceStatus(workspaceId, status);
-				}}
+				disableRowHoverCards
 			/>
 		);
 	},
 );
+
+function projectWorkGroups(
+	work: Array<{
+		id: string;
+		title: string;
+		status: string;
+		updatedAt: string;
+		nextAction: string;
+		waitingOn: string;
+		sourceType: string;
+	}>,
+): WorkspaceGroup[] {
+	const grouped = new Map<string, WorkspaceRow[]>();
+
+	for (const item of work) {
+		const groupId = normalizeWorkGroup(item.status);
+		const rows = grouped.get(groupId) ?? [];
+		rows.push({
+			id: item.id,
+			title: item.title,
+			status: mapWorkStatus(item.status),
+			state: "ready",
+			directoryName: item.sourceType,
+			branch: item.nextAction,
+			repoName: item.waitingOn,
+			updatedAt: item.updatedAt,
+		});
+		grouped.set(groupId, rows);
+	}
+
+	return Array.from(grouped.entries()).map(([groupId, rows]) => ({
+		id: groupId,
+		label: groupLabel(groupId),
+		tone: groupTone(groupId),
+		rows: rows.sort((left, right) =>
+			(right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""),
+		),
+	}));
+}
+
+function normalizeWorkGroup(status: string): string {
+	if (status.includes("failed") || status.includes("blocked")) return "review";
+	if (status.includes("done") || status.includes("passed")) return "done";
+	if (status.includes("running") || status.includes("execut")) return "progress";
+	return "backlog";
+}
+
+function mapWorkStatus(status: string): WorkspaceStatus {
+	if (status.includes("done") || status.includes("passed")) return "done";
+	if (status.includes("failed") || status.includes("blocked")) return "review";
+	if (status.includes("running") || status.includes("execut")) {
+		return "in-progress";
+	}
+	return "backlog";
+}
+
+function groupLabel(groupId: string): string {
+	switch (groupId) {
+		case "progress":
+			return "In Progress";
+		case "review":
+			return "Attention";
+		case "done":
+			return "Done";
+		default:
+			return "Planned";
+	}
+}
+
+function groupTone(groupId: string): WorkspaceGroup["tone"] {
+	switch (groupId) {
+		case "progress":
+			return "progress";
+		case "review":
+			return "review";
+		case "done":
+			return "done";
+		default:
+			return "backlog";
+	}
+}

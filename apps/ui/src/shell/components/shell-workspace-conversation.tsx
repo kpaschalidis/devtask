@@ -20,14 +20,19 @@ type Props = Omit<
 	WorkspaceConversationContainerProps,
 	| "selectedWorkspaceId"
 	| "displayedWorkspaceId"
+	| "selectedWorkId"
+	| "displayedWorkId"
 	| "selectedSessionId"
 	| "displayedSessionId"
 >;
 
 export function ShellWorkspaceConversation(props: Props) {
 	// `selected*` from the router (structurally shared → stable identity).
-	const { workspaceId: selectedWorkspaceId, sessionId: selectedSessionId } =
-		useRouterSelection();
+	const {
+		workspaceId: selectedWorkspaceId,
+		workId: selectedWorkId,
+		sessionId: selectedSessionId,
+	} = useRouterSelection();
 	// `displayed*` from the store — ONE `useShallow` subscription for both, never
 	// two independent `useStore` calls, which would tear the pairing.
 	const { displayedWorkspaceId, displayedSessionId } = useStore(
@@ -43,6 +48,8 @@ export function ShellWorkspaceConversation(props: Props) {
 			{...props}
 			selectedWorkspaceId={selectedWorkspaceId}
 			displayedWorkspaceId={displayedWorkspaceId}
+			selectedWorkId={selectedWorkId}
+			displayedWorkId={selectedWorkId}
 			selectedSessionId={selectedSessionId}
 			displayedSessionId={displayedSessionId}
 		/>

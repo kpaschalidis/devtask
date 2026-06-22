@@ -97,16 +97,22 @@ export type SelectionState = {
 
 export type SelectionSnapshot = {
 	workspaceId: string | null;
+	workId: string | null;
+	sessionThreadId: string | null;
+	artifactId: string | null;
+	// Deprecated compatibility alias during the migration.
 	sessionId: string | null;
 	viewMode: ShellViewMode;
 };
 
 export type SelectionActions = {
 	selectWorkspace(id: string | null): void;
+	selectWork(id: string | null, workspaceId?: string | null): void;
 	selectSession(id: string | null): void;
 	openStart(opts?: { persist?: boolean }): void;
 	setViewMode(mode: ShellViewMode): void;
 	navigateWorkspaces(offset: -1 | 1): void;
+	navigateWork(offset: -1 | 1): void;
 	navigateSessions(offset: -1 | 1): void;
 	resolveDisplayedSession(id: string | null): void;
 	rememberSessionSelection(
@@ -137,10 +143,11 @@ const INITIAL_SELECTION_STATE: SelectionState = {
 // the synchronous "latest intent" the actions / `getSnapshot` rely on.
 function getRouterSelection(): SelectionSnapshot {
 	const loc = router.state.location;
-	return locationToSelection({
+	const selection = locationToSelection({
 		pathname: loc.pathname,
 		search: loc.search as { view?: string },
 	});
+	return selection;
 }
 
 export type SelectionControllerDeps = {
@@ -833,7 +840,9 @@ export function useSelectionController(
 				viewMode:
 					current.viewMode === "start" ? "conversation" : current.viewMode,
 				workspaceId: current.workspaceId,
-				sessionId,
+				workId: current.workId,
+				sessionThreadId: current.workId ? sessionId : null,
+				sessionId: current.workId ? null : sessionId,
 			});
 
 			if (workspaceDiverged) return;
@@ -876,6 +885,22 @@ export function useSelectionController(
 			runWorkspaceDisplayFlip,
 			store,
 		],
+	);
+
+	const selectWork = useCallback(
+		(workId: string | null, workspaceId?: string | null) => {
+			const current = getRouterSelection();
+			if (workId === current.workId && current.sessionThreadId === null) return;
+			navigateSelection({
+				viewMode:
+					current.viewMode === "start" ? "conversation" : current.viewMode,
+				workspaceId: current.workspaceId ?? workspaceId ?? null,
+				workId,
+				sessionThreadId: null,
+				artifactId: null,
+			});
+		},
+		[],
 	);
 
 	const openStart = useCallback(
@@ -954,6 +979,16 @@ export function useSelectionController(
 		[queryClient, selectSession],
 	);
 
+	const navigateWork = useCallback(
+		(offset: -1 | 1) => {
+			// Transitional alias while the copied shell is still backed by
+			// session-derived lists. The work-first sidebar will replace this with
+			// real work navigation in the next migration step.
+			navigateSessions(offset);
+		},
+		[navigateSessions],
+	);
+
 	const resolveDisplayedSession = useCallback(
 		(sessionId: string | null) => {
 			// PAINT-track only. The panel calls this when it resolves which session
@@ -991,10 +1026,12 @@ export function useSelectionController(
 	// hooks that close over it don't re-create on every controller render.
 	const actions = useStableActions<SelectionActions>({
 		selectWorkspace,
+		selectWork,
 		selectSession,
 		openStart,
 		setViewMode,
 		navigateWorkspaces,
+		navigateWork,
 		navigateSessions,
 		resolveDisplayedSession,
 		rememberSessionSelection,
