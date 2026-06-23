@@ -23,6 +23,8 @@ export type {
   Redirect,
   MissionSnapshot,
   MissionAction,
+  RecoverOutcome,
+  RecoverInvocationInput,
   CreateMissionInput,
   MissionDefinitionValidationError,
   MissionDefinitionValidation,
@@ -54,7 +56,7 @@ export {
   CreateSpecInputSchema,
 } from './domain/schemas.js';
 
-export { validateMissionDefinition, validateOrchestratorDecision } from './domain/validation.js';
+export { validateMissionDefinition, validateOrchestratorDecision, validateWorkerHandoff, validateValidatorHandoff } from './domain/validation.js';
 export { deriveNextAction, isFeatureComplete, isMilestoneValidationPassed } from './domain/scheduler.js';
 
 export {
@@ -64,6 +66,7 @@ export {
   InvalidHandoffError,
   MissingMissionError,
   InvalidDefinitionError,
+  MissionAlreadyExistsError,
 } from './domain/errors.js';
 
 export type { MissionStore, MissionCommit, MissionEvent, NewMissionEvent } from './store/store.js';
@@ -91,3 +94,18 @@ export type {
 
 export { SpecWorkflow } from './spec/spec-workflow.js';
 export { MissionController } from './mission/mission-controller.js';
+
+// Factory functions for ergonomic construction.
+import { MissionController } from './mission/mission-controller.js';
+import { SpecWorkflow } from './spec/spec-workflow.js';
+import type { MissionAgents } from './ports/ports.js';
+import type { MissionStore } from './store/store.js';
+import type { SpecPlanner } from './ports/ports.js';
+
+export function createMissionController(store: MissionStore, agents: MissionAgents): MissionController {
+  return new MissionController(store, agents);
+}
+
+export function createSpecWorkflow(planner: SpecPlanner): SpecWorkflow {
+  return new SpecWorkflow(planner);
+}

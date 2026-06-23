@@ -39,3 +39,10 @@ export class InvalidDefinitionError extends MissionError {
     this.name = 'InvalidDefinitionError';
   }
 }
+
+export class MissionAlreadyExistsError extends MissionError {
+  constructor(id: string) {
+    super(`Mission already exists: ${id}`);
+    this.name = 'MissionAlreadyExistsError';
+  }
+}

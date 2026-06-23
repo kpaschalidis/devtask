@@ -7,6 +7,7 @@ function ts() { return new Date().toISOString(); }
 function makeDef(overrides: Partial<MissionDefinition> = {}): MissionDefinition {
   return {
     id: 'def1',
+    version: 0,
     goal: 'Build a thing',
     context: '',
     validationContract: {
@@ -362,5 +363,56 @@ describe('deriveNextAction', () => {
     });
     const action = deriveNextAction(snapshot);
     expect(action?.type).toBe('BlockMission');
+  });
+
+  it('repair dependencies may reference completed planned features', () => {
+    const def = makeDef({
+      features: [
+        { id: 'f1', kind: 'planned', milestoneId: 'm1', description: 'F1' },
+        { id: 'r1', kind: 'repair', milestoneId: 'm1', description: 'R1' },
+      ],
+      featureDependencies: [{ featureId: 'r1', dependsOnId: 'f1' }],
+    });
+    const snapshot = makeSnapshot({
+      status: 'running',
+      definition: def,
+      featureAttempts: [{ invocationId: 'inv1', featureId: 'f1', attemptNumber: 1, startedAt: ts(), completedAt: ts(), status: 'completed', handoff: null }],
+      validationRounds: [{
+        invocationId: 'vr1',
+        milestoneId: 'm1',
+        roundNumber: 1,
+        startedAt: ts(),
+        completedAt: ts(),
+        status: 'failed',
+        handoff: {
+          invocationId: 'vr1',
+          milestoneId: 'm1',
+          validationRound: 1,
+          status: 'failed',
+          assertionResults: [{ assertionId: 'a1', passed: false, notes: '' }],
+          evidenceRefs: [],
+          findings: [{ id: 'fi1', assertionId: 'a1', description: 'Bad', severity: 'critical' }],
+          environmentBlockers: [],
+        },
+      }],
+      orchestratorDecisions: [{
+        milestoneId: 'm1',
+        validationRound: 1,
+        recordedAt: ts(),
+        decision: {
+          invocationId: 'orch1',
+          findingIds: ['fi1'],
+          repairFeatures: [{ id: 'r1', milestoneId: 'm1', description: 'R1', dependencies: ['f1'] }],
+          addressedAssertionIds: ['a1'],
+          explanation: null,
+          safeToRepair: true,
+        },
+      }],
+    });
+    const action = deriveNextAction(snapshot);
+    expect(action?.type).toBe('ImplementFeature');
+    if (action?.type === 'ImplementFeature') {
+      expect(action.featureId).toBe('r1');
+    }
   });
 });

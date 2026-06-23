@@ -11,24 +11,28 @@ import {
   type FeatureDependency,
   type OrchestratorRoundRecord,
   type ActiveInvocation,
+  type RecoverInvocationInput,
 } from '../domain/types.js';
-import { validateMissionDefinition, validateOrchestratorDecision } from '../domain/validation.js';
+import { validateMissionDefinition, validateOrchestratorDecision, validateWorkerHandoff, validateValidatorHandoff } from '../domain/validation.js';
 import { deriveNextAction } from '../domain/scheduler.js';
 import {
   ValidationContractSchema,
   MissionDefinitionSchema,
-  WorkerHandoffSchema,
-  ValidationHandoffSchema,
   OrchestratorRepairDecisionSchema,
+  ValidationHandoffSchema,
+  WorkerHandoffSchema,
 } from '../domain/schemas.js';
 import {
   InvalidStateError,
   InvalidHandoffError,
   MissingMissionError,
   InvalidDefinitionError,
+  StaleRevisionError,
 } from '../domain/errors.js';
 import type { MissionStore, MissionEvent, NewMissionEvent } from '../store/store.js';
 import type { MissionAgents } from '../ports/ports.js';
+
+const MAX_CLAIM_RETRIES = 3;
 
 export class MissionController {
   constructor(
@@ -64,7 +68,8 @@ export class MissionController {
 
     const id = crypto.randomUUID();
     const snapshot = this.emptySnapshot(id);
-    snapshot.definition = defParsed.data;
+    // Start definition at version 0; each mutation increments it.
+    snapshot.definition = { ...defParsed.data, version: 0 };
     snapshot.updatedAt = this.now();
     return this.store.create(snapshot, [{ type: 'mission.draft.created', payload: { contractInvId, planInvId } }]);
   }
@@ -81,7 +86,9 @@ export class MissionController {
       throw new InvalidHandoffError(`Planner returned invalid revised definition: ${parsed.error.message}`);
     }
 
-    const updated: MissionSnapshot = { ...snapshot, definition: parsed.data, updatedAt: this.now() };
+    // Increment definition version on every successful revision.
+    const updatedDef = { ...parsed.data, version: snapshot.definition.version + 1 };
+    const updated: MissionSnapshot = { ...snapshot, definition: updatedDef, updatedAt: this.now() };
     return this.store.commit({
       id,
       expectedRevision: snapshot.revision,
@@ -98,7 +105,9 @@ export class MissionController {
 
   async approve(id: string): Promise<MissionSnapshot> {
     const snapshot = this.requireMission(id);
-    if (snapshot.status !== 'draft') throw new InvalidStateError(`Cannot approve mission in status: ${snapshot.status}`);
+    if (snapshot.status !== 'draft' && snapshot.status !== 'awaiting-approval') {
+      throw new InvalidStateError(`Cannot approve mission in status: ${snapshot.status}`);
+    }
     if (!snapshot.definition) throw new InvalidStateError('Mission has no definition to approve');
 
     const validation = validateMissionDefinition(snapshot.definition);
@@ -108,7 +117,8 @@ export class MissionController {
     const updated: MissionSnapshot = {
       ...snapshot,
       status: 'ready',
-      approvedDefinitionRevision: snapshot.revision,
+      // Track the definition's own version, not the store revision.
+      approvedDefinitionVersion: snapshot.definition.version,
       approvedAt: ts,
       updatedAt: ts,
     };
@@ -116,15 +126,37 @@ export class MissionController {
       id,
       expectedRevision: snapshot.revision,
       snapshot: updated,
-      events: [{ type: 'mission.approved', payload: {} }],
+      events: [{ type: 'mission.approved', payload: { definitionVersion: snapshot.definition.version } }],
     });
   }
 
   async advance(id: string): Promise<AdvanceResult> {
+    // CAS retry: reload and re-derive on StaleRevisionError up to MAX_CLAIM_RETRIES times.
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_CLAIM_RETRIES; attempt++) {
+      try {
+        return await this.advanceOnce(id);
+      } catch (err) {
+        if (err instanceof StaleRevisionError && attempt < MAX_CLAIM_RETRIES) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError;
+  }
+
+  private async advanceOnce(id: string): Promise<AdvanceResult> {
     let snapshot = this.requireMission(id);
 
-    if (snapshot.approvedDefinitionRevision === null && (snapshot.status === 'ready' || snapshot.status === 'running')) {
-      throw new InvalidStateError('Mission has no approved definition revision');
+    if (snapshot.status === 'ready' || snapshot.status === 'running') {
+      // Reject stale approvals: definition may have changed since last approval.
+      if (snapshot.definition && snapshot.approvedDefinitionVersion !== snapshot.definition.version) {
+        throw new InvalidStateError(
+          `Mission definition version ${snapshot.definition.version} is not approved (last approved: ${snapshot.approvedDefinitionVersion}). Call approve() first.`,
+        );
+      }
     }
 
     const action = deriveNextAction(snapshot);
@@ -158,7 +190,7 @@ export class MissionController {
         startedAt: ts,
       };
 
-      // Atomic claim: add active invocation and running attempt.
+      // Atomic claim: commit before invoking the port.
       const claimedSnapshot: MissionSnapshot = {
         ...snapshot,
         status: 'running',
@@ -181,7 +213,6 @@ export class MissionController {
         events: [{ type: 'feature.attempt.started', payload: { invocationId: action.invocationId, featureId: action.featureId, attemptNumber } }],
       });
 
-      // Execute port — recover atomically on any failure.
       let rawHandoff: unknown;
       try {
         rawHandoff = await this.agents.worker.implement({ invocationId: action.invocationId, feature, milestone, snapshot });
@@ -196,32 +227,32 @@ export class MissionController {
         throw err;
       }
 
-      // Validate JSON shape.
-      const parsed = WorkerHandoffSchema.safeParse(rawHandoff);
-      if (!parsed.success) {
+      const parsedHandoff = WorkerHandoffSchema.safeParse(rawHandoff);
+      if (!parsedHandoff.success) {
         const recovered = this.requireMission(id);
         this.store.commit({
           id,
           expectedRevision: recovered.revision,
           snapshot: failAttempt(recovered, action.invocationId, ts),
-          events: [{ type: 'feature.attempt.invalid-handoff', payload: { invocationId: action.invocationId, error: parsed.error.message } }],
+          events: [{ type: 'feature.attempt.invalid-handoff', payload: { invocationId: action.invocationId, errors: [parsedHandoff.error.message] } }],
         });
-        throw new InvalidHandoffError(`Worker returned invalid handoff: ${parsed.error.message}`);
+        throw new InvalidHandoffError(`Worker handoff invalid: ${parsedHandoff.error.message}`);
       }
 
-      // Validate identity.
-      const handoff = parsed.data;
-      if (handoff.invocationId !== action.invocationId || handoff.featureId !== action.featureId) {
+      const handoff = parsedHandoff.data;
+      const identityErrors = validateWorkerHandoff(
+        handoff,
+        { invocationId: action.invocationId, featureId: action.featureId },
+      );
+      if (identityErrors.length > 0) {
         const recovered = this.requireMission(id);
         this.store.commit({
           id,
           expectedRevision: recovered.revision,
           snapshot: failAttempt(recovered, action.invocationId, ts),
-          events: [{ type: 'feature.attempt.identity-mismatch', payload: { invocationId: action.invocationId } }],
+          events: [{ type: 'feature.attempt.invalid-handoff', payload: { invocationId: action.invocationId, errors: identityErrors } }],
         });
-        throw new InvalidHandoffError(
-          `Worker handoff identity mismatch: expected invocationId=${action.invocationId} featureId=${action.featureId}, got invocationId=${handoff.invocationId} featureId=${handoff.featureId}`,
-        );
+        throw new InvalidHandoffError(`Worker handoff invalid: ${identityErrors.join('; ')}`);
       }
 
       const resultSnapshot = this.requireMission(id);
@@ -291,73 +322,37 @@ export class MissionController {
         throw err;
       }
 
-      const parsed = ValidationHandoffSchema.safeParse(rawHandoff);
-      if (!parsed.success) {
+      const parsedHandoff = ValidationHandoffSchema.safeParse(rawHandoff);
+      if (!parsedHandoff.success) {
         const recovered = this.requireMission(id);
         this.store.commit({
           id,
           expectedRevision: recovered.revision,
           snapshot: failValidationRound(recovered, action.invocationId, ts),
-          events: [{ type: 'validation.round.invalid-handoff', payload: { invocationId: action.invocationId, error: parsed.error.message } }],
+          events: [{ type: 'validation.round.invalid-handoff', payload: { invocationId: action.invocationId, errors: [parsedHandoff.error.message] } }],
         });
-        throw new InvalidHandoffError(`Validator returned invalid handoff: ${parsed.error.message}`);
+        throw new InvalidHandoffError(`Validator handoff invalid: ${parsedHandoff.error.message}`);
       }
 
-      const handoff = parsed.data;
-
-      // Validate identity.
-      if (
-        handoff.invocationId !== action.invocationId ||
-        handoff.milestoneId !== action.milestoneId ||
-        handoff.validationRound !== action.roundNumber
-      ) {
+      const handoff = parsedHandoff.data;
+      const identityErrors = validateValidatorHandoff(
+        handoff,
+        {
+          invocationId: action.invocationId,
+          milestoneId: action.milestoneId,
+          roundNumber: action.roundNumber,
+          assertionIds: assertions.map((a) => a.id),
+        },
+      );
+      if (identityErrors.length > 0) {
         const recovered = this.requireMission(id);
         this.store.commit({
           id,
           expectedRevision: recovered.revision,
           snapshot: failValidationRound(recovered, action.invocationId, ts),
-          events: [{ type: 'validation.round.identity-mismatch', payload: { invocationId: action.invocationId } }],
+          events: [{ type: 'validation.round.invalid-handoff', payload: { invocationId: action.invocationId, errors: identityErrors } }],
         });
-        throw new InvalidHandoffError(
-          `Validator handoff identity mismatch: expected invocationId=${action.invocationId} milestoneId=${action.milestoneId} round=${action.roundNumber}`,
-        );
-      }
-
-      // Validate assertion coverage: every applicable assertion must appear exactly once.
-      const expectedAssertionIds = new Set(assertions.map((a) => a.id));
-      const coveredIds = handoff.assertionResults.map((r) => r.assertionId);
-      const coveredSet = new Set(coveredIds);
-      const missingAssertions = [...expectedAssertionIds].filter((id) => !coveredSet.has(id));
-      const duplicateAssertions = coveredIds.filter((id, i) => coveredIds.indexOf(id) !== i);
-
-      if (missingAssertions.length > 0 || duplicateAssertions.length > 0) {
-        const recovered = this.requireMission(id);
-        this.store.commit({
-          id,
-          expectedRevision: recovered.revision,
-          snapshot: failValidationRound(recovered, action.invocationId, ts),
-          events: [{ type: 'validation.round.assertion-coverage-error', payload: { invocationId: action.invocationId, missingAssertions, duplicateAssertions } }],
-        });
-        throw new InvalidHandoffError(
-          `Validator handoff assertion coverage error — missing: [${missingAssertions.join(', ')}] duplicate: [${duplicateAssertions.join(', ')}]`,
-        );
-      }
-
-      // Validate passed status is consistent.
-      if (handoff.status === 'passed') {
-        const allPassed = handoff.assertionResults.every((r) => r.passed);
-        const hasFindings = handoff.findings.length > 0;
-        const hasBlockers = handoff.environmentBlockers.length > 0;
-        if (!allPassed || hasFindings || hasBlockers) {
-          const recovered = this.requireMission(id);
-          this.store.commit({
-            id,
-            expectedRevision: recovered.revision,
-            snapshot: failValidationRound(recovered, action.invocationId, ts),
-            events: [{ type: 'validation.round.contradictory-passed', payload: { invocationId: action.invocationId } }],
-          });
-          throw new InvalidHandoffError('Validator returned status=passed but has failing assertions, findings, or blockers');
-        }
+        throw new InvalidHandoffError(`Validator handoff invalid: ${identityErrors.join('; ')}`);
       }
 
       const resultSnapshot = this.requireMission(id);
@@ -436,7 +431,6 @@ export class MissionController {
       const decision = parsed.data;
       const resultSnapshot = this.requireMission(id);
 
-      // Semantic validation of the repair decision.
       const semanticErrors = validateOrchestratorDecision(decision, { invocationId: action.invocationId, milestone, findings: action.findings }, resultSnapshot.definition!);
       if (semanticErrors.length > 0) {
         this.store.commit({
@@ -461,8 +455,10 @@ export class MissionController {
         const newDeps: FeatureDependency[] = decision.repairFeatures.flatMap((rf) =>
           rf.dependencies.map((depId) => ({ featureId: rf.id, dependsOnId: depId })),
         );
+        // Repair insertion increments the definition version (pre-approved: bounded, milestone-scoped).
         updatedDef = {
           ...updatedDef,
+          version: updatedDef.version + 1,
           features: [...updatedDef.features, ...newFeatures],
           featureDependencies: [...updatedDef.featureDependencies, ...newDeps],
         };
@@ -484,9 +480,12 @@ export class MissionController {
         return { action, snapshot: committed };
       }
 
+      // Repairs are pre-approved because they are constrained and milestone-scoped.
       const finished: MissionSnapshot = {
         ...resultSnapshot,
         definition: updatedDef,
+        // Update approvedDefinitionVersion to reflect the repair increment (pre-approved).
+        approvedDefinitionVersion: updatedDef.version,
         orchestratorDecisions: [...resultSnapshot.orchestratorDecisions, record],
         activeInvocations: resultSnapshot.activeInvocations.filter((inv) => inv.invocationId !== action.invocationId),
         updatedAt: ts,
@@ -507,6 +506,7 @@ export class MissionController {
 
       if (snapshot.status === 'completed') return { snapshot, actionsExecuted, stoppedReason: 'completed' };
       if (snapshot.status === 'paused') return { snapshot, actionsExecuted, stoppedReason: 'paused' };
+      if (snapshot.status === 'awaiting-approval') return { snapshot, actionsExecuted, stoppedReason: 'awaiting-approval' };
       if (snapshot.status === 'blocked') return { snapshot, actionsExecuted, stoppedReason: 'blocked' };
       if (snapshot.status === 'failed') return { snapshot, actionsExecuted, stoppedReason: 'failed' };
 
@@ -517,6 +517,7 @@ export class MissionController {
       const after = result.snapshot;
       if (after.status === 'completed') return { snapshot: after, actionsExecuted, stoppedReason: 'completed' };
       if (after.status === 'paused') return { snapshot: after, actionsExecuted, stoppedReason: 'paused' };
+      if (after.status === 'awaiting-approval') return { snapshot: after, actionsExecuted, stoppedReason: 'awaiting-approval' };
       if (after.status === 'blocked') return { snapshot: after, actionsExecuted, stoppedReason: 'blocked' };
       if (after.status === 'failed') return { snapshot: after, actionsExecuted, stoppedReason: 'failed' };
 
@@ -526,6 +527,7 @@ export class MissionController {
     const snapshot = this.requireMission(id);
     if (snapshot.status === 'completed') return { snapshot, actionsExecuted, stoppedReason: 'completed' };
     if (snapshot.status === 'paused') return { snapshot, actionsExecuted, stoppedReason: 'paused' };
+    if (snapshot.status === 'awaiting-approval') return { snapshot, actionsExecuted, stoppedReason: 'awaiting-approval' };
     if (snapshot.status === 'blocked') return { snapshot, actionsExecuted, stoppedReason: 'blocked' };
     return { snapshot, actionsExecuted, stoppedReason: 'limit' };
   }
@@ -553,6 +555,15 @@ export class MissionController {
     }
     if (!snapshot.definition) throw new InvalidStateError('Mission has no definition to redirect');
 
+    // Redirect rewrites future scheduling, so it must be exclusive.
+    if (snapshot.activeInvocations.length > 0) {
+      throw new InvalidStateError('Cannot redirect while an invocation is active');
+    }
+
+    // Reject if a redirect invocation is already active.
+    const activeRedirect = snapshot.activeInvocations.find((inv) => inv.type === 'redirect');
+    if (activeRedirect) throw new InvalidStateError('A redirect is already in progress');
+
     const invocationId = crypto.randomUUID();
     const ts = this.now();
 
@@ -560,12 +571,13 @@ export class MissionController {
     const paused: MissionSnapshot = {
       ...snapshot,
       status: 'paused',
+      activeInvocations: [...snapshot.activeInvocations, { invocationId, type: 'redirect', startedAt: ts }],
       redirects: [...snapshot.redirects, {
         invocationId,
         instruction,
         requestedAt: ts,
         appliedAt: null,
-        previousDefinitionRevision: snapshot.revision,
+        previousDefinitionVersion: snapshot.definition.version,
       }],
       updatedAt: ts,
     };
@@ -576,7 +588,6 @@ export class MissionController {
       events: [{ type: 'mission.redirect.requested', payload: { invocationId, instruction } }],
     });
 
-    // Invoke orchestrator to produce a revised definition.
     let rawDef: unknown;
     try {
       rawDef = await this.agents.orchestrator.reviseDefinition({
@@ -586,21 +597,45 @@ export class MissionController {
         snapshot: current,
       });
     } catch (err) {
-      // Leave paused — caller can retry or handle.
+      // Remove redirect invocation but leave paused — caller can retry.
+      const reloaded = this.requireMission(id);
+      this.store.commit({
+        id,
+        expectedRevision: reloaded.revision,
+        snapshot: removeActiveInv(reloaded, invocationId, ts),
+        events: [{ type: 'mission.redirect.exception', payload: { invocationId, error: String(err) } }],
+      });
       throw err;
     }
 
     const defParsed = MissionDefinitionSchema.safeParse(rawDef);
     if (!defParsed.success) {
+      const reloaded = this.requireMission(id);
+      this.store.commit({
+        id,
+        expectedRevision: reloaded.revision,
+        snapshot: removeActiveInv(reloaded, invocationId, ts),
+        events: [{ type: 'mission.redirect.invalid', payload: { invocationId, error: defParsed.error.message } }],
+      });
       throw new InvalidHandoffError(`Orchestrator returned invalid revised definition: ${defParsed.error.message}`);
     }
 
     const defValidation = validateMissionDefinition(defParsed.data);
     if (!defValidation.valid) {
+      const reloaded = this.requireMission(id);
+      this.store.commit({
+        id,
+        expectedRevision: reloaded.revision,
+        snapshot: removeActiveInv(reloaded, invocationId, ts),
+        events: [{ type: 'mission.redirect.invalid', payload: { invocationId, errors: defValidation.errors.map((e) => e.message) } }],
+      });
       throw new InvalidDefinitionError(defValidation.errors.map((e) => e.message));
     }
 
-    // Store the revised definition; require a fresh approve() before execution resumes.
+    // Increment definition version; clear approval until re-approved.
+    const newDefVersion = snapshot.definition.version + 1;
+    const revisedDef = { ...defParsed.data, version: newDefVersion };
+
     const reloaded = this.requireMission(id);
     const redirectIdx = reloaded.redirects.findIndex((r) => r.invocationId === invocationId);
     const updatedRedirects = reloaded.redirects.map((r, i) =>
@@ -608,10 +643,11 @@ export class MissionController {
     );
     const updated: MissionSnapshot = {
       ...reloaded,
-      definition: defParsed.data,
-      status: 'draft',
-      approvedDefinitionRevision: null,
+      definition: revisedDef,
+      status: 'awaiting-approval',
+      approvedDefinitionVersion: null,
       approvedAt: null,
+      activeInvocations: reloaded.activeInvocations.filter((inv) => inv.invocationId !== invocationId),
       redirects: updatedRedirects,
       updatedAt: this.now(),
     };
@@ -619,7 +655,57 @@ export class MissionController {
       id,
       expectedRevision: reloaded.revision,
       snapshot: updated,
-      events: [{ type: 'mission.redirect.applied', payload: { invocationId } }],
+      events: [{ type: 'mission.redirect.applied', payload: { invocationId, newDefinitionVersion: newDefVersion } }],
+    });
+  }
+
+  /**
+   * Recover an orphaned active invocation after process interruption.
+   * Accepts the existing result, or marks the attempt/round failed or blocked,
+   * using the original invocationId.
+   * Never creates a new invocation.
+   */
+  recoverInvocation(input: RecoverInvocationInput): MissionSnapshot {
+    const snapshot = this.requireMission(input.missionId);
+    const active = snapshot.activeInvocations.find((inv) => inv.invocationId === input.invocationId);
+    if (!active) {
+      const knownTerminal = snapshot.featureAttempts.some((a) => a.invocationId === input.invocationId && a.status !== 'running')
+        || snapshot.validationRounds.some((r) => r.invocationId === input.invocationId && r.status !== 'running')
+        || snapshot.redirects.some((r) => r.invocationId === input.invocationId && r.appliedAt !== null)
+        || snapshot.orchestratorDecisions.some((r) => r.decision.invocationId === input.invocationId);
+      if (knownTerminal) return snapshot;
+      throw new InvalidStateError(`No active invocation ${input.invocationId} in mission ${input.missionId}`);
+    }
+
+    const ts = this.now();
+    let updated: MissionSnapshot;
+
+    if (active.type === 'feature') {
+      const result = recoverFeatureAttempt(snapshot, input, ts);
+      updated = {
+        ...snapshot,
+        featureAttempts: result.attempts,
+        activeInvocations: snapshot.activeInvocations.filter((inv) => inv.invocationId !== input.invocationId),
+        updatedAt: ts,
+      };
+    } else if (active.type === 'validation') {
+      const result = recoverValidationRound(snapshot, input, ts);
+      updated = {
+        ...snapshot,
+        validationRounds: result.rounds,
+        activeInvocations: snapshot.activeInvocations.filter((inv) => inv.invocationId !== input.invocationId),
+        updatedAt: ts,
+      };
+    } else {
+      // orchestrator or redirect: just remove the active invocation.
+      updated = removeActiveInv(snapshot, input.invocationId, ts);
+    }
+
+    return this.store.commit({
+      id: input.missionId,
+      expectedRevision: snapshot.revision,
+      snapshot: updated,
+      events: [{ type: 'invocation.recovered', payload: { invocationId: input.invocationId, type: active.type, outcome: input.outcome, reason: input.reason ?? null } }],
     });
   }
 
@@ -649,7 +735,7 @@ export class MissionController {
       revision: 0,
       status: 'draft',
       definition: null,
-      approvedDefinitionRevision: null,
+      approvedDefinitionVersion: null,
       approvedAt: null,
       featureAttempts: [],
       validationRounds: [],
@@ -686,6 +772,78 @@ function failValidationRound(snapshot: MissionSnapshot, invocationId: string, ts
     ...removeActiveInv(snapshot, invocationId, ts),
     validationRounds: snapshot.validationRounds.map((r) =>
       r.invocationId === invocationId ? { ...r, status: 'failed', completedAt: ts } : r,
+    ),
+  };
+}
+
+function recoverFeatureAttempt(
+  snapshot: MissionSnapshot,
+  input: RecoverInvocationInput,
+  ts: string,
+): { attempts: MissionSnapshot['featureAttempts'] } {
+  const attempt = snapshot.featureAttempts.find((a) => a.invocationId === input.invocationId);
+  if (!attempt) throw new InvalidStateError(`No feature attempt for invocation ${input.invocationId}`);
+  if (input.outcome === 'passed') throw new InvalidStateError('Feature recovery outcome cannot be passed');
+
+  if (input.handoff !== undefined) {
+    const parsed = WorkerHandoffSchema.safeParse(input.handoff);
+    if (!parsed.success) throw new InvalidHandoffError(`Recovered worker handoff invalid: ${parsed.error.message}`);
+    const errors = validateWorkerHandoff(parsed.data, { invocationId: input.invocationId, featureId: attempt.featureId });
+    if (errors.length > 0) throw new InvalidHandoffError(`Recovered worker handoff invalid: ${errors.join('; ')}`);
+    return {
+      attempts: snapshot.featureAttempts.map((a) =>
+        a.invocationId === input.invocationId ? { ...a, status: parsed.data.status, completedAt: ts, handoff: parsed.data } : a,
+      ),
+    };
+  }
+
+  if (input.outcome === 'completed') {
+    throw new InvalidHandoffError('Feature recovery outcome completed requires a worker handoff');
+  }
+
+  return {
+    attempts: snapshot.featureAttempts.map((a) =>
+      a.invocationId === input.invocationId ? { ...a, status: input.outcome === 'blocked' ? 'blocked' : 'failed', completedAt: ts } : a,
+    ),
+  };
+}
+
+function recoverValidationRound(
+  snapshot: MissionSnapshot,
+  input: RecoverInvocationInput,
+  ts: string,
+): { rounds: MissionSnapshot['validationRounds'] } {
+  const round = snapshot.validationRounds.find((r) => r.invocationId === input.invocationId);
+  if (!round) throw new InvalidStateError(`No validation round for invocation ${input.invocationId}`);
+  if (input.outcome === 'completed') throw new InvalidStateError('Validation recovery outcome cannot be completed');
+
+  if (input.handoff !== undefined) {
+    const parsed = ValidationHandoffSchema.safeParse(input.handoff);
+    if (!parsed.success) throw new InvalidHandoffError(`Recovered validator handoff invalid: ${parsed.error.message}`);
+    const assertionIds = snapshot.definition?.validationContract.assertions
+      .filter((a) => a.milestoneIds.includes(round.milestoneId))
+      .map((a) => a.id) ?? [];
+    const errors = validateValidatorHandoff(parsed.data, {
+      invocationId: input.invocationId,
+      milestoneId: round.milestoneId,
+      roundNumber: round.roundNumber,
+      assertionIds,
+    });
+    if (errors.length > 0) throw new InvalidHandoffError(`Recovered validator handoff invalid: ${errors.join('; ')}`);
+    return {
+      rounds: snapshot.validationRounds.map((r) =>
+        r.invocationId === input.invocationId ? { ...r, status: parsed.data.status, completedAt: ts, handoff: parsed.data } : r,
+      ),
+    };
+  }
+
+  if (input.outcome === 'passed') {
+    throw new InvalidHandoffError('Validation recovery outcome passed requires a validator handoff');
+  }
+
+  return {
+    rounds: snapshot.validationRounds.map((r) =>
+      r.invocationId === input.invocationId ? { ...r, status: input.outcome === 'blocked' ? 'blocked' : 'failed', completedAt: ts } : r,
     ),
   };
 }

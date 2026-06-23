@@ -2,6 +2,7 @@ export const SCHEMA_VERSION = 1;
 
 export type MissionStatus =
   | 'draft'
+  | 'awaiting-approval'
   | 'ready'
   | 'running'
   | 'paused'
@@ -47,6 +48,7 @@ export interface ExecutionPolicy {
 
 export interface MissionDefinition {
   id: string;
+  version: number;
   goal: string;
   context: string;
   validationContract: ValidationContract;
@@ -149,7 +151,7 @@ export interface Redirect {
   instruction: string;
   requestedAt: string;
   appliedAt: string | null;
-  previousDefinitionRevision: number;
+  previousDefinitionVersion: number;
 }
 
 export interface MissionSnapshot {
@@ -158,7 +160,8 @@ export interface MissionSnapshot {
   revision: number;
   status: MissionStatus;
   definition: MissionDefinition | null;
-  approvedDefinitionRevision: number | null;
+  /** Tracks definition.version at last approval. Execution is only allowed when this equals definition.version. */
+  approvedDefinitionVersion: number | null;
   approvedAt: string | null;
   featureAttempts: FeatureAttempt[];
   validationRounds: ValidationRound[];
@@ -177,6 +180,16 @@ export type MissionAction =
   | { type: 'RequestOrchestratorRepair'; milestoneId: string; invocationId: string; findings: ValidationFinding[] }
   | { type: 'CompleteMission' }
   | { type: 'BlockMission'; reason: string };
+
+export type RecoverOutcome = 'completed' | 'passed' | 'failed' | 'blocked';
+
+export interface RecoverInvocationInput {
+  missionId: string;
+  invocationId: string;
+  outcome: RecoverOutcome;
+  reason?: string;
+  handoff?: WorkerHandoff | ValidationHandoff;
+}
 
 export interface CreateMissionInput {
   goal: string;
@@ -206,7 +219,7 @@ export interface RunOptions {
 export interface RunResult {
   snapshot: MissionSnapshot;
   actionsExecuted: number;
-  stoppedReason: 'completed' | 'paused' | 'blocked' | 'failed' | 'limit';
+  stoppedReason: 'completed' | 'paused' | 'awaiting-approval' | 'blocked' | 'failed' | 'limit';
 }
 
 export interface CreateSpecInput {
@@ -216,6 +229,7 @@ export interface CreateSpecInput {
 
 export interface SpecDocument {
   id: string;
+  version: number;
   goal: string;
   context: string;
   content: string;
@@ -230,5 +244,7 @@ export interface SpecValidation {
 
 export interface ApprovedSpec {
   spec: SpecDocument;
+  approvedVersion: number;
+  approvedDigest: string;
   approvedAt: string;
 }

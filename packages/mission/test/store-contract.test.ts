@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryMissionStore } from '../src/store/in-memory-store.js';
 import { SqliteMissionStore } from '../src/store/sqlite-store.js';
-import { StaleRevisionError } from '../src/domain/errors.js';
+import { StaleRevisionError, MissionAlreadyExistsError } from '../src/domain/errors.js';
 import type { MissionStore } from '../src/store/store.js';
 import type { MissionSnapshot } from '../src/domain/types.js';
 import { SCHEMA_VERSION } from '../src/domain/types.js';
@@ -14,7 +14,7 @@ function makeSnapshot(id: string): MissionSnapshot {
     revision: 0,
     status: 'draft',
     definition: null,
-    approvedDefinitionRevision: null,
+    approvedDefinitionVersion: null,
     approvedAt: null,
     featureAttempts: [],
     validationRounds: [],
@@ -159,6 +159,14 @@ function runStoreContract(createStore: () => MissionStore) {
     ).toThrow(StaleRevisionError);
     // Stored revision should still be 1.
     expect(store.get('m-cas1')!.revision).toBe(1);
+  });
+
+  it('duplicate create throws MissionAlreadyExistsError', () => {
+    const snapshot = makeSnapshot('m-dup1');
+    store.create(snapshot, []);
+    expect(() => store.create(snapshot, [])).toThrow(MissionAlreadyExistsError);
+    // Original should still be intact.
+    expect(store.get('m-dup1')!.revision).toBe(0);
   });
 }
 

@@ -5,6 +5,8 @@ import type {
   OrchestratorRepairDecision,
   Milestone,
   ValidationFinding,
+  ValidationHandoff,
+  WorkerHandoff,
   Feature,
   FeatureDependency,
 } from './types.js';
@@ -131,17 +133,44 @@ export function validateOrchestratorDecision(
   }
 
   const assignedFindingIds = new Set(assignment.findings.map((f) => f.id));
+  const decisionFindingIds = new Set<string>();
+  const duplicateFindingIds = new Set<string>();
+  for (const fid of decision.findingIds) {
+    if (decisionFindingIds.has(fid)) duplicateFindingIds.add(fid);
+    decisionFindingIds.add(fid);
+  }
+  for (const fid of duplicateFindingIds) {
+    errors.push({ code: 'DUPLICATE_FINDING_ID', message: `Decision references finding ID more than once: ${fid}` });
+  }
   for (const fid of decision.findingIds) {
     if (!assignedFindingIds.has(fid)) {
       errors.push({ code: 'UNKNOWN_FINDING_ID', message: `Decision references finding ID not in assignment: ${fid}` });
     }
   }
+  for (const fid of assignedFindingIds) {
+    if (!decisionFindingIds.has(fid)) {
+      errors.push({ code: 'MISSING_FINDING_ID', message: `Decision does not address assigned finding ID: ${fid}` });
+    }
+  }
 
-  const assertionIds = new Set(definition.validationContract.assertions.map((a) => a.id));
+  const assertionIds = new Set(
+    definition.validationContract.assertions
+      .filter((a) => a.milestoneIds.includes(assignment.milestone.id))
+      .map((a) => a.id),
+  );
   for (const aid of decision.addressedAssertionIds) {
     if (!assertionIds.has(aid)) {
-      errors.push({ code: 'UNKNOWN_ASSERTION_ID', message: `Decision addresses unknown assertion ID: ${aid}` });
+      errors.push({ code: 'UNKNOWN_ASSERTION_ID', message: `Decision addresses assertion ID not assigned to milestone ${assignment.milestone.id}: ${aid}` });
     }
+  }
+
+  // Safe decision with no repair features while unresolved findings remain is invalid.
+  if (decision.safeToRepair && decision.repairFeatures.length === 0 && assignment.findings.length > 0) {
+    errors.push({
+      code: 'SAFE_NO_REPAIRS_WITH_FINDINGS',
+      message: 'Orchestrator declared safeToRepair=true with no repair features but findings remain unresolved',
+    });
+    return errors;
   }
 
   if (decision.safeToRepair) {
@@ -190,6 +219,74 @@ export function validateOrchestratorDecision(
       };
       const defValidation = validateMissionDefinition(updatedDef);
       errors.push(...defValidation.errors);
+    }
+  }
+
+  return errors;
+}
+
+export function validateWorkerHandoff(handoff: WorkerHandoff, assignment: { invocationId: string; featureId: string }): string[] {
+  const errors: string[] = [];
+  if (handoff.invocationId !== assignment.invocationId) {
+    errors.push(`invocationId mismatch: expected ${assignment.invocationId}, got ${handoff.invocationId}`);
+  }
+  if (handoff.featureId !== assignment.featureId) {
+    errors.push(`featureId mismatch: expected ${assignment.featureId}, got ${handoff.featureId}`);
+  }
+  if (handoff.status === 'blocked' && !handoff.blockerInfo) {
+    errors.push('blocked status requires non-empty blockerInfo');
+  }
+  return errors;
+}
+
+export function validateValidatorHandoff(
+  handoff: ValidationHandoff,
+  assignment: { invocationId: string; milestoneId: string; roundNumber: number; assertionIds: string[] },
+): string[] {
+  const errors: string[] = [];
+  if (handoff.invocationId !== assignment.invocationId) {
+    errors.push(`invocationId mismatch: expected ${assignment.invocationId}, got ${handoff.invocationId}`);
+  }
+  if (handoff.milestoneId !== assignment.milestoneId) {
+    errors.push(`milestoneId mismatch: expected ${assignment.milestoneId}, got ${handoff.milestoneId}`);
+  }
+  if (handoff.validationRound !== assignment.roundNumber) {
+    errors.push(`validationRound mismatch: expected ${assignment.roundNumber}, got ${handoff.validationRound}`);
+  }
+
+  const expected = new Set(assignment.assertionIds);
+  const covered = handoff.assertionResults.map((r) => r.assertionId);
+  const coveredSet = new Set(covered);
+  const missing = [...expected].filter((id) => !coveredSet.has(id));
+  const extra = covered.filter((id) => !expected.has(id));
+  const dups = covered.filter((id, i) => covered.indexOf(id) !== i);
+  if (missing.length > 0) errors.push(`missing assertion results: ${missing.join(', ')}`);
+  if (extra.length > 0) errors.push(`extra assertion results not in assignment: ${extra.join(', ')}`);
+  if (dups.length > 0) errors.push(`duplicate assertion results: ${dups.join(', ')}`);
+
+  const findingIds = handoff.findings.map((f) => f.id);
+  const dupFindings = findingIds.filter((id, i) => findingIds.indexOf(id) !== i);
+  if (dupFindings.length > 0) errors.push(`duplicate finding IDs: ${dupFindings.join(', ')}`);
+  const unrelatedFindings = handoff.findings
+    .filter((f) => !expected.has(f.assertionId))
+    .map((f) => `${f.id}:${f.assertionId}`);
+  if (unrelatedFindings.length > 0) {
+    errors.push(`findings reference assertions not in assignment: ${unrelatedFindings.join(', ')}`);
+  }
+
+  if (handoff.status === 'passed') {
+    const allPassed = handoff.assertionResults.every((r) => r.passed);
+    if (!allPassed) errors.push('passed status requires all assertion results to pass');
+    if (handoff.findings.length > 0) errors.push('passed status requires no findings');
+    if (handoff.environmentBlockers.length > 0) errors.push('passed status requires no environment blockers');
+  } else if (handoff.status === 'failed') {
+    const hasFailedAssertion = handoff.assertionResults.some((r) => !r.passed);
+    if (!hasFailedAssertion && handoff.findings.length === 0) {
+      errors.push('failed status requires at least one failed assertion or finding');
+    }
+  } else if (handoff.status === 'blocked') {
+    if (handoff.environmentBlockers.length === 0) {
+      errors.push('blocked status requires at least one environment blocker');
     }
   }
 

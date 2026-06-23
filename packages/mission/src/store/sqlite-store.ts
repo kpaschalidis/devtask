@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { MissionSnapshot } from '../domain/types.js';
-import { StaleRevisionError } from '../domain/errors.js';
+import { StaleRevisionError, MissionAlreadyExistsError } from '../domain/errors.js';
 import type { MissionStore, NewMissionEvent, MissionEvent, MissionCommit } from './store.js';
 
 interface MissionRow {
@@ -55,6 +55,8 @@ export class SqliteMissionStore implements MissionStore {
     const stored = { ...snapshot, revision: 0 };
     const now = new Date().toISOString();
     this.runAtomic(() => {
+      const existing = this.db.prepare('SELECT id FROM missions WHERE id = ?').get(stored.id);
+      if (existing) throw new MissionAlreadyExistsError(stored.id);
       this.db.prepare(`
         INSERT INTO missions (id, schema_version, revision, status, snapshot_json, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { MissionController } from '../src/mission/mission-controller.js';
 import { InMemoryMissionStore } from '../src/store/in-memory-store.js';
 import type { MissionAgents, MissionPlanner, MissionOrchestrator } from '../src/ports/ports.js';
-import type { MissionDefinition, ValidationContract } from '../src/domain/types.js';
+import type { MissionDefinition, ValidationContract, WorkerHandoff } from '../src/domain/types.js';
 import { InvalidDefinitionError, InvalidHandoffError, InvalidStateError } from '../src/domain/errors.js';
 
 const BASE_CONTRACT: ValidationContract = {
@@ -12,6 +12,7 @@ const BASE_CONTRACT: ValidationContract = {
 function makeDef(overrides: Partial<MissionDefinition> = {}): MissionDefinition {
   return {
     id: 'def1',
+    version: 0,
     goal: 'Build a thing',
     context: '',
     validationContract: BASE_CONTRACT,
@@ -150,7 +151,7 @@ describe('MissionController', () => {
     const approved = await ctrl.approve(draft.id);
     expect(approved.status).toBe('ready');
     expect(approved.approvedAt).toBeTruthy();
-    expect(approved.approvedDefinitionRevision).not.toBeNull();
+    expect(approved.approvedDefinitionVersion).not.toBeNull();
   });
 
   it('approve rejects mission not in draft status', async () => {
@@ -232,9 +233,9 @@ describe('MissionController', () => {
     await ctrl.approve(draft.id);
 
     const redirected = await ctrl.redirect(draft.id, 'change the goal');
-    expect(redirected.status).toBe('draft');
+    expect(redirected.status).toBe('awaiting-approval');
     expect(redirected.definition?.goal).toBe('Revised goal');
-    expect(redirected.approvedDefinitionRevision).toBeNull();
+    expect(redirected.approvedDefinitionVersion).toBeNull();
     expect(redirected.redirects).toHaveLength(1);
     expect(redirected.redirects[0]!.appliedAt).not.toBeNull();
   });
@@ -260,14 +261,172 @@ describe('MissionController', () => {
     const store = new InMemoryMissionStore();
     const agents = makeNullAgents();
     const ctrl = new MissionController(store, agents);
-    // Manually create a completed snapshot
     const snap = store.create({
       id: 'x', schemaVersion: 1, revision: 0, status: 'completed',
-      definition: null, approvedDefinitionRevision: null, approvedAt: null,
+      definition: null, approvedDefinitionVersion: null, approvedAt: null,
       featureAttempts: [], validationRounds: [], orchestratorDecisions: [],
       activeInvocations: [], redirects: [], pauseReason: null, blockReason: null,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     }, []);
     await expect(ctrl.redirect(snap.id, 'nope')).rejects.toThrow(InvalidStateError);
+  });
+
+  it('redirect rejects while another invocation is active', async () => {
+    const store = new InMemoryMissionStore();
+    const def = makeDef();
+    let capturedInvId = '';
+    const agents: MissionAgents = {
+      ...makeNullAgents(),
+      planner: makePlanner(def),
+      worker: {
+        async implement(a) {
+          capturedInvId = a.invocationId;
+          return new Promise(() => {});
+        },
+      },
+      orchestrator: {
+        async reviewFindings() { throw new Error('not expected'); },
+        async reviseDefinition() { return def; },
+      },
+    };
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'Build a thing', context: '' });
+    await ctrl.approve(draft.id);
+
+    ctrl.advance(draft.id).catch(() => {});
+    await Promise.resolve();
+
+    expect(capturedInvId).toBeTruthy();
+    await expect(ctrl.redirect(draft.id, 'change')).rejects.toThrow(InvalidStateError);
+  });
+
+  it('redirect sets awaiting-approval; approve moves to ready after redirect', async () => {
+    const store = new InMemoryMissionStore();
+    const def = makeDef();
+    const revisedDef: MissionDefinition = { ...def, goal: 'Redirected goal' };
+    const agents: MissionAgents = {
+      ...makeNullAgents(),
+      planner: makePlanner(def),
+      orchestrator: {
+        async reviewFindings() { throw new Error('not expected'); },
+        async reviseDefinition() { return revisedDef; },
+      },
+    };
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'Build a thing', context: '' });
+    await ctrl.approve(draft.id);
+    const redirected = await ctrl.redirect(draft.id, 'change');
+    expect(redirected.status).toBe('awaiting-approval');
+    expect(redirected.approvedDefinitionVersion).toBeNull();
+
+    // approve() accepts awaiting-approval status.
+    const reapproved = await ctrl.approve(draft.id);
+    expect(reapproved.status).toBe('ready');
+    expect(reapproved.approvedDefinitionVersion).toBe(reapproved.definition?.version);
+  });
+
+  it('recoverInvocation marks orphaned feature attempt as failed', async () => {
+    const store = new InMemoryMissionStore();
+    const def = makeDef();
+    let capturedInvId = '';
+    const agents: MissionAgents = {
+      ...makeNullAgents(),
+      planner: makePlanner(def),
+      worker: {
+        async implement(a) {
+          capturedInvId = a.invocationId;
+          // Never resolves — simulates process interruption.
+          return new Promise(() => {});
+        },
+      },
+    };
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'Build a thing', context: '' });
+    await ctrl.approve(draft.id);
+
+    // Start advance but don't await — the worker hangs.
+    ctrl.advance(draft.id).catch(() => {});
+    // Yield to let the claim commit execute synchronously.
+    await Promise.resolve();
+
+    // Recover the orphaned invocation.
+    const recovered = ctrl.recoverInvocation({ missionId: draft.id, invocationId: capturedInvId, outcome: 'failed', reason: 'process restart' });
+    expect(recovered.activeInvocations).toHaveLength(0);
+    const attempt = recovered.featureAttempts.find((a) => a.invocationId === capturedInvId);
+    expect(attempt?.status).toBe('failed');
+  });
+
+  it('recoverInvocation accepts the existing worker result and is idempotent', async () => {
+    const store = new InMemoryMissionStore();
+    const def = makeDef();
+    let capturedInvId = '';
+    const agents: MissionAgents = {
+      ...makeNullAgents(),
+      planner: makePlanner(def),
+      worker: {
+        async implement(a) {
+          capturedInvId = a.invocationId;
+          return new Promise(() => {});
+        },
+      },
+    };
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'Build a thing', context: '' });
+    await ctrl.approve(draft.id);
+
+    ctrl.advance(draft.id).catch(() => {});
+    await Promise.resolve();
+
+    const handoff: WorkerHandoff = {
+      invocationId: capturedInvId,
+      featureId: 'f1',
+      status: 'completed',
+      summary: 'Recovered result',
+      checksPerformed: [],
+      artifactRefs: [],
+      blockerInfo: null,
+      knowledgeUpdates: [],
+    };
+    const recovered = ctrl.recoverInvocation({ missionId: draft.id, invocationId: capturedInvId, outcome: 'completed', handoff });
+    expect(recovered.activeInvocations).toHaveLength(0);
+    const attempt = recovered.featureAttempts.find((a) => a.invocationId === capturedInvId);
+    expect(attempt?.status).toBe('completed');
+    expect(attempt?.handoff?.summary).toBe('Recovered result');
+
+    const repeated = ctrl.recoverInvocation({ missionId: draft.id, invocationId: capturedInvId, outcome: 'completed', handoff });
+    expect(repeated.revision).toBe(recovered.revision);
+  });
+
+  it('recoverInvocation throws for unknown invocationId', async () => {
+    const store = new InMemoryMissionStore();
+    const agents = makeNullAgents();
+    const ctrl = new MissionController(store, agents);
+    const snap = store.create({
+      id: 'rtest', schemaVersion: 1, revision: 0, status: 'running',
+      definition: null, approvedDefinitionVersion: null, approvedAt: null,
+      featureAttempts: [], validationRounds: [], orchestratorDecisions: [],
+      activeInvocations: [], redirects: [], pauseReason: null, blockReason: null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }, []);
+    expect(() => ctrl.recoverInvocation({ missionId: snap.id, invocationId: 'nonexistent', outcome: 'failed' })).toThrow(InvalidStateError);
+  });
+
+  it('advance throws InvalidStateError when definition version differs from approved version', async () => {
+    const store = new InMemoryMissionStore();
+    const def = makeDef();
+    const agents = { ...makeNullAgents(), planner: makePlanner(def) };
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'Build a thing', context: '' });
+    const approved = await ctrl.approve(draft.id);
+
+    // Manually increment definition version without re-approving.
+    store.commit({
+      id: approved.id,
+      expectedRevision: approved.revision,
+      snapshot: { ...approved, definition: { ...approved.definition!, version: 99 } },
+      events: [],
+    });
+
+    await expect(ctrl.advance(approved.id)).rejects.toThrow(InvalidStateError);
   });
 });

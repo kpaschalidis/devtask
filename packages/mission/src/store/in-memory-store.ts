@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { MissionSnapshot } from '../domain/types.js';
-import { StaleRevisionError } from '../domain/errors.js';
+import { StaleRevisionError, MissionAlreadyExistsError } from '../domain/errors.js';
 import type { MissionStore, NewMissionEvent, MissionEvent, MissionCommit } from './store.js';
 
 export class InMemoryMissionStore implements MissionStore {
@@ -9,6 +9,7 @@ export class InMemoryMissionStore implements MissionStore {
   private sequences = new Map<string, number>();
 
   create(snapshot: MissionSnapshot, events: NewMissionEvent[]): MissionSnapshot {
+    if (this.snapshots.has(snapshot.id)) throw new MissionAlreadyExistsError(snapshot.id);
     const stored: MissionSnapshot = structuredClone({ ...snapshot, revision: 0 });
     this.snapshots.set(stored.id, stored);
     this.sequences.set(stored.id, 0);

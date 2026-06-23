@@ -116,13 +116,13 @@ export function deriveNextAction(snapshot: MissionSnapshot): MissionAction | nul
           ).length;
 
           if (repairRunning < concurrency) {
-            const completedRepairIds = new Set(repairFeatures.filter((f) => isFeatureComplete(f.id, snapshot)).map((f) => f.id));
+            const completedIds = new Set(def.features.filter((f) => isFeatureComplete(f.id, snapshot)).map((f) => f.id));
             const pendingRepairs = repairFeatures.filter((f) => {
               if (isFeatureComplete(f.id, snapshot)) return false;
               if (isFeatureExhausted(f.id, snapshot, maxAttempts)) return false;
               if (isFeatureRunning(f.id, snapshot)) return false;
               const deps = def.featureDependencies.filter((d) => d.featureId === f.id);
-              return deps.every((d) => completedRepairIds.has(d.dependsOnId));
+              return deps.every((d) => completedIds.has(d.dependsOnId));
             });
 
             if (pendingRepairs.length > 0) {

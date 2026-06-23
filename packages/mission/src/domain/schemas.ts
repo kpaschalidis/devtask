@@ -40,6 +40,7 @@ export const FeatureDependencySchema = z.object({
 
 export const MissionDefinitionSchema = z.object({
   id: z.string().min(1),
+  version: z.number().int().min(0),
   goal: z.string(),
   context: z.string(),
   validationContract: z.object({
@@ -109,6 +110,7 @@ export const OrchestratorRepairDecisionSchema = z.object({
 
 export const SpecDocumentSchema = z.object({
   id: z.string().min(1),
+  version: z.number().int().min(1),
   goal: z.string().min(1),
   context: z.string(),
   content: z.string(),

@@ -12,6 +12,7 @@ const BASE_CONTRACT: ValidationContract = {
 function makeDef(overrides: Partial<MissionDefinition> = {}): MissionDefinition {
   return {
     id: 'def1',
+    version: 0,
     goal: 'Build a thing',
     context: '',
     validationContract: BASE_CONTRACT,
@@ -289,6 +290,24 @@ describe('Mission execution', () => {
     expect(snapshot.featureAttempts.some((a) => a.status === 'failed')).toBe(true);
   });
 
+  it('null worker handoff: attempt marked failed, throws InvalidHandoffError', async () => {
+    const store = new InMemoryMissionStore();
+    const agents: MissionAgents = {
+      planner: makePlanner(makeDef()),
+      worker: { async implement() { return null as unknown as WorkerHandoff; } },
+      validator: validatorPasses(),
+      orchestrator: nullOrchestrator(),
+    };
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'x', context: '' });
+    await ctrl.approve(draft.id);
+
+    await expect(ctrl.advance(draft.id)).rejects.toThrow(InvalidHandoffError);
+    const snapshot = ctrl.get(draft.id)!;
+    expect(snapshot.activeInvocations).toHaveLength(0);
+    expect(snapshot.featureAttempts.some((a) => a.status === 'failed')).toBe(true);
+  });
+
   it('handoff identity mismatch: attempt marked failed, throws InvalidHandoffError', async () => {
     const store = new InMemoryMissionStore();
     const agents: MissionAgents = {
@@ -330,6 +349,53 @@ describe('Mission execution', () => {
     await expect(ctrl.advance(draft.id)).rejects.toThrow(InvalidHandoffError);
     const snapshot = ctrl.get(draft.id)!;
     expect(snapshot.activeInvocations).toHaveLength(0);
+  });
+
+  it('null validator handoff: round marked failed, throws InvalidHandoffError', async () => {
+    const store = new InMemoryMissionStore();
+    const agents: MissionAgents = {
+      planner: makePlanner(makeDef()),
+      worker: workerSucceeds(),
+      validator: { async validate() { return null as unknown as ValidationHandoff; } },
+      orchestrator: nullOrchestrator(),
+    };
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'x', context: '' });
+    await ctrl.approve(draft.id);
+    await ctrl.advance(draft.id);
+
+    await expect(ctrl.advance(draft.id)).rejects.toThrow(InvalidHandoffError);
+    const snapshot = ctrl.get(draft.id)!;
+    expect(snapshot.activeInvocations).toHaveLength(0);
+    expect(snapshot.validationRounds.some((r) => r.status === 'failed')).toBe(true);
+  });
+
+  it('validator finding must reference an assigned assertion', async () => {
+    const store = new InMemoryMissionStore();
+    const agents: MissionAgents = {
+      planner: makePlanner(makeDef()),
+      worker: workerSucceeds(),
+      validator: {
+        async validate(a): Promise<ValidationHandoff> {
+          return {
+            invocationId: a.invocationId,
+            milestoneId: a.milestone.id,
+            validationRound: a.roundNumber,
+            status: 'failed',
+            assertionResults: [{ assertionId: 'a1', passed: false, notes: '' }],
+            evidenceRefs: [],
+            findings: [{ id: 'fi1', assertionId: 'other-assertion', description: 'Broken elsewhere', severity: 'critical' }],
+            environmentBlockers: [],
+          };
+        },
+      },
+      orchestrator: nullOrchestrator(),
+    };
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'x', context: '' });
+    await ctrl.approve(draft.id);
+    await ctrl.advance(draft.id);
+    await expect(ctrl.advance(draft.id)).rejects.toThrow(InvalidHandoffError);
   });
 
   it('contradictory passed status throws InvalidHandoffError', async () => {
@@ -397,6 +463,91 @@ describe('Mission execution', () => {
     await ctrl.approve(draft.id);
     await ctrl.advance(draft.id); // ImplementFeature
     await ctrl.advance(draft.id); // ValidateMilestone (fails)
+    await expect(ctrl.advance(draft.id)).rejects.toThrow(InvalidHandoffError);
+  });
+
+  it('orchestrator repair must address every validator finding exactly once', async () => {
+    const def = makeDef();
+    const agents: MissionAgents = {
+      planner: makePlanner(def),
+      worker: workerSucceeds(),
+      validator: {
+        async validate(a): Promise<ValidationHandoff> {
+          return {
+            invocationId: a.invocationId,
+            milestoneId: a.milestone.id,
+            validationRound: a.roundNumber,
+            status: 'failed',
+            assertionResults: [{ assertionId: 'a1', passed: false, notes: '' }],
+            evidenceRefs: [],
+            findings: [
+              { id: 'fi1', assertionId: 'a1', description: 'Broken 1', severity: 'critical' },
+              { id: 'fi2', assertionId: 'a1', description: 'Broken 2', severity: 'major' },
+            ],
+            environmentBlockers: [],
+          };
+        },
+      },
+      orchestrator: {
+        async reviewFindings(a): Promise<OrchestratorRepairDecision> {
+          return {
+            invocationId: a.invocationId,
+            findingIds: ['fi1'],
+            repairFeatures: [{ id: 'r1', milestoneId: a.milestone.id, description: 'Fix', dependencies: [] }],
+            addressedAssertionIds: ['a1'],
+            explanation: null,
+            safeToRepair: true,
+          };
+        },
+        async reviseDefinition() { throw new Error('not expected'); },
+      },
+    };
+    const store = new InMemoryMissionStore();
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'x', context: '' });
+    await ctrl.approve(draft.id);
+    await ctrl.advance(draft.id);
+    await ctrl.advance(draft.id);
+    await expect(ctrl.advance(draft.id)).rejects.toThrow(InvalidHandoffError);
+  });
+
+  it('orchestrator repair addressed assertions must belong to failing milestone', async () => {
+    const def = makeDef({
+      validationContract: {
+        assertions: [
+          { id: 'a1', description: 'M1 works', milestoneIds: ['m1'] },
+          { id: 'a2', description: 'Other milestone works', milestoneIds: ['m2'] },
+        ],
+      },
+      milestones: [
+        { id: 'm1', name: 'M1', order: 1 },
+        { id: 'm2', name: 'M2', order: 2 },
+      ],
+    });
+    const agents: MissionAgents = {
+      planner: makePlanner(def),
+      worker: workerSucceeds(),
+      validator: validatorFailsThenPasses(),
+      orchestrator: {
+        async reviewFindings(a): Promise<OrchestratorRepairDecision> {
+          return {
+            invocationId: a.invocationId,
+            findingIds: a.findings.map((f) => f.id),
+            repairFeatures: [{ id: 'r1', milestoneId: a.milestone.id, description: 'Fix', dependencies: [] }],
+            addressedAssertionIds: ['a2'],
+            explanation: null,
+            safeToRepair: true,
+          };
+        },
+        async reviseDefinition() { throw new Error('not expected'); },
+      },
+    };
+    const store = new InMemoryMissionStore();
+    const ctrl = new MissionController(store, agents);
+    const draft = await ctrl.createDraft({ goal: 'x', context: '' });
+    await ctrl.approve(draft.id);
+    await ctrl.advance(draft.id);
+    await ctrl.advance(draft.id);
     await expect(ctrl.advance(draft.id)).rejects.toThrow(InvalidHandoffError);
   });
 
