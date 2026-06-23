@@ -27,10 +27,10 @@ export interface WorkInspection {
     repoId: string | null;
     taskId: string | null;
     status: string;
-    promptPath: string;
+    promptPath: string | null;
     outputPath: string;
-    filePath: string;
-    provider: string;
+    filePath: string | null;
+    provider: string | null;
     transportId: string | null;
     conversationId: string | null;
     providerSessionId: string | null;
@@ -78,7 +78,7 @@ export function inspectWork(paths: DevtaskPaths, workId: string): WorkInspection
     artifact("phases", path.join(workItemLocalDir(paths, workId), "phases"))
   ];
 
-  const latestPhaseRuns = listWorkPhaseRuns(paths, workId, { latest: true }).map((run) => ({
+  const latestPhaseRuns: WorkInspection["latestPhaseRuns"] = listWorkPhaseRuns(paths, workId, { latest: true }).map((run) => ({
     phase: run.phase,
     repoId: run.repoId,
     taskId: run.taskId,
@@ -108,6 +108,33 @@ export function inspectWork(paths: DevtaskPaths, workId: string): WorkInspection
       promptPath: session.promptPath,
       outputPath: session.outputPath
     }));
+
+  // Merge live sessions into latestPhaseRuns for phases that have no persisted run yet.
+  // This ensures the UI sees actively running phases even before they complete and write a run file.
+  const runKeys = new Set(latestPhaseRuns.map((r) => `${r.phase}:${r.repoId ?? ""}:${r.taskId ?? ""}`));
+  for (const session of livePhaseSessions) {
+    const key = `${session.phase}:${session.repoId ?? ""}:${session.taskId ?? ""}`;
+    if (!runKeys.has(key)) {
+      latestPhaseRuns.push({
+        phase: session.phase,
+        repoId: session.repoId,
+        taskId: session.taskId,
+        status: "running",
+        promptPath: session.promptPath,
+        outputPath: session.outputPath,
+        filePath: null,
+        provider: null,
+        transportId: null,
+        conversationId: null,
+        providerSessionId: null,
+        resumeTarget: null,
+        summary: null,
+        storageRoot: null,
+        transcriptPath: null,
+        artifacts: {}
+      });
+    }
+  }
 
   const problemTasks = (materialization?.tasks ?? [])
     .map((task) => {

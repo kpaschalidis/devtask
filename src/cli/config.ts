@@ -85,7 +85,7 @@ export function registerConfigCommands(program: Command): void {
           console.log(current.agent.provider);
           return;
         }
-        if (provider !== "codex" && provider !== "cursor") {
+        if (provider !== "codex" && provider !== "cursor" && provider !== "claude-code") {
           throw new Error(`Unsupported agent provider: ${provider}`);
         }
         writeConfig(paths, {

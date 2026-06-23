@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import {
 	ChevronDown,
 	ChevronRight,
@@ -10,6 +10,7 @@ import {
 	Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LazyStreamdown } from "@/components/streamdown-loader";
 import { detectTranscriptFormat } from "./detect";
 import { parseTranscript } from "./parse";
 import type { ToolCallEntry, ToolResultEntry, TranscriptEntry } from "./types";
@@ -141,8 +142,16 @@ function TextBlock({ role, content }: { role: "user" | "assistant"; content: str
 	}
 
 	return (
-		<div className="px-1 py-2">
-			<p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">{content}</p>
+		<div className="px-1 py-2 prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-1 prose-headings:mt-3 prose-headings:mb-1">
+			<Suspense
+				fallback={
+					<p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+						{content}
+					</p>
+				}
+			>
+				<LazyStreamdown mode="static">{content}</LazyStreamdown>
+			</Suspense>
 		</div>
 	);
 }

@@ -303,9 +303,9 @@ export function registerWorkCommands(program: Command): void {
               run.transportId ?? "-",
               run.conversationId ?? "-",
               run.transcriptPath ?? "-",
-              run.promptPath,
+              run.promptPath ?? "-",
               Object.entries(run.artifacts).map(([name, artifactPath]) => `${name}=${artifactPath}`).join(", ") || "-",
-              run.filePath
+              run.filePath ?? "-"
             ])
           );
         }

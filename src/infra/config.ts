@@ -10,7 +10,7 @@ export interface DevtaskConfig {
     provider: "github" | "bitbucket" | "gitlab" | null;
   };
   agent: {
-    provider: "codex" | "cursor";
+    provider: "codex" | "cursor" | "claude-code";
   };
   agentSessions: {
     roots: {
@@ -120,9 +120,11 @@ function parseAgentConfig(value: unknown): DevtaskConfig["agent"] {
   }
 
   const record = value as { provider?: unknown };
-  return {
-    provider: record.provider === "cursor" ? "cursor" : "codex"
-  };
+  const provider =
+    record.provider === "cursor" ? "cursor" :
+    record.provider === "claude-code" ? "claude-code" :
+    "codex";
+  return { provider };
 }
 
 function parseAgentSessionsConfig(value: unknown): DevtaskConfig["agentSessions"] {

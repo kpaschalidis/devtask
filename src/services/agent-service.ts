@@ -23,7 +23,7 @@ export interface AgentTestOptions {
 }
 
 export interface AgentTestResult {
-  provider: "codex" | "cursor";
+  provider: "codex" | "cursor" | "claude-code";
   model: string | null;
   workspacePath: string;
   command: string;
@@ -123,7 +123,7 @@ export async function testAgentIntegration(
 }
 
 interface FailureContext {
-  provider: "codex" | "cursor";
+  provider: "codex" | "cursor" | "claude-code";
   workspacePath: string;
   command: string;
   prompt: string;
@@ -197,7 +197,7 @@ function normalizeErrorText(error: unknown): string | null {
   return String(error);
 }
 
-function normalizeAgentCliOutput(rawOutput: string, prompt: string, provider: "codex" | "cursor"): string {
+function normalizeAgentCliOutput(rawOutput: string, prompt: string, provider: "codex" | "cursor" | "claude-code"): string {
   const lines = rawOutput
     .split("\n")
     .map((line) => line.replace(/\r$/, ""))

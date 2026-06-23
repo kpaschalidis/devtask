@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { DevtaskConfig } from "../infra/config.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { InteractiveCodexAgent } from "./adapters/codex-interactive.js";
+import { InteractiveClaudeCodeAgent } from "./adapters/claude-code-interactive.js";
 import type { Agent } from "./agent/agent.js";
 import type { Runtime } from "./runtime/runtime.js";
 import { DevtaskTmuxRuntime } from "./runtime/devtask-tmux-runtime.js";
@@ -70,6 +71,13 @@ export function createDevtaskKernel(
 }
 
 function createKernelAgent(config: DevtaskConfig): Agent {
+  if (config.agent.provider === "claude-code") {
+    return new InteractiveClaudeCodeAgent({
+      model: config.codex.model ?? undefined,
+      fullAuto: config.codex.fullAuto,
+    });
+  }
+
   if (config.agent.provider !== "codex") {
     throw new Error(`Kernel bootstrap does not support agent provider: ${config.agent.provider}`);
   }

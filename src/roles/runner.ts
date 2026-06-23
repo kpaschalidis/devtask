@@ -308,7 +308,7 @@ function launchInteractiveSession(cwd: string, tmuxSession: string, command: str
 function buildDevtaskCommand(args: string[]): string {
   const escaped = args.map((v) => shellEscape(v)).join(" ");
   const entry = shellEscape(path.resolve(process.cwd(), "dist/bin/devtask.js"));
-  return `node ${entry} ${escaped}`;
+  return `${shellEscape(process.execPath)} ${entry} ${escaped}`;
 }
 
 function shellEscape(value: string): string {

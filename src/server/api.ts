@@ -1,4 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { resolveWorkspacePaths } from "../infra/paths.js";
 import { DevtaskError } from "../infra/errors.js";
@@ -117,6 +118,16 @@ async function handleApiRequest(request: IncomingMessage, response: ServerRespon
 
   if (pathname === "/api/health") {
     return respondJson(response, { ok: true, generatedAt: new Date().toISOString() });
+  }
+
+  if (pathname === "/api/transcript-stream") {
+    const filePath = url.searchParams.get("path");
+    if (!filePath) {
+      response.statusCode = 400;
+      response.end(JSON.stringify({ error: "path is required" }));
+      return;
+    }
+    return streamTranscriptFile(request, response, filePath);
   }
 
   if (pathname === "/api/work") {
@@ -287,6 +298,50 @@ function streamSession(
     }
 
     stream.heartbeat();
+  }, 1000);
+
+  attachStreamCleanup(request, response, interval, stream);
+}
+
+// Streams a file's content via SSE, re-emitting on every detected change.
+// Uses mtime+size as the change signal — same polling pattern as all other streams.
+// Clients reconnect with Last-Event-ID to resume from a known event.
+function streamTranscriptFile(
+  request: IncomingMessage,
+  response: ServerResponse,
+  filePath: string,
+): void {
+  const stream = openSseStream(response);
+  let eventId = parseLastEventId(request.headers["last-event-id"]) ?? 0;
+  let previousMtime = 0;
+  let previousSize = 0;
+
+  // Read file and return content only if it changed since last read.
+  function readIfChanged(): string | null {
+    if (!fs.existsSync(filePath)) return null;
+    const stat = fs.statSync(filePath);
+    if (stat.mtimeMs === previousMtime && stat.size === previousSize) return null;
+    previousMtime = stat.mtimeMs;
+    previousSize = stat.size;
+    return fs.readFileSync(filePath, "utf8");
+  }
+
+  // Send initial snapshot unconditionally (even if file doesn't exist yet).
+  if (fs.existsSync(filePath)) {
+    const stat = fs.statSync(filePath);
+    previousMtime = stat.mtimeMs;
+    previousSize = stat.size;
+    const content = fs.readFileSync(filePath, "utf8");
+    stream.send("snapshot", { content }, String(++eventId));
+  }
+
+  const interval = setInterval(() => {
+    const content = readIfChanged();
+    if (content !== null) {
+      stream.send("snapshot", { content }, String(++eventId));
+    } else {
+      stream.heartbeat();
+    }
   }, 1000);
 
   attachStreamCleanup(request, response, interval, stream);

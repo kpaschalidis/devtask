@@ -5,8 +5,17 @@ import type { DevtaskPaths } from "../infra/paths.js";
 import type { KernelSessionRef, SessionPhase } from "../infra/session-run.js";
 import { createDevtaskKernel } from "./devtask-kernel.js";
 import { InteractiveCodexAgent } from "./adapters/codex-interactive.js";
+import { InteractiveClaudeCodeAgent } from "./adapters/claude-code-interactive.js";
 import type { RuntimeHandle } from "./runtime/runtime.js";
 import type { SessionOwner } from "./trace/session-history.js";
+
+interface InteractiveLaunchAgent {
+  createLaunchCommand(
+    prompt: string,
+    handleId: string,
+    options: { taskDir?: string | null; addDirs?: readonly string[]; managedCompletionCommand?: string | null }
+  ): { command: string; metadata: Record<string, unknown> };
+}
 
 export interface StartKernelPhaseSessionInput {
   paths: DevtaskPaths;
@@ -45,7 +54,7 @@ export async function startKernelPhaseSession(input: StartKernelPhaseSessionInpu
   const config = readConfig(input.paths);
   const kernel = createDevtaskKernel(input.paths, config);
   try {
-    const agent = assertInteractiveCodexAgent(kernel.agent);
+    const agent = assertInteractiveAgent(kernel.agent);
     const handleId = input.tmuxSession;
     const launch = agent.createLaunchCommand(input.prompt, handleId, {
       taskDir: input.taskDir ?? null,
@@ -126,8 +135,10 @@ function sessionRefFromHandle(handle: RuntimeHandle): AgentSessionRef {
   const threadId = typeof handle.data["threadId"] === "string" ? handle.data["threadId"] : null;
   const codexHome = typeof handle.data["codexHome"] === "string" ? handle.data["codexHome"] : null;
   const transcriptPath = typeof handle.data["transcriptPath"] === "string" ? handle.data["transcriptPath"] : null;
+  const agentName = typeof handle.data["agentName"] === "string" ? handle.data["agentName"] : null;
+  const provider = agentName === "cursor" ? "cursor" : agentName === "claude-code" ? "claude-code" : "codex";
   return {
-    provider: "codex",
+    provider,
     transportId: handle.id,
     resumeContext: {
       providerSessionId: threadId,
@@ -194,9 +205,15 @@ function buildLabels(phase: SessionPhase, workId: string, repoId: string | null)
   };
 }
 
-function assertInteractiveCodexAgent(agent: unknown): InteractiveCodexAgent {
-  if (!(agent instanceof InteractiveCodexAgent)) {
-    throw new Error("Devtask kernel is not configured with InteractiveCodexAgent");
+function assertInteractiveAgent(agent: unknown): InteractiveLaunchAgent {
+  if (
+    agent instanceof InteractiveCodexAgent ||
+    agent instanceof InteractiveClaudeCodeAgent
+  ) {
+    return agent;
   }
-  return agent;
+  throw new Error(
+    `Kernel agent does not support createLaunchCommand. ` +
+    `Configure a supported interactive agent provider (codex or claude-code).`
+  );
 }

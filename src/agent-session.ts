@@ -1,4 +1,4 @@
-export type AgentProvider = "codex" | "cursor";
+export type AgentProvider = "codex" | "cursor" | "claude-code";
 
 export interface AgentSessionRef {
   provider: AgentProvider;

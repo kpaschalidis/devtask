@@ -62,6 +62,10 @@ export const orchestratorPhase: RoleConfig = {
     const planPath = workItemPlanPath(paths, workId);
     const graphPath = workItemGraphPath(paths, workId);
     const memory = collectPhaseMemory(paths, "planning");
+    // Clear artifacts so the freshness check can verify this run produced them.
+    for (const p of [specPath, contractPath, planPath, graphPath]) {
+      try { fs.unlinkSync(p); } catch { /* ignore if missing */ }
+    }
     return {
       scope: {
         tmuxSession: tmuxSessionName(paths, `orchestrate-${workId}`),

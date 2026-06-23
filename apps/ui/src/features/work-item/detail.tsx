@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import {
 	CheckCircle2,
 	Circle,
@@ -9,16 +9,17 @@ import {
 	MessagesSquare,
 	XCircle,
 } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { Suspense, memo, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { DevtaskWorkDetail, DevtaskWorkGraph, DevtaskWorkGraphFeature, DevtaskWorkGraphTask } from "@/lib/devtask-api";
-import { loadDevtaskFileContent, type DevtaskFileEntry } from "@/lib/devtask-api";
+import { loadDevtaskFileContent, type DevtaskFileContent, type DevtaskFileEntry } from "@/lib/devtask-api";
 import {
 	devtaskWorkDetailQueryOptions,
 } from "@/lib/devtask-query-client";
 import { formatRelativeTime } from "@/lib/devtask-projections";
 import { cn } from "@/lib/utils";
-import { TranscriptViewer } from "./transcript";
+import { LazyStreamdown } from "@/components/streamdown-loader";
+import { TranscriptViewer, useTranscriptStream } from "./transcript";
 
 type WorkItemDetailProps = {
 	workId: string | null;
@@ -521,7 +522,7 @@ function CenterContent({
 
 		if (!graph && diagTasks.length === 0) {
 			return (
-				<div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+				<div className="py-8 text-sm text-muted-foreground">
 					No repo tasks — work has not been materialized yet.
 				</div>
 			);
@@ -915,13 +916,21 @@ function SessionsSection({ detail }: { detail: DevtaskWorkDetail }) {
 		: null;
 	const isActiveRun = selectedDisplayStatus === "running";
 
-	const transcriptFile = selectedRun?.transcriptPath ?? selectedRun?.outputPath ?? null;
-	const transcriptQuery = useQuery({
-		queryKey: ["devtask", "phase-transcript", transcriptFile],
-		queryFn: () => loadDevtaskFileContent(transcriptFile!),
-		enabled: Boolean(transcriptFile),
-		staleTime: 10_000,
-		refetchInterval: isActiveRun ? 5_000 : false,
+	// Primary: structured transcript via SSE (live for active runs, static for done)
+	const transcriptStream = useTranscriptStream(
+		selectedRun?.transcriptPath ?? null,
+		selectedRun?.provider,
+		Boolean(selectedRun?.transcriptPath),
+	);
+
+	// Fallback: load outputPath as markdown when transcriptPath is absent
+	const outputPath = selectedRun?.transcriptPath ? null : (selectedRun?.outputPath ?? null);
+	const outputQuery = useQuery({
+		queryKey: ["devtask", "phase-output", outputPath],
+		queryFn: () => loadDevtaskFileContent(outputPath!),
+		enabled: Boolean(outputPath),
+		staleTime: isActiveRun ? 0 : 60_000,
+		refetchInterval: isActiveRun && outputPath ? 5_000 : false,
 	});
 
 	return (
@@ -997,32 +1006,111 @@ function SessionsSection({ detail }: { detail: DevtaskWorkDetail }) {
 				)}
 			</div>
 
-			{/* Right: transcript viewer */}
-			<InfoCard title={selectedRun ? "Transcript" : "Session output"}>
-				{!selectedRun ? (
-					<div className="text-sm text-muted-foreground">
-						Select a session to view its transcript.
+			{/* Right: output panel */}
+			<SessionOutputPanel
+				selectedRun={selectedRun}
+				transcriptStream={transcriptStream}
+				outputQuery={outputQuery}
+				isActiveRun={isActiveRun}
+			/>
+		</div>
+	);
+}
+
+type PhaseRunItem = PhaseRun;
+
+function SessionOutputPanel({
+	selectedRun,
+	transcriptStream,
+	outputQuery,
+	isActiveRun,
+}: {
+	selectedRun: PhaseRunItem | null;
+	transcriptStream: ReturnType<typeof useTranscriptStream>;
+	outputQuery: UseQueryResult<DevtaskFileContent>;
+	isActiveRun: boolean;
+}) {
+	if (!selectedRun) {
+		return (
+			<InfoCard title="Session output">
+				<div className="text-sm text-muted-foreground">
+					Select a session to view its output.
+				</div>
+			</InfoCard>
+		);
+	}
+
+	// — Transcript path present: use SSE-backed structured viewer
+	if (selectedRun.transcriptPath) {
+		const title = (
+			<div className="flex items-center gap-2">
+				<span>Transcript</span>
+				{isActiveRun && (
+					<span className="flex items-center gap-1 text-[10px] text-blue-500">
+						<Loader2 className="size-2.5 animate-spin" />
+						live
+					</span>
+				)}
+			</div>
+		);
+		return (
+			<InfoCard title={title as unknown as string}>
+				{transcriptStream.error ? (
+					<div className="space-y-2">
+						<div className="text-sm text-destructive">{transcriptStream.error}</div>
+						<div className="font-mono text-[10px] text-muted-foreground break-all">
+							{selectedRun.transcriptPath}
+						</div>
 					</div>
-				) : !transcriptFile ? (
-					<div className="text-sm text-muted-foreground">
-						No transcript path recorded for this session.
-					</div>
-				) : transcriptQuery.isPending ? (
+				) : !transcriptStream.hasContent ? (
 					<div className="flex items-center gap-2 text-sm text-muted-foreground">
-						<Loader2 className="size-3.5 animate-spin" /> Loading transcript…
+						<Loader2 className="size-3.5 animate-spin" /> Connecting…
 					</div>
-				) : transcriptQuery.data?.type === "file" ? (
+				) : (
 					<TranscriptViewer
-						content={transcriptQuery.data.content}
+						content={transcriptStream.rawContent!}
 						provider={selectedRun.provider}
 					/>
-				) : (
-					<div className="text-sm text-muted-foreground">
-						No transcript content found.
-					</div>
 				)}
 			</InfoCard>
-		</div>
+		);
+	}
+
+	// — No transcript path: render outputPath as markdown if available
+	if (selectedRun.outputPath) {
+		const outputData = outputQuery.data;
+		const fileContent = outputData?.type === "file" ? outputData.content : null;
+		return (
+			<InfoCard title="Output">
+				{outputQuery.isPending ? (
+					<div className="flex items-center gap-2 text-sm text-muted-foreground">
+						<Loader2 className="size-3.5 animate-spin" /> Loading…
+					</div>
+				) : fileContent !== null ? (
+					<Suspense
+						fallback={
+							<pre className="text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground font-mono">
+								{fileContent}
+							</pre>
+						}
+					>
+						<div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-1 prose-headings:mt-3 prose-headings:mb-1">
+							<LazyStreamdown mode="static">{fileContent}</LazyStreamdown>
+						</div>
+					</Suspense>
+				) : (
+					<div className="text-sm text-muted-foreground">Output not available.</div>
+				)}
+			</InfoCard>
+		);
+	}
+
+	return (
+		<InfoCard title="Session output">
+			<div className="text-sm text-muted-foreground">
+				No output recorded for this session.
+			</div>
+		</InfoCard>
 	);
 }
 

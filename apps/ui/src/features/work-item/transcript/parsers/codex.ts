@@ -26,6 +26,38 @@ function extractMessageText(content: MessageContent): string {
 	return "";
 }
 
+// ---------------------------------------------------------------------------
+// Codex CLI output cleaning
+//
+// exec_command output always leads with Codex CLI metadata before actual content:
+//   Chunk ID: f43b25
+//   Wall time: 1.0009 seconds
+//   Process running with session ID 73056   (or: Process exited with code 0)
+//   Original token count: 359
+//   Output:
+//   <actual output here>
+//
+// We strip everything up to and including the "Output:" / "Output (truncated):"
+// marker so the UI only shows the real command output.
+// ---------------------------------------------------------------------------
+
+const CODEX_OUTPUT_MARKER = /^Output(?: \(truncated\))?:\s*\n/m;
+const CODEX_META_LINE = /^(?:Chunk ID:|Wall time:|Process (?:running|exited) with|Original token count:|Output(?: \(truncated\))?:)/;
+
+function cleanCodexOutput(raw: string): string {
+	const markerMatch = CODEX_OUTPUT_MARKER.exec(raw);
+	if (markerMatch) {
+		return raw.slice(markerMatch.index + markerMatch[0].length);
+	}
+	// Fallback: strip leading metadata lines one-by-one
+	const lines = raw.split("\n");
+	const firstContent = lines.findIndex((l) => !CODEX_META_LINE.test(l));
+	if (firstContent > 0) {
+		return lines.slice(firstContent).join("\n");
+	}
+	return raw;
+}
+
 function parseArgs(argumentsStr: string): Record<string, unknown> {
 	try {
 		return JSON.parse(argumentsStr) as Record<string, unknown>;
@@ -165,7 +197,7 @@ export function parseCodexTranscript(content: string): TranscriptEntry[] {
 
 			case "function_call_output": {
 				const callId = String(payload.call_id ?? "");
-				const output = String(payload.output ?? "");
+				const output = cleanCodexOutput(String(payload.output ?? ""));
 				entries.push({ kind: "tool-result", id, callId, output, success: true });
 				break;
 			}

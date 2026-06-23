@@ -36,10 +36,10 @@ export type DevtaskWorkInspection = {
 		repoId: string | null;
 		taskId: string | null;
 		status: string;
-		promptPath: string;
+		promptPath: string | null;
 		outputPath: string;
-		filePath: string;
-		provider: string;
+		filePath: string | null;
+		provider: string | null;
 		transportId: string | null;
 		conversationId: string | null;
 		providerSessionId: string | null;

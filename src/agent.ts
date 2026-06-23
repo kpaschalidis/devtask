@@ -4,6 +4,7 @@ import type { AgentProvider, AgentSessionRef } from "./agent-session.js";
 import { CodexAgentRunner } from "./adapters/codex/index.js";
 import { buildCodexCommand } from "./adapters/codex/command.js";
 import { CursorAgentRunner } from "./adapters/cursor/index.js";
+import { buildClaudeCodeCommand } from "./adapters/claude-code/command.js";
 import type { DevtaskConfig } from "./infra/config.js";
 
 export interface SessionHandle {
@@ -90,6 +91,12 @@ export function buildAgentBootstrapCommand(config: DevtaskConfig, options: Agent
       fullAuto: options.fullAuto,
       skipGitRepoCheck: options.skipGitRepoCheck,
       addDirs: options.addDirs
+    });
+  }
+  if (config.agent.provider === "claude-code") {
+    return buildClaudeCodeCommand({
+      model: options.model ?? config.codex.model ?? null,
+      dangerouslySkipPermissions: config.codex.fullAuto !== false
     });
   }
   const runner = createDefaultAgentRunner(config);
