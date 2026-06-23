@@ -27,7 +27,7 @@ import {
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
 import type { KernelSessionRef } from "../infra/session-run.js";
-import { DevtaskTmuxRuntime } from "../adapters/agent-kernel/tmux-runtime.js";
+import { launchExecutionTmuxSession } from "../adapters/agent-kernel/tmux-runtime.js";
 import type { TaskMeta } from "../types.js";
 import type { RoleConfig, RoleFreshScope, RoleResult, RoleScope } from "./types.js";
 
@@ -307,19 +307,11 @@ async function launchExecutionSession(
   meta: TaskMeta
 ): Promise<KernelSessionRef> {
   const executionTaskPath = buildExecutionTaskPath(workspacePaths, repoId, meta);
-  const runtime = new DevtaskTmuxRuntime();
-  const handle = await runtime.create({
+  return launchExecutionTmuxSession({
     sessionId: sessionName,
     workspacePath: meta.worktreePath,
     launchCommand: buildExecutionLaunchCommand(meta, executionTaskPath),
-    environment: {}
   });
-  return {
-    runtimeSessionId: handle.id,
-    runtimeName: handle.runtimeName,
-    threadId: null,
-    data: { ...handle.data }
-  };
 }
 
 function buildExecutionLaunchCommand(meta: TaskMeta, executionTaskPath: string): string {

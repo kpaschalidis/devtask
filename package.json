@@ -10,9 +10,6 @@
   "engines": {
     "node": ">=22"
   },
-  "workspaces": [
-    "packages/*"
-  ],
   "files": [
     "dist",
     "docs",
@@ -20,10 +17,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build:kernel": "npm run build --workspace packages/agent-kernel",
-    "build": "npm run build:kernel && node scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/chmod-bin.mjs && cp src/instructions/*.md dist/instructions/ && cp -r src/skills/* dist/skills/",
-    "check": "npm run build:kernel && tsc -p tsconfig.json --noEmit",
-    "test": "npm run build:kernel && vitest run",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/chmod-bin.mjs && cp src/instructions/*.md dist/instructions/ && cp -r src/skills/* dist/skills/",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "prepack": "npm run build"
   },
   "keywords": [
@@ -36,7 +32,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@devtask/agent-kernel": "*",
     "@mastra/core": "^1.33.1",
     "@mastra/libsql": "^1.10.1",
     "commander": "^14.0.3",

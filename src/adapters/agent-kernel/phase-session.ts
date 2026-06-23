@@ -6,8 +6,8 @@ import type { KernelSessionRef, SessionPhase } from "../../infra/session-run.js"
 import { createDevtaskKernel } from "./kernel.js";
 import { InteractiveCodexAgent } from "./codex-interactive.js";
 import { InteractiveClaudeCodeAgent } from "./claude-code-interactive.js";
-import type { RuntimeHandle } from "@devtask/agent-kernel";
-import type { SessionOwner } from "@devtask/agent-kernel";
+import type { RuntimeHandle } from "../../kernel/runtime/runtime.js";
+import type { SessionOwner } from "../../kernel/trace/session-history.js";
 
 interface InteractiveLaunchAgent {
   createLaunchCommand(

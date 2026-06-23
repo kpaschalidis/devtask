@@ -1,14 +1,14 @@
-import fs from "node:fs";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { SqliteSessionHistoryStore } from "@devtask/agent-kernel";
-import type {
-  SessionHistoryEvent,
-  SessionThread,
-  TimelineBlock,
-  TranscriptMessage,
-} from "@devtask/agent-kernel";
+import {
+  hasSessionHistory,
+  withSessionHistory,
+  type SessionHistoryEvent,
+  type SessionThread,
+  type TimelineBlock,
+  type TranscriptMessage,
+} from "../adapters/agent-kernel/session-history.js";
+
+export type { SessionHistoryEvent, TimelineBlock, TranscriptMessage };
 
 export interface WorkSessionThreadSummary {
   threadId: string;
@@ -26,7 +26,7 @@ export function listWorkSessionThreads(paths: DevtaskPaths, workId: string): Wor
   if (!hasSessionHistory(paths)) {
     return [];
   }
-  return withSessionHistoryStore(paths, (store) =>
+  return withSessionHistory(paths, (store) =>
     store
       .listThreads({ rootOwner: { type: "work", id: workId } })
       .map(toThreadSummary)
@@ -38,7 +38,7 @@ export function getSessionThread(paths: DevtaskPaths, threadId: string): WorkSes
   if (!hasSessionHistory(paths)) {
     return null;
   }
-  return withSessionHistoryStore(paths, (store) => {
+  return withSessionHistory(paths, (store) => {
     const thread = store.getThread(threadId);
     return thread ? toThreadSummary(thread) : null;
   });
@@ -48,14 +48,14 @@ export function listSessionEvents(paths: DevtaskPaths, threadId: string, fromSeq
   if (!hasSessionHistory(paths)) {
     return [];
   }
-  return withSessionHistoryStore(paths, (store) => store.listEvents(threadId, fromSeq));
+  return withSessionHistory(paths, (store) => store.listEvents(threadId, fromSeq));
 }
 
 export function listSessionTimeline(paths: DevtaskPaths, threadId: string): TimelineBlock[] {
   if (!hasSessionHistory(paths)) {
     return [];
   }
-  return withSessionHistoryStore(paths, (store) => store.listTimeline(threadId));
+  return withSessionHistory(paths, (store) => store.listTimeline(threadId));
 }
 
 export function listSessionTranscript(paths: DevtaskPaths, threadId: string): TranscriptMessage[] {
@@ -81,24 +81,6 @@ function toThreadSummary(thread: SessionThread): WorkSessionThreadSummary {
     endedAt: thread.endedAt,
     metadata: thread.metadata,
   };
-}
-
-function withSessionHistoryStore<T>(paths: DevtaskPaths, fn: (store: SqliteSessionHistoryStore) => T): T {
-  const dbPath = sessionHistoryPath(paths);
-  const db = new DatabaseSync(dbPath);
-  try {
-    return fn(new SqliteSessionHistoryStore(db));
-  } finally {
-    db.close();
-  }
-}
-
-function hasSessionHistory(paths: DevtaskPaths): boolean {
-  return fs.existsSync(sessionHistoryPath(paths));
-}
-
-function sessionHistoryPath(paths: DevtaskPaths): string {
-  return path.join(paths.localDir, "kernel", "session-history.sqlite");
 }
 
 function buildTranscriptFromEvents(
