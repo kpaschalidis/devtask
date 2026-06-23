@@ -1,13 +1,13 @@
-import type { AgentSessionRef } from "../agent-session.js";
-import { configureManagedHooks } from "../adapters/codex/index.js";
-import { readConfig } from "../infra/config.js";
-import type { DevtaskPaths } from "../infra/paths.js";
-import type { KernelSessionRef, SessionPhase } from "../infra/session-run.js";
-import { createDevtaskKernel } from "./devtask-kernel.js";
-import { InteractiveCodexAgent } from "./adapters/codex-interactive.js";
-import { InteractiveClaudeCodeAgent } from "./adapters/claude-code-interactive.js";
-import type { RuntimeHandle } from "./runtime/runtime.js";
-import type { SessionOwner } from "./trace/session-history.js";
+import type { AgentSessionRef } from "../../agent-session.js";
+import { configureManagedHooks } from "../codex/index.js";
+import { readConfig } from "../../infra/config.js";
+import type { DevtaskPaths } from "../../infra/paths.js";
+import type { KernelSessionRef, SessionPhase } from "../../infra/session-run.js";
+import { createDevtaskKernel } from "./kernel.js";
+import { InteractiveCodexAgent } from "./codex-interactive.js";
+import { InteractiveClaudeCodeAgent } from "./claude-code-interactive.js";
+import type { RuntimeHandle } from "@devtask/agent-kernel";
+import type { SessionOwner } from "@devtask/agent-kernel";
 
 interface InteractiveLaunchAgent {
   createLaunchCommand(
@@ -164,11 +164,8 @@ function kernelSessionFromHandle(handle: RuntimeHandle): KernelSessionRef {
 }
 
 function resolveTmuxSession(kernel: ReturnType<typeof createDevtaskKernel>, handle: RuntimeHandle): string {
-  const attach = kernel.runtime.getAttachInfo?.(handle);
   const sessionName = typeof handle.data["sessionName"] === "string" ? handle.data["sessionName"] : handle.id;
-  if (!attach?.command?.includes(sessionName)) {
-    return sessionName;
-  }
+  void kernel.runtime.getAttachInfo?.(handle);
   return sessionName;
 }
 

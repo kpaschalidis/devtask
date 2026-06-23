@@ -16,7 +16,7 @@ import {
   writeLaunchScript
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
-import { resumeKernelPhaseSession, startKernelPhaseSession } from "../kernel/devtask-phase-session.js";
+import { resumeKernelPhaseSession, startKernelPhaseSession } from "../adapters/agent-kernel/phase-session.js";
 import { getLatestWorkPhaseRun } from "../services/session-run-service.js";
 import type { RoleConfig, RoleLaunchResult, FreshScopeOpts } from "./types.js";
 

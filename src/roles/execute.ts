@@ -27,7 +27,7 @@ import {
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
 import type { KernelSessionRef } from "../infra/session-run.js";
-import { DevtaskTmuxRuntime } from "../kernel/runtime/devtask-tmux-runtime.js";
+import { DevtaskTmuxRuntime } from "../adapters/agent-kernel/tmux-runtime.js";
 import type { TaskMeta } from "../types.js";
 import type { RoleConfig, RoleFreshScope, RoleResult, RoleScope } from "./types.js";
 

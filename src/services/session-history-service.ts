@@ -2,13 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { DevtaskPaths } from "../infra/paths.js";
-import { SqliteSessionHistoryStore } from "../kernel/storage/sqlite/session-history-store.js";
+import { SqliteSessionHistoryStore } from "@devtask/agent-kernel";
 import type {
   SessionHistoryEvent,
   SessionThread,
   TimelineBlock,
   TranscriptMessage,
-} from "../kernel/trace/session-history.js";
+} from "@devtask/agent-kernel";
 
 export interface WorkSessionThreadSummary {
   threadId: string;

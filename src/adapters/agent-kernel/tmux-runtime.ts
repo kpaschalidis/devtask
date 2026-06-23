@@ -1,4 +1,4 @@
-import type { AttachInfo, Runtime, RuntimeCreateConfig, RuntimeHandle } from "./runtime.js";
+import type { AttachInfo, Runtime, RuntimeCreateConfig, RuntimeHandle } from "@devtask/agent-kernel";
 import {
   captureOutputAsync,
   createBareSession,

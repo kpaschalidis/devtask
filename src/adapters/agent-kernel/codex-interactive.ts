@@ -1,16 +1,16 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import type { Agent, AgentSessionInfo, RunEvent, RunOptions } from "../agent/agent.js";
-import type { PreparedSessionInstructions } from "../instructions/instruction-payload.js";
-import type { Runtime, RuntimeHandle } from "../runtime/runtime.js";
-import { buildCodexInteractiveResumeCommand, buildCodexInteractiveStartCommand } from "../../adapters/codex/command.js";
+import type { Agent, AgentSessionInfo, RunEvent, RunOptions } from "@devtask/agent-kernel";
+import type { PreparedSessionInstructions } from "@devtask/agent-kernel";
+import type { Runtime, RuntimeHandle } from "@devtask/agent-kernel";
+import { buildCodexInteractiveResumeCommand, buildCodexInteractiveStartCommand } from "../codex/command.js";
 import {
   configureManagedHooks,
   extractAssistantSummary,
   extractThreadId,
   findSessionFileCached,
   prepareIsolatedCodexHome,
-} from "../../adapters/codex/index.js";
+} from "../codex/index.js";
 
 export interface InteractiveCodexAgentConfig {
   model?: string;

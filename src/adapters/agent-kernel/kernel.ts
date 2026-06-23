@@ -1,18 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { DevtaskConfig } from "../infra/config.js";
-import type { DevtaskPaths } from "../infra/paths.js";
-import { InteractiveCodexAgent } from "./adapters/codex-interactive.js";
-import { InteractiveClaudeCodeAgent } from "./adapters/claude-code-interactive.js";
-import type { Agent } from "./agent/agent.js";
-import type { Runtime } from "./runtime/runtime.js";
-import { DevtaskTmuxRuntime } from "./runtime/devtask-tmux-runtime.js";
-import { SessionCoordinator } from "./sessions/session-coordinator.js";
-import { SqliteSessionHistoryStore } from "./storage/sqlite/session-history-store.js";
-import { SessionHistoryCaptureService } from "./trace/session-history-capture-service.js";
-import type { SessionHistoryEvent } from "./trace/session-history.js";
-import { NoopWorkspaceSetup } from "./workspace/workspace-setup.js";
+import type { DevtaskConfig } from "../../infra/config.js";
+import type { DevtaskPaths } from "../../infra/paths.js";
+import type { Agent } from "@devtask/agent-kernel";
+import type { Runtime } from "@devtask/agent-kernel";
+import { SessionCoordinator, SqliteSessionHistoryStore, SessionHistoryCaptureService, NoopWorkspaceSetup } from "@devtask/agent-kernel";
+import type { SessionHistoryEvent } from "@devtask/agent-kernel";
+import { InteractiveCodexAgent } from "./codex-interactive.js";
+import { InteractiveClaudeCodeAgent } from "./claude-code-interactive.js";
+import { DevtaskTmuxRuntime } from "./tmux-runtime.js";
 
 export interface DevtaskKernelLogger {
   info?(meta: Record<string, unknown>, message: string): void;
@@ -89,13 +86,7 @@ function createKernelAgent(config: DevtaskConfig): Agent {
   });
 }
 
-function createKernelRuntime(config: DevtaskConfig): Runtime {
-  if (config.runtime.mode !== "attachable" || config.runtime.backend !== "tmux") {
-    throw new Error(
-      `Kernel bootstrap requires runtime.mode=attachable and runtime.backend=tmux, received ${config.runtime.mode}/${config.runtime.backend ?? "none"}`,
-    );
-  }
-
+function createKernelRuntime(_config: DevtaskConfig): Runtime {
   return new DevtaskTmuxRuntime();
 }
 

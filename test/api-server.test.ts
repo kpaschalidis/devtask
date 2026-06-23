@@ -7,7 +7,7 @@ import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem, updateWorkItemStatus } from "../src/storage/work-store.js";
 import { writeRunningPhaseRun } from "../src/infra/session-run.js";
 import { startApiServer, type ApiServerHandle } from "../src/server/api.js";
-import { createDevtaskKernel } from "../src/kernel/devtask-kernel.js";
+import { createDevtaskKernel } from "../src/adapters/agent-kernel/kernel.js";
 import { readConfig } from "../src/infra/config.js";
 
 describe("api server", () => {
