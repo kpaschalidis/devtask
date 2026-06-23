@@ -74,26 +74,35 @@ export class SessionCoordinator {
     const instructions = await prepareSessionInstructions(sessionId, this.artifactPrefix, input.instructions);
     const environment = mergeEnvironment(setup.env, setup.pathEntries, agent.getEnvironment(input.workspacePath));
     let sessionThreadId: string | null = null;
+    const pendingHistoryEvents: AgentSessionHistoryEvent[] = [];
     const onHistoryEvent = (event: AgentSessionHistoryEvent) => {
-      if (!sessionThreadId) return;
+      if (!sessionThreadId) {
+        pendingHistoryEvents.push(event);
+        return;
+      }
       this.recordAgentHistoryEvent(sessionThreadId, sessionId, event);
     };
 
     let handle: RuntimeHandle;
-    handle = agent.createSession
-      ? await agent.createSession({
-          workspacePath: input.workspacePath,
-          sessionId,
-          environment,
-          instructions,
-          onHistoryEvent,
-        })
-      : await runtime.create({
-          sessionId,
-          workspacePath: input.workspacePath,
-          launchCommand: input.launchCommand ?? await agent.getLaunchCommand(input.workspacePath, instructions),
-          environment,
-        });
+    try {
+      handle = agent.createSession
+        ? await agent.createSession({
+            workspacePath: input.workspacePath,
+            sessionId,
+            environment,
+            instructions,
+            onHistoryEvent,
+          })
+        : await runtime.create({
+            sessionId,
+            workspacePath: input.workspacePath,
+            launchCommand: input.launchCommand ?? await agent.getLaunchCommand(input.workspacePath, instructions),
+            environment,
+          });
+    } catch (error) {
+      await instructions.cleanup?.();
+      throw error;
+    }
 
     handle.data['agentName'] = agent.name;
     setInstructionCleanup(handle, instructions.cleanup);
@@ -107,6 +116,9 @@ export class SessionCoordinator {
       });
       sessionThreadId = thread.id;
       setSessionThreadId(handle, thread.id);
+      for (const event of pendingHistoryEvents) {
+        this.recordAgentHistoryEvent(thread.id, sessionId, event);
+      }
     }
     return handle;
   }
@@ -157,24 +169,39 @@ export class SessionCoordinator {
       const instructions = await prepareSessionInstructions(sessionId, this.artifactPrefix, input.instructions);
       const environment = mergeEnvironment(setup.env, setup.pathEntries, agent.getEnvironment(input.workspacePath));
       let sessionThreadId = getSessionThreadId(previousHandle) ?? null;
+      const pendingHistoryEvents: AgentSessionHistoryEvent[] = [];
+      let bufferHistoryEvents = true;
       const onHistoryEvent = (event: AgentSessionHistoryEvent) => {
-        if (!sessionThreadId) return;
+        if (bufferHistoryEvents || !sessionThreadId) {
+          pendingHistoryEvents.push(event);
+          return;
+        }
         this.recordAgentHistoryEvent(sessionThreadId, sessionId, event);
       };
-      handle = await agent.restoreSession({
-        workspacePath: input.workspacePath,
-        sessionId,
-        environment,
-        instructions,
-        previousHandle,
-        onHistoryEvent,
-      });
+      try {
+        handle = await agent.restoreSession({
+          workspacePath: input.workspacePath,
+          sessionId,
+          environment,
+          instructions,
+          previousHandle,
+          onHistoryEvent,
+        });
+      } catch (error) {
+        await instructions.cleanup?.();
+        throw error;
+      }
       setInstructionCleanup(handle, instructions.cleanup);
       if (sessionThreadId) {
+        setSessionThreadId(handle, sessionThreadId);
         this.config.sessionHistory.attachRuntime(sessionThreadId, handle.id, {
           workspacePath: input.workspacePath,
           ...(input.metadata ?? {}),
         });
+        for (const event of pendingHistoryEvents) {
+          this.recordAgentHistoryEvent(sessionThreadId, sessionId, event);
+        }
+        bufferHistoryEvents = false;
       }
     } else if (agent.getRestoreCommand) {
       const restoreCommand = await agent.getRestoreCommand(previousHandle);

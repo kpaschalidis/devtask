@@ -10,6 +10,7 @@ export * from './sessions/session-store.js';
 export * from './sessions/kernel-handle-state.js';
 export * from './runtime/runtime.js';
 export * from './trace/session-history.js';
+export * from './trace/history-projection.js';
 export * from './trace/session-history-store.js';
 export * from './trace/session-history-capture-service.js';
 export * from './trace/session-history-events.js';

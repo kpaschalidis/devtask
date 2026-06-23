@@ -21,9 +21,10 @@
   ],
   "scripts": {
     "build:kernel": "npm run build --workspace packages/agent-kernel",
+    "test:kernel": "npm test --workspace packages/agent-kernel",
     "build": "npm run build:kernel && node scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/chmod-bin.mjs && cp src/instructions/*.md dist/instructions/ && cp -r src/skills/* dist/skills/",
     "check": "npm run build:kernel && tsc -p tsconfig.json --noEmit",
-    "test": "npm run build:kernel && vitest run",
+    "test": "npm run build:kernel && npm run test:kernel && vitest run",
     "prepack": "npm run build"
   },
   "keywords": [

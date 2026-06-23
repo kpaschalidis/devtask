@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Agent, AgentCreateSessionInput, AgentRestoreSessionInput, AgentTurnCancellationResult, RunEvent, RunOptions, ActivityState, AgentSessionInfo, SendMessageOptions } from '../../agent/agent.js';
+import type { AgentCostEstimate } from '../../agent/agent.js';
 import type { PreparedSessionInstructions } from '../../instructions/instruction-payload.js';
 import type { Runtime } from '../../runtime/runtime.js';
 import type { RuntimeHandle } from '../../runtime/runtime.js';
@@ -81,6 +82,13 @@ export async function resolveCodexBinary(): Promise<string> {
 export interface CodexAgentConfig {
   model?: string;
   permissions?: string;
+  estimateCostUsd?: (input: {
+    model: string;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    reasoningOutputTokens: number;
+  }) => number | null;
   logger?: {
     info?(meta: Record<string, unknown>, message: string): void;
     warn?(meta: Record<string, unknown>, message: string): void;
@@ -366,18 +374,14 @@ export class CodexAgent implements Agent {
     const cachedTokens = state?.totalCachedTokens ?? 0;
     const outputTokens = state?.totalOutputTokens ?? 0;
     const reasoningTokens = state?.totalReasoningTokens ?? 0;
-    const totalInput = inputTokens + cachedTokens;
 
-    const cost = totalInput > 0 || outputTokens > 0
-      ? {
-          inputTokens: totalInput,
-          outputTokens,
-          estimatedCostUsd:
-            (inputTokens / 1_000_000) * 2.5 +
-            (cachedTokens / 1_000_000) * 0.625 +
-            ((outputTokens + reasoningTokens) / 1_000_000) * 10.0,
-        }
-      : undefined;
+    const cost = buildAgentCostEstimate({
+      model: model ?? null,
+      inputTokens,
+      cachedInputTokens: cachedTokens,
+      outputTokens,
+      reasoningOutputTokens: reasoningTokens,
+    }, this.config.estimateCostUsd);
 
     return {
       summary: model ? `Codex session (${model})` : 'Codex app-server session',
@@ -554,6 +558,36 @@ export class CodexAgent implements Agent {
     }
     return this.resolvedBinary;
   }
+}
+
+export interface CodexTokenUsage {
+  model: string | null;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+}
+
+export function buildAgentCostEstimate(
+  usage: CodexTokenUsage,
+  estimateCostUsd?: CodexAgentConfig['estimateCostUsd'],
+): AgentCostEstimate | undefined {
+  const totalInput = usage.inputTokens + usage.cachedInputTokens;
+  if (totalInput === 0 && usage.outputTokens === 0) return undefined;
+  const estimatedCostUsd = usage.model && estimateCostUsd
+    ? estimateCostUsd({
+        model: usage.model,
+        inputTokens: usage.inputTokens,
+        cachedInputTokens: usage.cachedInputTokens,
+        outputTokens: usage.outputTokens,
+        reasoningOutputTokens: usage.reasoningOutputTokens,
+      })
+    : null;
+  return {
+    inputTokens: totalInput,
+    outputTokens: usage.outputTokens,
+    ...(estimatedCostUsd === null ? {} : { estimatedCostUsd }),
+  };
 }
 
 // ─── CLI flag helpers ─────────────────────────────────────────────────────────

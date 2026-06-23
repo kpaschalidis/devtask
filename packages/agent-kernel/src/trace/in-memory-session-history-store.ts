@@ -11,11 +11,13 @@ import type {
 } from './session-history.js';
 import type { SessionHistoryStore } from './session-history-store.js';
 import { now } from '../shared/time.js';
+import { buildTimelineBlocks, buildTranscript } from './history-projection.js';
 
 export class InMemorySessionHistoryStore implements SessionHistoryStore {
   private readonly threads = new Map<string, SessionThread>();
   private readonly events = new Map<string, SessionHistoryEvent[]>();
   private readonly delivered = new Map<string, string>();
+  private readonly timelines = new Map<string, TimelineBlock[]>();
 
   createThread(thread: SessionThread): void {
     this.threads.set(thread.id, thread);
@@ -70,27 +72,16 @@ export class InMemorySessionHistoryStore implements SessionHistoryStore {
     for (const thread of this.listThreads(query)) {
       this.threads.delete(thread.id);
       this.events.delete(thread.id);
+      this.timelines.delete(thread.id);
     }
   }
 
   listTranscript(query: SessionThreadQuery): TranscriptMessage[] {
-    return this.listThreads(query)
-      .flatMap((thread) => this.listEvents(thread.id).map((event) => ({ thread, event })))
-      .filter(({ event }) => event.type === 'message.sent' || event.type === 'message.delta')
-      .filter(({ event }) => event.visibility !== 'hidden')
-      .map(({ thread, event }): TranscriptMessage => {
-        const role = event.payload['role'];
-        return {
-          id: event.id,
-          owner: thread.owner,
-          labels: thread.labels,
-          role: role === 'user' ? 'user' : 'agent',
-          kind: role === 'user' ? 'user-initiated' : 'output',
-          content: String(event.payload['text'] ?? ''),
-          createdAt: event.occurredAt,
-          deliveredAt: this.delivered.get(event.id),
-        };
-      });
+    return buildTranscript(
+      this.listThreads(query),
+      (threadId) => this.listEvents(threadId),
+      (messageId) => this.delivered.get(messageId) ?? null,
+    );
   }
 
   getUndeliveredUserMessages(query: SessionThreadQuery): TranscriptMessage[] {
@@ -102,10 +93,12 @@ export class InMemorySessionHistoryStore implements SessionHistoryStore {
     for (const id of messageIds) this.delivered.set(id, ts);
   }
 
-  rebuildTimeline(_threadId: string): void {}
+  rebuildTimeline(threadId: string): void {
+    this.timelines.set(threadId, buildTimelineBlocks(threadId, this.listEvents(threadId)));
+  }
 
-  listTimeline(_threadId: string): TimelineBlock[] {
-    return [];
+  listTimeline(threadId: string): TimelineBlock[] {
+    return this.timelines.get(threadId) ?? [];
   }
 }
 

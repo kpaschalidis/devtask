@@ -27,11 +27,15 @@ export class GitWorktreeWorkspaceDriver implements WorkspaceDriver {
   async removeWorkspace(workspace: WorkspaceHandle): Promise<void> {
     if (!fs.existsSync(workspace.path)) return;
 
+    const registered = await registeredWorktreePaths(workspace.repoPath);
+    const workspacePath = await fs.promises.realpath(workspace.path);
+    if (!registered.has(workspacePath)) {
+      throw new Error(`Refusing to remove unregistered worktree: ${workspace.path}`);
+    }
+
     await execFileAsync('git', ['worktree', 'remove', '--force', workspace.path], {
       cwd: workspace.repoPath,
-    }).catch(() => {});
-
-    fs.rmSync(workspace.path, { recursive: true, force: true });
+    });
   }
 
   async runScript(workspace: WorkspaceHandle, script: string): Promise<ScriptResult> {
@@ -60,6 +64,25 @@ export class GitWorktreeWorkspaceDriver implements WorkspaceDriver {
       fs.rmSync(scriptPath, { force: true });
     }
   }
+}
+
+async function registeredWorktreePaths(repoPath: string): Promise<Set<string>> {
+  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+    cwd: repoPath,
+  });
+  const paths = stdout
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length).trim())
+    .filter(Boolean);
+  const resolved = await Promise.all(paths.map(async (worktreePath) => {
+    try {
+      return await fs.promises.realpath(worktreePath);
+    } catch {
+      return path.resolve(worktreePath);
+    }
+  }));
+  return new Set(resolved);
 }
 
 // ---------------------------------------------------------------------------

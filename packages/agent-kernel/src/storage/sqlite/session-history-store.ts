@@ -16,6 +16,7 @@ import type {
 } from '../../trace/session-history.js';
 import type { SessionHistoryStore } from '../../trace/session-history-store.js';
 import { now } from '../../shared/time.js';
+import { buildTimelineBlocks, buildTranscript } from '../../trace/history-projection.js';
 
 interface ThreadRow {
   id: string;
@@ -246,63 +247,11 @@ export class SqliteSessionHistoryStore implements SessionHistoryStore {
   }
 
   listTranscript(query: SessionThreadQuery): TranscriptMessage[] {
-    const threads = this.listThreads(query);
-    const messages: TranscriptMessage[] = [];
-    for (const thread of threads) {
-      let assistantContent = '';
-      let assistantStartedAt: string | null = null;
-
-      const flushAssistant = (createdAt: string, open = false) => {
-        if (!assistantContent) return;
-        messages.push({
-          id: `${thread.id}:assistant:${messages.length}`,
-          owner: thread.owner,
-          labels: thread.labels,
-          role: 'agent',
-          kind: 'output',
-          content: assistantContent,
-          createdAt: assistantStartedAt ?? createdAt,
-          ...(open ? {} : { deliveredAt: createdAt }),
-        });
-        assistantContent = '';
-        assistantStartedAt = null;
-      };
-
-      for (const event of this.listEvents(thread.id)) {
-        if (event.visibility === 'hidden') continue;
-        if (event.type === 'message.sent' && event.payload['role'] === 'user') {
-          flushAssistant(event.occurredAt);
-          messages.push({
-            id: event.id,
-            owner: thread.owner,
-            labels: thread.labels,
-            role: 'user',
-            kind: stringKind(event.payload['kind']) ?? 'user-initiated',
-            content: String(event.payload['text'] ?? ''),
-            createdAt: event.occurredAt,
-            deliveredAt: this.getDeliveredAt(event.id) ?? undefined,
-          });
-        } else if (event.type === 'message.delta' && event.payload['role'] === 'assistant') {
-          assistantStartedAt ??= event.occurredAt;
-          assistantContent += String(event.payload['text'] ?? '');
-        } else if (event.type === 'message.completed' || event.type === 'turn.completed' || event.type === 'turn.failed') {
-          flushAssistant(event.occurredAt);
-        } else if (event.type === 'human_input.requested') {
-          flushAssistant(event.occurredAt);
-          messages.push({
-            id: event.id,
-            owner: thread.owner,
-            labels: thread.labels,
-            role: 'agent',
-            kind: 'question',
-            content: String(event.payload['prompt'] ?? event.payload['question'] ?? ''),
-            createdAt: event.occurredAt,
-          });
-        }
-      }
-      flushAssistant(thread.endedAt ?? now(), true);
-    }
-    return messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return buildTranscript(
+      this.listThreads(query),
+      (threadId) => this.listEvents(threadId),
+      (messageId) => this.getDeliveredAt(messageId),
+    );
   }
 
   getUndeliveredUserMessages(query: SessionThreadQuery): TranscriptMessage[] {
@@ -492,12 +441,6 @@ function rowToTimelineBlock(row: TimelineBlockRow): TimelineBlock {
   };
 }
 
-function stringKind(value: unknown): TranscriptMessage['kind'] | null {
-  return value === 'output' || value === 'thinking' || value === 'question' || value === 'answer' || value === 'user-initiated'
-    ? value
-    : null;
-}
-
 function matchesThreadQuery(thread: SessionThread, query: SessionThreadQuery): boolean {
   if (query.owner && !sameOwnerRef(thread.owner, query.owner)) return false;
   if (query.rootOwner && !matchesRootOwner(thread.owner, query.rootOwner)) return false;
@@ -522,194 +465,4 @@ function matchesRootOwner(owner: SessionOwner, root: SessionOwnerRef): boolean {
 
 function hasLabels(labels: SessionLabels, expected: SessionLabels): boolean {
   return Object.entries(expected).every(([key, value]) => labels[key] === value);
-}
-
-function buildTimelineBlocks(threadId: string, events: SessionHistoryEvent[]): TimelineBlock[] {
-  const blocks: TimelineBlock[] = [];
-  const openByKey = new Map<string, TimelineBlock>();
-
-  const push = (block: Omit<TimelineBlock, 'id' | 'blockSeq'>) => {
-    blocks.push({ ...block, id: `${threadId}:block:${blocks.length + 1}`, blockSeq: blocks.length + 1 });
-    return blocks[blocks.length - 1];
-  };
-  const close = (block: TimelineBlock | null, endedAt: string, status: TimelineBlock['status'] = 'completed') => {
-    if (!block) return;
-    block.endedAt = endedAt;
-    block.status = status;
-  };
-  const keyFor = (event: SessionHistoryEvent, kind: TimelineBlock['kind']) => `${kind}:${event.itemId ?? event.turnId ?? 'default'}`;
-  const metadataFor = (event: SessionHistoryEvent, extra: Record<string, unknown> = {}) => ({
-    turnId: event.turnId,
-    itemId: event.itemId,
-    parentItemId: event.parentItemId,
-    visible: event.visibility !== 'hidden',
-    ...extra,
-  });
-
-  for (const event of events) {
-    switch (event.type) {
-      case 'reasoning.started':
-        openByKey.set(keyFor(event, 'reasoning'), push({
-          threadId,
-          kind: 'reasoning',
-          status: 'open',
-          startedAt: event.occurredAt,
-          endedAt: null,
-          title: stringValue(event.payload['title']) ?? 'Thinking',
-          bodyText: '',
-          metadata: metadataFor(event),
-        }));
-        break;
-      case 'reasoning.delta': {
-        const key = keyFor(event, 'reasoning');
-        let block = openByKey.get(key);
-        if (!block) {
-          block = push({
-            threadId,
-            kind: 'reasoning',
-            status: 'open',
-            startedAt: event.occurredAt,
-            endedAt: null,
-            title: stringValue(event.payload['title']) ?? 'Thinking',
-            bodyText: '',
-            metadata: metadataFor(event),
-          });
-          openByKey.set(key, block);
-        }
-        block.bodyText += String(event.payload['text'] ?? '');
-        break;
-      }
-      case 'reasoning.completed': {
-        const key = keyFor(event, 'reasoning');
-        close(openByKey.get(key) ?? null, event.occurredAt);
-        openByKey.delete(key);
-        break;
-      }
-      case 'message.sent':
-        push({
-          threadId,
-          kind: 'message',
-          status: 'completed',
-          startedAt: event.occurredAt,
-          endedAt: event.occurredAt,
-          title: stringValue(event.payload['title']) ?? titleForRole(event.payload['role']),
-          bodyText: String(event.payload['text'] ?? ''),
-          metadata: metadataFor(event, { role: event.payload['role'], kind: event.payload['kind'] }),
-        });
-        break;
-      case 'message.delta': {
-        const key = keyFor(event, 'message');
-        let block = openByKey.get(key);
-        if (!block) {
-          block = push({
-            threadId,
-            kind: 'message',
-            status: 'open',
-            startedAt: event.occurredAt,
-            endedAt: null,
-            title: stringValue(event.payload['title']) ?? titleForRole(event.payload['role']),
-            bodyText: '',
-            metadata: metadataFor(event, { role: event.payload['role'] }),
-          });
-          openByKey.set(key, block);
-        }
-        block.bodyText += String(event.payload['text'] ?? '');
-        break;
-      }
-      case 'message.completed': {
-        const key = keyFor(event, 'message');
-        close(openByKey.get(key) ?? null, event.occurredAt);
-        openByKey.delete(key);
-        break;
-      }
-      case 'tool.started':
-        openByKey.set(keyFor(event, 'tool'), push({
-          threadId,
-          kind: 'tool',
-          status: 'open',
-          startedAt: event.occurredAt,
-          endedAt: null,
-          title: stringValue(event.payload['title']) ?? String(event.payload['name'] ?? 'Tool'),
-          bodyText: event.payload['input'] === undefined ? '' : JSON.stringify(event.payload['input'], null, 2),
-          metadata: metadataFor(event, { name: event.payload['name'] }),
-        }));
-        break;
-      case 'tool.output.delta': {
-        const key = keyFor(event, 'tool');
-        let block = openByKey.get(key);
-        if (!block) {
-          block = push({
-            threadId,
-            kind: 'tool',
-            status: 'open',
-            startedAt: event.occurredAt,
-            endedAt: null,
-            title: stringValue(event.payload['title']) ?? 'Tool output',
-            bodyText: '',
-            metadata: metadataFor(event),
-          });
-          openByKey.set(key, block);
-        }
-        block.bodyText += String(event.payload['text'] ?? '');
-        break;
-      }
-      case 'tool.completed': {
-        const key = keyFor(event, 'tool');
-        close(openByKey.get(key) ?? null, event.occurredAt, typeof event.payload['exitCode'] === 'number' && event.payload['exitCode'] !== 0 ? 'failed' : 'completed');
-        openByKey.delete(key);
-        break;
-      }
-      case 'file.changed':
-      case 'patch.generated':
-        push({
-          threadId,
-          kind: 'file',
-          status: 'completed',
-          startedAt: event.occurredAt,
-          endedAt: event.occurredAt,
-          title: stringValue(event.payload['title']) ?? String(event.payload['path'] ?? 'File changed'),
-          bodyText: String(event.payload['diff'] ?? event.payload['text'] ?? ''),
-          metadata: metadataFor(event, { path: event.payload['path'], action: event.payload['action'] }),
-        });
-        break;
-      case 'human_input.requested':
-      case 'human_input.resolved':
-        push({
-          threadId,
-          kind: 'human_input',
-          status: 'completed',
-          startedAt: event.occurredAt,
-          endedAt: event.occurredAt,
-          title: event.type === 'human_input.requested' ? 'Input requested' : 'Input resolved',
-          bodyText: String(event.payload['prompt'] ?? event.payload['response'] ?? ''),
-          metadata: metadataFor(event, event.payload),
-        });
-        break;
-      case 'turn.completed':
-        for (const [key, block] of openByKey) {
-          if (block.metadata['turnId'] === event.turnId || !event.turnId) {
-            close(block, event.occurredAt);
-            openByKey.delete(key);
-          }
-        }
-        break;
-      case 'turn.failed':
-        for (const [key, block] of openByKey) {
-          if (block.metadata['turnId'] === event.turnId || !event.turnId) {
-            close(block, event.occurredAt, 'failed');
-            openByKey.delete(key);
-          }
-        }
-        break;
-    }
-  }
-  return blocks;
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === 'string' && value ? value : null;
-}
-
-function titleForRole(role: unknown): string {
-  return role === 'user' ? 'User' : role === 'system' ? 'System' : role === 'tool' ? 'Tool' : 'Assistant';
 }

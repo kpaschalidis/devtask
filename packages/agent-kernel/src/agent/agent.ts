@@ -30,7 +30,7 @@ export interface SendMessageOptions {
 export interface AgentCostEstimate {
   inputTokens: number;
   outputTokens: number;
-  estimatedCostUsd: number;
+  estimatedCostUsd?: number;
 }
 
 export interface AgentSessionInfo {
