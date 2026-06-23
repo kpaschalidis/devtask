@@ -11,15 +11,14 @@ import {
 } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ActiveThreadViewport, type PresentedSessionPane } from "@/features/panel/thread-viewport";
 import type { DevtaskWorkDetail, DevtaskWorkGraph, DevtaskWorkGraphFeature, DevtaskWorkGraphTask } from "@/lib/devtask-api";
 import { loadDevtaskFileContent, type DevtaskFileEntry } from "@/lib/devtask-api";
-import type { ThreadMessageLike } from "@/lib/api";
 import {
 	devtaskWorkDetailQueryOptions,
 } from "@/lib/devtask-query-client";
 import { formatRelativeTime } from "@/lib/devtask-projections";
 import { cn } from "@/lib/utils";
+import { TranscriptViewer } from "./transcript";
 
 type WorkItemDetailProps = {
 	workId: string | null;
@@ -593,7 +592,7 @@ function CenterContent({
 	}
 
 	if (section === "sessions") {
-		return <SessionsSection detail={detail} onOpenArtifact={onOpenArtifact} />;
+		return <SessionsSection detail={detail} />;
 	}
 
 	return null;
@@ -903,41 +902,8 @@ function groupPhaseRuns(runs: PhaseRun[]): Array<{ phase: string; runs: PhaseRun
 	return [...ordered, ...others].map((p) => ({ phase: p, runs: grouped.get(p)! }));
 }
 
-function parseTranscriptFile(content: string): ThreadMessageLike[] {
-	return content
-		.split("\n")
-		.filter((l) => l.trim())
-		.flatMap((line, idx) => {
-			try {
-				const entry = JSON.parse(line) as Record<string, unknown>;
-				if (!entry.content) return [];
-				return [
-					toThreadMessage({
-						id: typeof entry.id === "string" ? entry.id : `msg-${idx}`,
-						role: entry.role === "user" ? "user" : "agent",
-						content:
-							typeof entry.content === "string"
-								? entry.content
-								: JSON.stringify(entry.content),
-						createdAt:
-							typeof entry.createdAt === "string"
-								? entry.createdAt
-								: new Date().toISOString(),
-					}),
-				];
-			} catch {
-				return [];
-			}
-		});
-}
 
-function SessionsSection({
-	detail,
-	onOpenArtifact,
-}: {
-	detail: DevtaskWorkDetail;
-	onOpenArtifact?: (path: string) => void;
-}) {
+function SessionsSection({ detail }: { detail: DevtaskWorkDetail }) {
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	const orchestratorRunning = detail.status.orchestratorSession.running;
 	const phaseRuns = detail.inspection.latestPhaseRuns;
@@ -957,22 +923,6 @@ function SessionsSection({
 		staleTime: 10_000,
 		refetchInterval: isActiveRun ? 5_000 : false,
 	});
-
-	const messages = useMemo(() => {
-		if (!transcriptQuery.data || transcriptQuery.data.type !== "file") return [];
-		return parseTranscriptFile(transcriptQuery.data.content);
-	}, [transcriptQuery.data]);
-
-	const sessionPane = useMemo<PresentedSessionPane | null>(() => {
-		if (!selectedKey || messages.length === 0) return null;
-		return {
-			sessionId: selectedKey,
-			sending: false,
-			hasLoaded: true,
-			presentationState: "presented",
-			messages,
-		};
-	}, [selectedKey, messages]);
 
 	return (
 		<div className="grid gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
@@ -1061,19 +1011,10 @@ function SessionsSection({
 					<div className="flex items-center gap-2 text-sm text-muted-foreground">
 						<Loader2 className="size-3.5 animate-spin" /> Loading transcript…
 					</div>
-				) : sessionPane ? (
-					<div className="min-h-[520px] overflow-hidden rounded-md border border-border/60 bg-background">
-						<ActiveThreadViewport
-							hasSession
-							workspaceName={detail.item.source.title}
-							pane={sessionPane}
-						/>
-					</div>
 				) : transcriptQuery.data?.type === "file" ? (
-					<FileViewer
+					<TranscriptViewer
 						content={transcriptQuery.data.content}
-						path={transcriptFile}
-						onOpenArtifact={onOpenArtifact}
+						provider={selectedRun.provider}
 					/>
 				) : (
 					<div className="text-sm text-muted-foreground">
@@ -1327,25 +1268,6 @@ function SectionButton({
 	);
 }
 
-function toThreadMessage(message: {
-	id: string;
-	role: "agent" | "user";
-	content: string;
-	createdAt: string;
-}): ThreadMessageLike {
-	return {
-		id: message.id,
-		role: message.role === "agent" ? "assistant" : "user",
-		createdAt: message.createdAt,
-		content: [
-			{
-				type: "text",
-				id: `${message.id}:text:0`,
-				text: message.content,
-			},
-		],
-	};
-}
 
 function InfoCard({
 	title,
