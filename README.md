@@ -80,9 +80,8 @@ devtask work orchestrate <work-id> --auto
 devtask work status <work-id>       # gate states, active session, validator result
 devtask work inspect <work-id>      # artifacts, latest runs, live sessions
 devtask work diagnose <work-id>     # what is blocking and why
+devtask work next <work-id>         # recommended next command
 devtask work runs <work-id> --latest
-devtask board
-devtask board serve --workspace platform
 ```
 
 ## Manual Escape Hatches

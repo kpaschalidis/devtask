@@ -69,7 +69,6 @@ devtask work show <work-id>
 Inspect work:
 
 ```bash
-devtask work board <work-id>
 devtask work next <work-id>
 devtask work diagnose <work-id>
 devtask work inspect <work-id>
@@ -111,40 +110,8 @@ Notes:
 - `ci-watch` polls provider CI for existing PRs, captures bounded failure output, runs scoped `ci-fix` agent attempts, reruns deterministic validation, and pushes validated fixes back to the existing PR branch
 - `compound` writes `shared/work/<workId>/learnings.md`; it never changes active knowledge
 
-## Board
-
-Workspace board:
-
-```bash
-devtask board
-```
-
-Static HTML board report:
-
-```bash
-devtask board html
-devtask board html --workspace <workspace-id>
-devtask board html --out <dir>
-```
-
-Live local board app:
-
-```bash
-devtask board serve
-devtask board serve --workspace <workspace-id>
-devtask board serve --host 127.0.0.1 --port 4310
-```
-
-Single work board:
-
-```bash
-devtask board work <work-id>
-```
-
-Current board UX is terminal table output plus optional HTML surfaces built from the same read models. `board serve` is a local read-only app, not a separate product backend.
-
 Current diagnostic workflow is:
-- `work board` for a compact repo-task status table
+- `work next` for the recommended next command
 - `work diagnose` for why the work or repo task is waiting and which artifact is missing
 - `work inspect` for stored artifact paths, latest phase runs, and blocked/failed/paused repo tasks
 - `work runs` and `work runs show` for persisted prompt/output/artifact/session traceability by phase, including isolated Codex session metadata

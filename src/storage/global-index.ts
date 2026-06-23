@@ -3,7 +3,7 @@ import path from "node:path";
 import { DevtaskError } from "../infra/errors.js";
 import { globalDevtaskDir, resolveWorkspacePaths, workItemGraphPath, workItemPlanPath, type DevtaskPaths } from "../infra/paths.js";
 import { getWorkItem, listWorkItems, type WorkItem } from "./work-store.js";
-import { buildWorkspaceBoardRow } from "../board/workspace-board.js";
+import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 
 export interface GlobalWorkspaceEntry {
   id: string;
@@ -192,15 +192,15 @@ async function buildRecentWorkEntry(
   workspace: GlobalWorkspaceEntry,
   item: WorkItem
 ): Promise<GlobalRecentWorkEntry> {
-  const boardRow = await buildWorkspaceBoardRow(paths, item);
+  const diagnostics = getWorkDiagnostics(paths, item.id);
   return {
     workId: item.id,
     workspaceId: workspace.id,
     workspacePath: workspace.path,
     title: item.source.title,
     sourceType: item.source.type,
-    status: boardRow.status,
-    updatedAt: boardRow.updatedAt,
+    status: diagnostics.status,
+    updatedAt: item.updatedAt,
     planPath: workItemPlanPath(paths, item.id),
     graphPath: workItemGraphPath(paths, item.id)
   };

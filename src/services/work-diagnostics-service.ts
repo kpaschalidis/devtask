@@ -100,7 +100,7 @@ export function getWorkDiagnostics(paths: DevtaskPaths, workId: string): WorkDia
   return {
     workId,
     status: item.status,
-    next: waiting?.next ?? `devtask work board ${shellQuote(workId)}`,
+    next: waiting?.next ?? `devtask work inspect ${shellQuote(workId)}`,
     waitingOn: waiting?.waitingOn ?? "complete",
     reason: waiting?.reason ?? "No pending diagnostic signals.",
     missingArtifacts: waiting?.missingArtifacts ?? [],
@@ -203,7 +203,7 @@ function buildRepoTaskDiagnosticLogic(
     };
   }
   return {
-    next: `devtask work board ${shellQuote(workId)}`,
+    next: `devtask work inspect ${shellQuote(workId)}`,
     waitingOn: "complete",
     reason: `The repo task has reached CI state: ${ci}.`,
     missingArtifacts: []

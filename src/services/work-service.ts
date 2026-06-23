@@ -65,6 +65,7 @@ import {
   pushBranchUpdate,
   type CiCheckResult
 } from "../adapters/scm/index.js";
+import { runDevtaskCodexOneShot } from "../adapters/agent-kernel/run-once.js";
 
 export interface VerifyCommandResult {
   command: string;
@@ -344,24 +345,49 @@ export async function runRepoPlanWorker(paths: DevtaskPaths, workId: string, rep
     MEMORY: memory ? `${memory}\n\n` : ""
   });
   fs.writeFileSync(promptPath, `${prompt}\n`);
-  const runner = createDefaultAgentRunner(config);
-  const startOptions = {
-    workspacePath: repo.repoPath,
-    model: config.codex.model,
-    fullAuto: config.codex.fullAuto,
-    skipGitRepoCheck: true,
-    addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
-    env: {
-      ...process.env,
-      DEVTASK_TASK_DIR: workItemDir(paths, workId),
-      DEVTASK_TASK_PATH: promptPath,
-      DEVTASK_PLAN_PATH: runtimePlanPath,
-      DEVTASK_STATE_PATH: runtimeStatePath,
-      DEVTASK_RESULT_PATH: resultPath
-    }
-  } as const;
   const startedAt = new Date().toISOString();
-  const result = await runAgentPrompt(runner, startOptions, prompt, { outputPath });
+  const result =
+    config.agent.provider === "codex"
+      ? await runDevtaskCodexOneShot(
+          config,
+          {
+            workspacePath: repo.repoPath,
+            model: config.codex.model,
+            fullAuto: config.codex.fullAuto,
+            skipGitRepoCheck: true,
+            addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
+            env: {
+              ...process.env,
+              DEVTASK_TASK_DIR: workItemDir(paths, workId),
+              DEVTASK_TASK_PATH: promptPath,
+              DEVTASK_PLAN_PATH: runtimePlanPath,
+              DEVTASK_STATE_PATH: runtimeStatePath,
+              DEVTASK_RESULT_PATH: resultPath
+            }
+          },
+          prompt,
+          { outputPath }
+        )
+      : await runAgentPrompt(
+          createDefaultAgentRunner(config),
+          {
+            workspacePath: repo.repoPath,
+            model: config.codex.model,
+            fullAuto: config.codex.fullAuto,
+            skipGitRepoCheck: true,
+            addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
+            env: {
+              ...process.env,
+              DEVTASK_TASK_DIR: workItemDir(paths, workId),
+              DEVTASK_TASK_PATH: promptPath,
+              DEVTASK_PLAN_PATH: runtimePlanPath,
+              DEVTASK_STATE_PATH: runtimeStatePath,
+              DEVTASK_RESULT_PATH: resultPath
+            }
+          },
+          prompt,
+          { outputPath }
+        );
   const finishedAt = new Date().toISOString();
   persistSharedRepoPlan(runtimePlanPath, finalPlanPath);
   const blocked = readResultStatus(resultPath) === "blocked";
@@ -461,21 +487,43 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
   });
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
-  const runner = createDefaultAgentRunner(config);
-  const startOptions = {
-    workspacePath: paths.root,
-    model: config.codex.model,
-    fullAuto: config.codex.fullAuto,
-    skipGitRepoCheck: true,
-    addDirs: [workItemDir(paths, workId)],
-    env: {
-      ...process.env,
-      DEVTASK_TASK_DIR: workItemDir(paths, workId),
-      DEVTASK_TASK_PATH: promptPath
-    }
-  } as const;
   const startedAt = new Date().toISOString();
-  const result = await runAgentPrompt(runner, startOptions, prompt, { outputPath });
+  const result =
+    config.agent.provider === "codex"
+      ? await runDevtaskCodexOneShot(
+          config,
+          {
+            workspacePath: paths.root,
+            model: config.codex.model,
+            fullAuto: config.codex.fullAuto,
+            skipGitRepoCheck: true,
+            addDirs: [workItemDir(paths, workId)],
+            env: {
+              ...process.env,
+              DEVTASK_TASK_DIR: workItemDir(paths, workId),
+              DEVTASK_TASK_PATH: promptPath
+            }
+          },
+          prompt,
+          { outputPath }
+        )
+      : await runAgentPrompt(
+          createDefaultAgentRunner(config),
+          {
+            workspacePath: paths.root,
+            model: config.codex.model,
+            fullAuto: config.codex.fullAuto,
+            skipGitRepoCheck: true,
+            addDirs: [workItemDir(paths, workId)],
+            env: {
+              ...process.env,
+              DEVTASK_TASK_DIR: workItemDir(paths, workId),
+              DEVTASK_TASK_PATH: promptPath
+            }
+          },
+          prompt,
+          { outputPath }
+        );
   const finishedAt = new Date().toISOString();
   const status: CompoundWorkResult["status"] =
     result.status === "completed" && isFreshNonEmptyFile(learningsPath, startedAt) ? "completed" : "failed";
@@ -1162,26 +1210,46 @@ async function runCiFixAttempt(
   fs.writeFileSync(statePath, `# State: ${options.taskId} ci-fix\n\n## Progress\n- Attempt ${options.attempt} started ${startedAt}\n`);
   fs.writeFileSync(resultPath, "{\n  \"status\": \"pending\"\n}\n");
 
-  const runner = createDefaultAgentRunner(config);
-  const result = await runAgentPrompt(
-    runner,
-    {
-      workspacePath: options.worktreePath,
-      model: config.codex.model,
-      fullAuto: config.codex.fullAuto,
-      skipGitRepoCheck: true,
-      addDirs: [workItemDir(paths, workId), options.worktreePath],
-      env: {
-        ...process.env,
-        DEVTASK_TASK_DIR: attemptDir,
-        DEVTASK_TASK_PATH: promptPath,
-        DEVTASK_STATE_PATH: statePath,
-        DEVTASK_RESULT_PATH: resultPath
-      }
-    },
-    prompt,
-    { outputPath }
-  );
+  const result =
+    config.agent.provider === "codex"
+      ? await runDevtaskCodexOneShot(
+          config,
+          {
+            workspacePath: options.worktreePath,
+            model: config.codex.model,
+            fullAuto: config.codex.fullAuto,
+            skipGitRepoCheck: true,
+            addDirs: [workItemDir(paths, workId), options.worktreePath],
+            env: {
+              ...process.env,
+              DEVTASK_TASK_DIR: attemptDir,
+              DEVTASK_TASK_PATH: promptPath,
+              DEVTASK_STATE_PATH: statePath,
+              DEVTASK_RESULT_PATH: resultPath
+            }
+          },
+          prompt,
+          { outputPath }
+        )
+      : await runAgentPrompt(
+          createDefaultAgentRunner(config),
+          {
+            workspacePath: options.worktreePath,
+            model: config.codex.model,
+            fullAuto: config.codex.fullAuto,
+            skipGitRepoCheck: true,
+            addDirs: [workItemDir(paths, workId), options.worktreePath],
+            env: {
+              ...process.env,
+              DEVTASK_TASK_DIR: attemptDir,
+              DEVTASK_TASK_PATH: promptPath,
+              DEVTASK_STATE_PATH: statePath,
+              DEVTASK_RESULT_PATH: resultPath
+            }
+          },
+          prompt,
+          { outputPath }
+        );
 
   const finishedAt = new Date().toISOString();
   const resultStatus = readResultStatus(resultPath);

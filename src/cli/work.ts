@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 import { Command } from "commander";
 import { DevtaskError } from "../infra/errors.js";
 import { resolveWorkspacePaths } from "../infra/paths.js";
-import { buildWorkBoard } from "../board/work-board.js";
 import {
   checkWork,
   checkWorkCi,
@@ -39,7 +38,6 @@ import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPha
 import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
 import { inspectWork } from "../services/work-inspection-service.js";
 import { getWorkStatus } from "../services/work-status-service.js";
-import { recommendWorkNextAction } from "../board/next-actions.js";
 import { printError, printTable } from "./common.js";
 
 export function registerWorkCommands(program: Command): void {
@@ -178,26 +176,6 @@ export function registerWorkCommands(program: Command): void {
           return;
         }
         console.log(JSON.stringify(run, null, 2));
-      } catch (error) {
-        printError(error);
-      }
-    });
-
-  work
-    .command("board")
-    .description("Show the repo-level board for one work item.")
-    .argument("<work-id>")
-    .action(async (workId: string) => {
-      try {
-        const rows = await buildWorkBoard(resolveWorkspacePaths(), workId);
-        if (rows.length === 0) {
-          console.log("No repo tasks");
-          return;
-        }
-        printTable(
-          ["REPO", "TASK", "PHASE", "STATUS", "BLOCKED", "UPDATED", "NEXT"],
-          rows.map((row) => [row.repo, row.task, row.phase, row.status, row.blocked, row.updated, row.next])
-        );
       } catch (error) {
         printError(error);
       }
@@ -359,11 +337,7 @@ export function registerWorkCommands(program: Command): void {
           fs.existsSync(`${workDir}/graph.json`) &&
           fs.existsSync(repoPlansDir) &&
           fs.readdirSync(repoPlansDir).some((e) => e.endsWith(".md"));
-        console.log(`Next: ${recommendWorkNextAction(item, {
-          hasOrchestratedPlan,
-          isMaterialized: materialization !== null,
-          hasActiveSession: false
-        })}`);
+        console.log(`Next: ${recommendedWorkCommand(item.id, hasOrchestratedPlan, materialization !== null)}`);
       } catch (error) {
         printError(error);
       }
@@ -843,6 +817,23 @@ export function registerWorkCommands(program: Command): void {
       }
     });
 
+}
+
+function recommendedWorkCommand(workId: string, hasOrchestratedPlan: boolean, isMaterialized: boolean): string {
+  if (!hasOrchestratedPlan) {
+    return `devtask work orchestrate ${shellQuote(workId)}`;
+  }
+  if (!isMaterialized) {
+    return `devtask work materialize ${shellQuote(workId)}`;
+  }
+  return `devtask work execute ${shellQuote(workId)}`;
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function normalizePhaseOption(value: string | undefined): "orchestrate" | "repo-plan" | "review" | "execute" | "ci-fix" | "compound" | undefined {

@@ -206,7 +206,7 @@ export function registerWorkspaceCommands(program: Command): void {
         console.log(`Workspace: ${item.workspacePath}`);
         console.log(`Plan: ${item.planPath}`);
         console.log(`Graph: ${item.graphPath}`);
-        console.log(`Next: cd ${shellQuote(item.workspacePath)} && devtask work board ${shellQuote(item.workId)}`);
+        console.log(`Next: cd ${shellQuote(item.workspacePath)} && devtask work inspect ${shellQuote(item.workId)}`);
       } catch (error) {
         printError(error);
       }

@@ -5,11 +5,10 @@ import type { DevtaskConfig } from "../../infra/config.js";
 import type { DevtaskPaths } from "../../infra/paths.js";
 import type { Agent } from "@devtask/agent-kernel";
 import type { Runtime } from "@devtask/agent-kernel";
-import { SessionCoordinator, SqliteSessionHistoryStore, SessionHistoryCaptureService, NoopWorkspaceSetup } from "@devtask/agent-kernel";
+import { SessionCoordinator, SqliteSessionHistoryStore, SessionHistoryCaptureService, NoopWorkspaceSetup, TmuxRuntime } from "@devtask/agent-kernel";
 import type { SessionHistoryEvent } from "@devtask/agent-kernel";
 import { InteractiveCodexAgent } from "./codex-interactive.js";
 import { InteractiveClaudeCodeAgent } from "./claude-code-interactive.js";
-import { DevtaskTmuxRuntime } from "./tmux-runtime.js";
 
 export interface DevtaskKernelLogger {
   info?(meta: Record<string, unknown>, message: string): void;
@@ -87,7 +86,7 @@ function createKernelAgent(config: DevtaskConfig): Agent {
 }
 
 function createKernelRuntime(_config: DevtaskConfig): Runtime {
-  return new DevtaskTmuxRuntime();
+  return new TmuxRuntime({ artifactPrefix: "devtask" });
 }
 
 function kernelSessionHistoryPath(paths: DevtaskPaths): string {

@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { AgentSessionRef } from "../agent-session.js";
-import { createDefaultAgentRunner } from "../agent.js";
-import { readConfig } from "../infra/config.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { phaseRunDir } from "../infra/paths.js";
 import { readRunningPhaseRun, writeRunningPhaseRun, type SessionRun, type SessionPhase } from "../infra/session-run.js";
@@ -11,9 +9,7 @@ import {
   attachTmuxSession,
   killTmuxSession,
   startPipePane,
-  startTmuxSession,
   tmuxSessionExists,
-  writeLaunchScript
 } from "../infra/tmux.js";
 import { DevtaskError } from "../infra/errors.js";
 import { resumeKernelPhaseSession, startKernelPhaseSession } from "../adapters/agent-kernel/phase-session.js";
@@ -115,7 +111,11 @@ export async function launchPhaseResume(
     ? buildManagedCompletionCommand(paths, phase, workId, repoId, runId)
     : null;
   if (!previous.kernelSession) {
-    return launchLegacyPhaseResume(config, paths, workId, phase, repoId, scope, previous.session, completionCommand, prompt);
+    const scopeLabel = repoId ? `${workId}/${repoId}` : workId;
+    throw new DevtaskError(
+      `Cannot resume ${phase} for ${scopeLabel} because the last session predates the kernel-backed runtime. ` +
+      `Start a fresh ${phase} run instead.`
+    );
   }
   const startedAt = new Date().toISOString();
   const resolvedPrompt = prompt ?? buildResumePrompt(phase, previous.session);
@@ -234,75 +234,6 @@ function buildResumePrompt(phase: string, session: AgentSessionRef): string {
 
 function hasResumeContext(session: AgentSessionRef): boolean {
   return Object.values(session.resumeContext).some((v) => v !== null);
-}
-
-async function launchLegacyPhaseResume(
-  config: RoleConfig,
-  paths: DevtaskPaths,
-  workId: string,
-  phase: SessionPhase,
-  repoId: string | null,
-  scope: ReturnType<RoleConfig["resumeScope"]>,
-  session: AgentSessionRef,
-  completionCommand: string | null,
-  prompt?: string,
-): Promise<RoleLaunchResult> {
-  const runId = path.basename(scope.promptPath).replace(/\.prompt\.md$/, "");
-  const devtaskConfig = readConfig(paths);
-  const runner = createDefaultAgentRunner(devtaskConfig);
-  runner.installCompletionHook?.(session, completionCommand);
-  const command = runner.buildInteractiveResumeCommand?.(session, {
-    workspacePath: scope.cwd,
-    model: devtaskConfig.codex.model ?? null,
-    prompt: prompt ?? null,
-    managedCompletionCommand: completionCommand
-  });
-  if (!command) {
-    throw new DevtaskError(`Provider ${session.provider} does not support interactive resume for ${phase}`);
-  }
-  const startedAt = new Date().toISOString();
-  const resolvedPrompt = prompt ?? buildResumePrompt(phase, session);
-  fs.mkdirSync(path.dirname(scope.promptPath), { recursive: true });
-  fs.writeFileSync(scope.promptPath, `${resolvedPrompt}\n`);
-  launchInteractiveSession(scope.cwd, scope.tmuxSession, command);
-  await startPipePane(scope.tmuxSession, scope.outputPath);
-  writeRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
-    phase,
-    workId,
-    repoId,
-    taskId: scope.taskId,
-    runId,
-    tmuxSession: scope.tmuxSession,
-    startedAt,
-    promptPath: scope.promptPath,
-    outputPath: scope.outputPath,
-    artifacts: scope.artifacts,
-    session: {
-      ...session,
-      transportId: scope.tmuxSession,
-      summary: `${phase} resume session started`,
-      summaryIsFallback: true
-    },
-    kernelSession: null
-  });
-  return {
-    phase,
-    workId,
-    repoId,
-    taskId: scope.taskId,
-    status: "started",
-    tmuxSession: scope.tmuxSession,
-    promptPath: scope.promptPath,
-    outputPath: scope.outputPath
-  };
-}
-
-function launchInteractiveSession(cwd: string, tmuxSession: string, command: string): void {
-  if (tmuxSessionExists(tmuxSession)) {
-    killTmuxSession(tmuxSession);
-  }
-  const scriptPath = writeLaunchScript([`cd ${shellEscape(cwd)}`, command].join("\n"));
-  startTmuxSession(tmuxSession, ["bash", scriptPath], cwd);
 }
 
 function buildDevtaskCommand(args: string[]): string {
