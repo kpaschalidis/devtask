@@ -16,9 +16,8 @@ const scmMocks = vi.hoisted(() => ({
   pushBranchUpdate: vi.fn()
 }));
 
-const agentMocks = vi.hoisted(() => ({
-  createDefaultAgentRunner: vi.fn(() => ({ provider: "mock" })),
-  runAgentPrompt: vi.fn()
+const kernelMocks = vi.hoisted(() => ({
+  runKernelOneShot: vi.fn()
 }));
 
 vi.mock("../src/adapters/scm/index.js", async () => {
@@ -31,9 +30,8 @@ vi.mock("../src/adapters/scm/index.js", async () => {
   };
 });
 
-vi.mock("../src/agent.js", () => ({
-  createDefaultAgentRunner: agentMocks.createDefaultAgentRunner,
-  runAgentPrompt: agentMocks.runAgentPrompt
+vi.mock("../src/adapters/agent-kernel/run-once.js", () => ({
+  runKernelOneShot: kernelMocks.runKernelOneShot
 }));
 
 import { watchWorkCi } from "../src/services/work-service.js";
@@ -81,7 +79,7 @@ describe("work ci-watch", () => {
       });
     scmMocks.hasUncommittedChanges.mockResolvedValue(false);
     scmMocks.pushBranchUpdate.mockResolvedValue(undefined);
-    agentMocks.runAgentPrompt.mockImplementation(async (_runner, startOptions: { workspacePath: string; env?: Record<string, string> }) => {
+    kernelMocks.runKernelOneShot.mockImplementation(async (_config, startOptions: { workspacePath: string; env?: Record<string, string> }) => {
       fs.writeFileSync(path.join(startOptions.workspacePath, "ci-fix.txt"), "fixed\n");
       await runCommandOrThrow("git", ["add", "ci-fix.txt"], { cwd: startOptions.workspacePath });
       await runCommandOrThrow("git", ["commit", "-m", "fix ci failure"], { cwd: startOptions.workspacePath });
@@ -118,6 +116,7 @@ describe("work ci-watch", () => {
     expect(result.tasks[0]?.latestFailureLogPath).toBeTruthy();
     expect(fs.readFileSync(result.tasks[0]!.latestFailureLogPath!, "utf8")).toContain("FAIL src/example.test.ts");
     expect(scmMocks.pushBranchUpdate).toHaveBeenCalledWith(task.worktreePath, task.branch);
+    expect(kernelMocks.runKernelOneShot).toHaveBeenCalledTimes(1);
     expect(getWorkItem(paths, item.id).status).toBe("completed");
     expect(fs.existsSync(path.join(phaseRunDir(paths, item.id, "ci-fix", "app")))).toBe(true);
   });
@@ -164,7 +163,7 @@ describe("work ci-watch", () => {
       status: "max-attempts",
       attempts: 0
     });
-    expect(agentMocks.runAgentPrompt).not.toHaveBeenCalled();
+    expect(kernelMocks.runKernelOneShot).not.toHaveBeenCalled();
     expect(getWorkItem(paths, item.id).status).toBe("blocked");
   });
 });

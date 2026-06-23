@@ -1,7 +1,7 @@
 import { DevtaskError } from "../infra/errors.js";
 import { phaseRunDir } from "../infra/paths.js";
 import { readRunningPhaseRun } from "../infra/session-run.js";
-import { sendToTmuxSession, tmuxSessionExists } from "../infra/tmux.js";
+import { sendToTmuxSession, tmuxSessionExists } from "../adapters/agent-kernel/tmux-control.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { sendWorkPhaseFeedback } from "../services/work-service.js";
 import { writeGateState } from "./gates.js";

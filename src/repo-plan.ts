@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "./infra/paths.js";
 import { planMarkdownPath, taskDir } from "./infra/paths.js";
-import type { AgentSessionRef } from "./agent-session.js";
+import type { AgentSessionRef } from "./infra/session-ref.js";
 import type { TaskMeta } from "./types.js";
 import { loadInstruction } from "./instructions/loader.js";
 

@@ -3,12 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  CodexAgentRunner,
+  buildCodexExecCommand,
   configureManagedHooks,
-  findCodexSessionFileInDirForTest,
-  prepareIsolatedCodexHomeForTest,
+  findSessionFileCached,
+  InteractiveCodexAgent,
+  prepareIsolatedCodexHome,
   updateSessionActivity
-} from "../src/adapters/codex/index.js";
+} from "@devtask/agent-kernel";
 
 describe("codex runner isolation", () => {
   it("creates a dedicated codex home for a task run and seeds auth/config", () => {
@@ -20,7 +21,7 @@ describe("codex runner isolation", () => {
     fs.writeFileSync(path.join(sourceHome, "config.toml"), "model = \"gpt-5\"\n");
 
     try {
-      const isolatedHome = prepareIsolatedCodexHomeForTest(taskDir, "session-1");
+      const isolatedHome = prepareIsolatedCodexHome(taskDir, "session-1");
 
       expect(isolatedHome).toBe(path.join(taskDir, "codex-sessions", "session-1", ".codex"));
       expect(fs.existsSync(path.join(isolatedHome, "auth.json"))).toBe(true);
@@ -41,7 +42,7 @@ describe("codex runner isolation", () => {
     const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-task-explicit-"));
     fs.writeFileSync(path.join(sourceHome, "auth.json"), "{\"token\":\"explicit\"}\n");
 
-    const isolatedHome = prepareIsolatedCodexHomeForTest(taskDir, "session-2", sourceHome);
+    const isolatedHome = prepareIsolatedCodexHome(taskDir, "session-2", sourceHome);
 
     expect(isolatedHome).toBe(path.join(taskDir, "codex-sessions", "session-2", ".codex"));
     expect(fs.readFileSync(path.join(isolatedHome, "auth.json"), "utf8")).toContain("explicit");
@@ -67,17 +68,14 @@ describe("codex runner isolation", () => {
       `${JSON.stringify({ type: "session_meta", payload: { cwd: workspacePath, timestamp: "2026-06-11T20:55:04.000Z", threadId: "thread-isolated" } })}\n`
     );
 
-    const matched = await findCodexSessionFileInDirForTest(path.join(root, "isolated", "sessions"), workspacePath, startedAt);
+    const matched = await findSessionFileCached(path.join(root, "isolated", "sessions"), workspacePath, startedAt);
 
     expect(matched).toBe(isolatedFile);
     expect(matched).not.toBe(globalFile);
   });
 
   it("reports the codex exec command surface used by automated runs", () => {
-    const runner = new CodexAgentRunner({ model: "gpt-5" });
-
-    const command = runner.buildStartCommand({
-      workspacePath: "/tmp/project",
+    const command = buildCodexExecCommand({
       model: "gpt-5",
       fullAuto: true,
       skipGitRepoCheck: true,
@@ -134,61 +132,40 @@ describe("codex runner isolation", () => {
 
   it("provisions managed hooks for interactive fresh starts", () => {
     const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-managed-start-"));
-    const runner = new CodexAgentRunner({ model: "gpt-5" });
+    const agent = new InteractiveCodexAgent({ model: "gpt-5" });
 
-    const start = runner.buildInteractiveStartCommand(
-      {
-        workspacePath: taskDir,
-        model: "gpt-5",
-        fullAuto: true,
-        addDirs: [taskDir],
-        env: {
-          DEVTASK_TASK_DIR: taskDir
-        },
-        managedCompletionCommand: "devtask work _phase-finalize-hook spec WORK-123 run-1"
-      },
-      "Plan work item WORK-123."
-    );
+    const start = agent.createLaunchCommand("Plan work item WORK-123.", "session-start", {
+      taskDir,
+      addDirs: [taskDir],
+      managedCompletionCommand: "devtask work _phase-finalize-hook spec WORK-123 run-1"
+    });
 
-    expect(fs.existsSync(path.join(start.session.resumeContext.storageRoot!, "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(String(start.metadata.codexHome), "hooks.json"))).toBe(true);
     expect(start.command).toContain("--dangerously-bypass-hook-trust");
   });
 
-  it("updates managed hooks for interactive resumes and clears them for unmanaged attach", () => {
+  it("updates managed hooks for interactive resumes and clears them for unmanaged attach", async () => {
     const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), "devtask-codex-managed-resume-"));
-    const codexHome = prepareIsolatedCodexHomeForTest(taskDir, "session-resume");
-    const runner = new CodexAgentRunner({ model: "gpt-5" });
-    const session = {
-      provider: "codex" as const,
-      transportId: null,
-      resumeContext: {
-        providerSessionId: "thread-123",
-        conversationId: "thread-123",
-        resumeTarget: "thread-123",
-        storageRoot: codexHome,
-        transcriptPath: null
-      },
-      summary: null,
-      summaryIsFallback: null
+    const codexHome = prepareIsolatedCodexHome(taskDir, "session-resume");
+    const agent = new InteractiveCodexAgent({ model: "gpt-5" });
+    const handle = {
+      id: "session-resume",
+      runtimeName: "tmux",
+      data: {
+        threadId: "thread-123",
+        codexHome,
+        resumePrompt: "Continue"
+      }
     };
 
-    runner.installCompletionHook(session, "devtask work _phase-finalize-hook plan WORK-123 run-2");
-    const managed = runner.buildInteractiveResumeCommand(session, {
-      workspacePath: taskDir,
-      model: "gpt-5",
-      prompt: "Continue",
-      managedCompletionCommand: "devtask work _phase-finalize-hook plan WORK-123 run-2"
-    });
+    configureManagedHooks(codexHome, "devtask work _phase-finalize-hook plan WORK-123 run-2");
+    const managed = await agent.getRestoreCommand(handle);
     expect(managed).toContain("codex resume --dangerously-bypass-hook-trust");
     expect(fs.readFileSync(path.join(codexHome, "completion-cmd.sh"), "utf8")).toContain("_phase-finalize-hook plan WORK-123 run-2");
 
-    runner.installCompletionHook(session, null);
-    const unmanaged = runner.buildInteractiveResumeCommand(session, {
-      workspacePath: taskDir,
-      model: "gpt-5",
-      prompt: null,
-      managedCompletionCommand: null
-    });
+    configureManagedHooks(codexHome, null);
+    delete handle.data.resumePrompt;
+    const unmanaged = await agent.getRestoreCommand(handle);
     expect(unmanaged).toContain("codex resume");
     expect(fs.existsSync(path.join(codexHome, "hooks.json"))).toBe(false);
   });

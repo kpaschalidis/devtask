@@ -3,7 +3,7 @@ import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { phaseRunDir, workItemReviewDir } from "../infra/paths.js";
 import { readRunningPhaseRun } from "../infra/session-run.js";
-import { tmuxSessionExists } from "../infra/tmux.js";
+import { tmuxSessionExists } from "../adapters/agent-kernel/tmux-control.js";
 import { readGateState } from "../mission/gates.js";
 import type { GateState } from "../mission/gates.js";
 

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentSessionRef } from "../agent-session.js";
+import type { AgentSessionRef } from "../infra/session-ref.js";
 
 export type SessionPhase = "orchestrate" | "repo-plan" | "review" | "execute" | "ci-fix" | "compound";
 
@@ -52,10 +52,26 @@ export interface SessionRunRecord {
   exitCode: number | null;
 }
 
+type SessionRefSource = {
+  tmuxSession?: string | null;
+  session?: AgentSessionRef | null;
+  kernelSession?: KernelSessionRef | null;
+};
+
+type SessionRunWriteInput = Omit<SessionRun, "schemaVersion" | "status" | "updatedAt" | "finishedAt" | "exitCode" | "session"> & {
+  tmuxSession: string;
+  session?: AgentSessionRef | null;
+};
+
+export type SessionRunRecordWriteInput = Omit<SessionRunRecord, "schemaVersion" | "session"> & {
+  schemaVersion?: 1;
+  session?: AgentSessionRef | null;
+};
+
 // Write the running session marker (replaces session.json pattern).
 export function writeRunningPhaseRun(
   dir: string,
-  run: Omit<SessionRun, "schemaVersion" | "status" | "updatedAt" | "finishedAt" | "exitCode"> & { tmuxSession: string }
+  run: SessionRunWriteInput
 ): void {
   fs.mkdirSync(dir, { recursive: true });
   const record: SessionRun = {
@@ -64,7 +80,8 @@ export function writeRunningPhaseRun(
     updatedAt: run.startedAt,
     finishedAt: null,
     exitCode: null,
-    ...run
+    ...run,
+    session: resolveSessionRef(run)
   };
   fs.writeFileSync(path.join(dir, "running.json"), `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -95,10 +112,15 @@ export function updateRunningPhaseRun(dir: string, patch: Partial<SessionRun>): 
 
 // Write a completed session run record ({runId}.json). Used by both interactive
 // finalizers and non-interactive phase runners.
-export function writePhaseRunRecord(dir: string, record: SessionRunRecord): string {
+export function writePhaseRunRecord(dir: string, record: SessionRunRecordWriteInput): string {
   fs.mkdirSync(dir, { recursive: true });
+  const normalized: SessionRunRecord = {
+    schemaVersion: 1,
+    ...record,
+    session: resolveSessionRef(record)
+  };
   const filePath = path.join(dir, `${record.runId}.json`);
-  fs.writeFileSync(filePath, `${JSON.stringify(record, null, 2)}\n`);
+  fs.writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`);
   return filePath;
 }
 
@@ -124,6 +146,7 @@ export function readLatestPhaseRunRecord(dir: string): SessionRunRecord | null {
 function normalizeSessionRun(run: SessionRun): SessionRun {
   return {
     ...run,
+    session: resolveSessionRef(run),
     kernelSession: run.kernelSession ?? null
   };
 }
@@ -131,6 +154,35 @@ function normalizeSessionRun(run: SessionRun): SessionRun {
 function normalizeSessionRunRecord(run: SessionRunRecord): SessionRunRecord {
   return {
     ...run,
+    session: resolveSessionRef(run),
     kernelSession: run.kernelSession ?? null
+  };
+}
+
+export function resolveSessionRef(source: SessionRefSource): AgentSessionRef {
+  if (source.session) {
+    return source.session;
+  }
+
+  const kernelSession = source.kernelSession;
+  const data = kernelSession?.data ?? {};
+  const threadId = typeof data["threadId"] === "string" ? data["threadId"] : kernelSession?.threadId ?? null;
+  const codexHome = typeof data["codexHome"] === "string" ? data["codexHome"] : null;
+  const transcriptPath = typeof data["transcriptPath"] === "string" ? data["transcriptPath"] : null;
+  const agentName = typeof data["agentName"] === "string" ? data["agentName"] : null;
+  const provider = agentName === "cursor" ? "cursor" : agentName === "claude-code" ? "claude-code" : "codex";
+
+  return {
+    provider,
+    transportId: source.tmuxSession ?? kernelSession?.runtimeSessionId ?? null,
+    resumeContext: {
+      providerSessionId: threadId,
+      conversationId: threadId,
+      resumeTarget: threadId,
+      storageRoot: codexHome,
+      transcriptPath,
+    },
+    summary: null,
+    summaryIsFallback: null,
   };
 }

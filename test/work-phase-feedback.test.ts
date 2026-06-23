@@ -3,64 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/agent.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/agent.js")>();
-  return {
-    ...actual,
-    createDefaultAgentRunner: vi.fn(() => ({
-      buildStartCommand: () => "fake-agent-start",
-      buildInteractiveStartCommand: vi.fn(() => ({
-        command: "fake-agent-interactive-start",
-        session: {
-          provider: "codex",
-          transportId: null,
-          resumeContext: {
-            providerSessionId: null,
-            conversationId: null,
-            resumeTarget: null,
-            storageRoot: "/tmp/codex-home",
-            transcriptPath: null
-          },
-          summary: null,
-          summaryIsFallback: null
-        }
-      })),
-      buildResumeCommand: () => "fake-agent-resume",
-      buildInteractiveResumeCommand: vi.fn(() => "fake-agent-interactive-resume"),
-      installCompletionHook: vi.fn(),
-      hydrateSessionRef: vi.fn(async (session) => ({
-        ...session,
-        resumeContext: {
-          ...session.resumeContext,
-          providerSessionId: session.resumeContext?.providerSessionId ?? "agent-123",
-          conversationId: session.resumeContext?.conversationId ?? "thread-123",
-          resumeTarget: session.resumeContext?.resumeTarget ?? "agent-123",
-          transcriptPath: session.resumeContext?.transcriptPath ?? "/tmp/codex-home/sessions/orchestrate.jsonl"
-        },
-        summary: "hydrated session",
-        summaryIsFallback: false
-      }))
-    })),
-    runAgentPrompt: vi.fn(),
-    resumeAgentPrompt: vi.fn(async (_runner, session, resumeOptions: { workspacePath: string }, _prompt: string, options: { outputPath: string }) => {
-      const specPath = path.join(resumeOptions.workspacePath, ".devtask", "work", "WORK-123", "spec.md");
-      fs.mkdirSync(path.dirname(specPath), { recursive: true });
-      fs.writeFileSync(specPath, "# Spec\n\nUpdated from feedback.\n");
-      fs.writeFileSync(options.outputPath, "resumed\n");
-      return {
-        status: "completed",
-        error: null,
-        session: {
-          ...session,
-          summary: "spec updated from feedback",
-          summaryIsFallback: false
-        }
-      };
-    })
-  };
-});
-
-vi.mock("../src/infra/tmux.js", () => ({
+vi.mock("../src/adapters/agent-kernel/tmux-control.js", () => ({
   attachTmuxSession: vi.fn(),
   createBareSession: vi.fn(),
   killTmuxSession: vi.fn(),
@@ -80,8 +23,7 @@ import { createManualWorkItem } from "../src/storage/work-store.js";
 import { getLatestWorkPhaseRun } from "../src/services/session-run-service.js";
 import { attachWorkPhase, runManagedPhaseHookFinalizer, sendWorkPhaseFeedback, startOrchestrateWork } from "../src/services/work-service.js";
 
-const agent = await import("../src/agent.js");
-const tmux = await import("../src/infra/tmux.js");
+const tmux = await import("../src/adapters/agent-kernel/tmux-control.js");
 
 describe("work phase feedback", () => {
   afterEach(() => {
@@ -186,13 +128,6 @@ describe("work phase feedback", () => {
     expect(tmux.startTmuxSession).toHaveBeenCalledTimes(1);
     expect(tmux.attachTmuxSession).toHaveBeenCalledWith("devtask-test-orchestrate-WORK-123");
     expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.status).toBe("running");
-    const runner = vi.mocked(agent.createDefaultAgentRunner).mock.results.at(-1)?.value;
-    expect(runner?.buildInteractiveResumeCommand).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        managedCompletionCommand: null
-      })
-    );
   });
 
   it("starts fresh orchestrate work as an interactive background session with a managed completion hook", async () => {
@@ -213,7 +148,6 @@ describe("work phase feedback", () => {
     expect(tmux.sendLaunchCommand).toHaveBeenCalledTimes(1);
     expect(tmux.startPipePane).toHaveBeenCalledWith("devtask-test-orchestrate-WORK-123", launch.outputPath);
     expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.status).toBe("running");
-    expect(vi.mocked(agent.createDefaultAgentRunner)).not.toHaveBeenCalled();
   });
 
   it("finalizes the matching managed phase run from the hook callback and closes tmux", async () => {

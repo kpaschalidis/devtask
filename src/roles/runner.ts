@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentSessionRef } from "../agent-session.js";
+import type { AgentSessionRef } from "../infra/session-ref.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { phaseRunDir } from "../infra/paths.js";
 import { readRunningPhaseRun, writeRunningPhaseRun, type SessionRun, type SessionPhase } from "../infra/session-run.js";
@@ -10,7 +10,7 @@ import {
   killTmuxSession,
   startPipePane,
   tmuxSessionExists,
-} from "../infra/tmux.js";
+} from "../adapters/agent-kernel/tmux-control.js";
 import { DevtaskError } from "../infra/errors.js";
 import { resumeKernelPhaseSession, startKernelPhaseSession } from "../adapters/agent-kernel/phase-session.js";
 import { getLatestWorkPhaseRun } from "../services/session-run-service.js";
@@ -74,12 +74,6 @@ export async function launchPhaseFresh(
     promptPath: scope.promptPath,
     outputPath: scope.outputPath,
     artifacts: scope.artifacts,
-    session: {
-      ...launch.session,
-      transportId: launch.tmuxSession,
-      summary: `${phase} session started`,
-      summaryIsFallback: true
-    },
     kernelSession: launch.kernelSession
   });
   return {
@@ -145,12 +139,6 @@ export async function launchPhaseResume(
     promptPath: scope.promptPath,
     outputPath: scope.outputPath,
     artifacts: scope.artifacts,
-    session: {
-      ...launch.session,
-      transportId: launch.tmuxSession,
-      summary: `${phase} resume session started`,
-      summaryIsFallback: true
-    },
     kernelSession: launch.kernelSession
   });
   return {

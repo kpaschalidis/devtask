@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/infra/tmux.js", () => ({
+vi.mock("../src/adapters/agent-kernel/tmux-control.js", () => ({
   createBareSession: vi.fn(),
   killTmuxSession: vi.fn(),
   sendLaunchCommand: vi.fn(),
@@ -26,7 +26,7 @@ import { readTaskMeta } from "../src/storage/meta.js";
 import { getWorkItem } from "../src/storage/work-store.js";
 import { makeTempRepo } from "./helpers.js";
 
-const tmux = await import("../src/infra/tmux.js");
+const tmux = await import("../src/adapters/agent-kernel/tmux-control.js");
 
 describe("work execute", () => {
   afterEach(() => {

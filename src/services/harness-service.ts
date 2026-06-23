@@ -2,8 +2,9 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
-import { createDefaultAgentRunner } from "../agent.js";
+import { buildClaudeCodeCommand, buildCodexExecCommand, buildCursorCommand } from "@devtask/agent-kernel";
 import { readConfig } from "../infra/config.js";
+import type { DevtaskConfig } from "../infra/config.js";
 import { DevtaskError } from "../infra/errors.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 
@@ -47,14 +48,15 @@ type ShellCommandExecutor = (
   }
 ) => Promise<ShellCommandResult>;
 
+type AgentCommandBuilder = (config: DevtaskConfig, options: { model: string | null; fullAuto: boolean; skipGitRepoCheck: boolean }) => string;
+
 export async function testAgentIntegration(
   paths: DevtaskPaths,
   options: AgentTestOptions = {},
-  runnerFactory: typeof createDefaultAgentRunner = createDefaultAgentRunner,
+  commandBuilder: AgentCommandBuilder = buildAgentTestCommand,
   commandExecutor: ShellCommandExecutor = runShellCommand
 ): Promise<AgentTestResult> {
   const config = readConfig(paths);
-  const runner = runnerFactory(config);
   const prompt = options.message?.trim() ? options.message.trim() : DEFAULT_TEST_PROMPT;
   const promptDir = await fs.mkdtemp(path.join(os.tmpdir(), "devtask-agent-test-"));
   const promptPath = path.join(promptDir, "prompt.txt");
@@ -72,7 +74,7 @@ export async function testAgentIntegration(
       DEVTASK_TASK_PATH: promptPath
     }
   } as const;
-  const command = runner.buildStartCommand?.(startOptions) ?? "agent-run";
+  const command = commandBuilder(config, startOptions);
 
   try {
     const result = await commandExecutor(command, {
@@ -120,6 +122,29 @@ export async function testAgentIntegration(
   } finally {
     await fs.rm(promptDir, { recursive: true, force: true });
   }
+}
+
+function buildAgentTestCommand(
+  config: DevtaskConfig,
+  options: { model: string | null; fullAuto: boolean; skipGitRepoCheck: boolean },
+): string {
+  if (config.agent.provider === "cursor") {
+    return buildCursorCommand({
+      model: options.model,
+      fullAuto: options.fullAuto,
+    });
+  }
+  if (config.agent.provider === "claude-code") {
+    return buildClaudeCodeCommand({
+      model: options.model,
+      dangerouslySkipPermissions: config.codex.fullAuto !== false,
+    });
+  }
+  return buildCodexExecCommand({
+    model: options.model,
+    fullAuto: options.fullAuto,
+    skipGitRepoCheck: options.skipGitRepoCheck,
+  });
 }
 
 interface FailureContext {

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { buildAgentBootstrapCommand } from "./agent.js";
+import { buildAgentBootstrapCommand } from "./adapters/agent-kernel/command.js";
 import { DevtaskError } from "./infra/errors.js";
 import { readConfig } from "./infra/config.js";
 import type { DevtaskPaths } from "./infra/paths.js";

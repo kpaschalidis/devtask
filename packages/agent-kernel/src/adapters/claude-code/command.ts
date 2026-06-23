@@ -3,22 +3,36 @@ export function buildClaudeCodePrintCommand(
     model?: string | null;
     promptPath: string;
     completionCommand?: string | null;
-  }
+  },
 ): string {
   const parts: string[] = [];
 
-  const args = ["claude", "--dangerously-skip-permissions", "--print"];
+  const args = ['claude', '--dangerously-skip-permissions', '--print'];
   if (options.model) {
-    args.push("--model", shellQuote(options.model));
+    args.push('--model', shellQuote(options.model));
   }
-  args.push("<", shellQuote(options.promptPath));
-  parts.push(args.join(" "));
+  args.push('<', shellQuote(options.promptPath));
+  parts.push(args.join(' '));
 
   if (options.completionCommand?.trim()) {
     parts.push(options.completionCommand.trim());
   }
 
-  return parts.join("; ");
+  return parts.join('; ');
+}
+
+export function buildClaudeCodeCommand(
+  options: { model?: string | null; dangerouslySkipPermissions?: boolean } = {},
+): string {
+  const args = ['claude', '--print'];
+  if (options.dangerouslySkipPermissions !== false) {
+    args.push('--dangerously-skip-permissions');
+  }
+  if (options.model) {
+    args.push('--model', shellQuote(options.model));
+  }
+  args.push('<', '"$DEVTASK_TASK_PATH"');
+  return args.join(' ');
 }
 
 export function buildClaudeCodeInteractiveStartCommand(
@@ -28,43 +42,30 @@ export function buildClaudeCodeInteractiveStartCommand(
     dangerouslySkipPermissions?: boolean;
     completionCommand?: string | null;
     nodeExecPath?: string | null;
-  } = {}
+  } = {},
 ): string {
   const parts: string[] = [];
 
-  // Prepend the node binary directory so all subprocesses spawned by Claude
-  // use the same Node.js version that devtask is running with.
   if (options.nodeExecPath) {
-    const nodeBinDir = options.nodeExecPath.replace(/\/node$/, "");
+    const nodeBinDir = options.nodeExecPath.replace(/\/node$/, '');
     parts.push(`export PATH=${shellQuote(nodeBinDir)}:"$PATH"`);
   }
 
-  const args = ["claude", "--print"];
+  const args = ['claude', '--print'];
   if (options.dangerouslySkipPermissions !== false) {
-    args.push("--dangerously-skip-permissions");
+    args.push('--dangerously-skip-permissions');
   }
   if (options.model) {
-    args.push("--model", shellQuote(options.model));
+    args.push('--model', shellQuote(options.model));
   }
   args.push(shellQuote(prompt));
-  parts.push(args.join(" "));
+  parts.push(args.join(' '));
 
   if (options.completionCommand?.trim()) {
     parts.push(options.completionCommand.trim());
   }
 
-  return parts.join("; ");
-}
-
-export function buildClaudeCodeCommand(
-  options: { model?: string | null; dangerouslySkipPermissions?: boolean } = {}
-): string {
-  const args = ["claude", "--print", "--dangerously-skip-permissions"];
-  if (options.model) {
-    args.push("--model", shellQuote(options.model));
-  }
-  args.push("<", '"$DEVTASK_TASK_PATH"');
-  return args.join(" ");
+  return parts.join('; ');
 }
 
 function shellQuote(value: string): string {

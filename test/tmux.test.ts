@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendToTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionName, waitForTmuxSession } from "../src/infra/tmux.js";
+import { sendToTmuxSession, sendToTmuxSessionWithConfirmation, tmuxSessionName, waitForTmuxSession } from "../src/adapters/agent-kernel/tmux-control.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();

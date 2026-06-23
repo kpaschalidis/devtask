@@ -1,4 +1,4 @@
-import type { AgentStartOptions } from "../agent.js";
+import type { AgentStartOptions } from "../adapters/agent-kernel/run-once.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import type { SessionRun } from "../infra/session-run.js";
 

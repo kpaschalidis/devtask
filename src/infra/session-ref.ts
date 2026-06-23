@@ -7,13 +7,3 @@ export interface AgentSessionRef {
   summary: string | null;
   summaryIsFallback: boolean | null;
 }
-
-export function emptyAgentSessionRef(provider: AgentProvider = "codex"): AgentSessionRef {
-  return {
-    provider,
-    transportId: null,
-    resumeContext: {},
-    summary: null,
-    summaryIsFallback: null
-  };
-}

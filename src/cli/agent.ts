@@ -3,8 +3,8 @@ import { spawnSync } from "node:child_process";
 import { Command, InvalidArgumentError } from "commander";
 import { resolveWorkspacePaths } from "../infra/paths.js";
 import { readConfig } from "../infra/config.js";
-import { buildAgentBootstrapCommand } from "../agent.js";
-import { testAgentIntegration } from "../services/agent-service.js";
+import { buildAgentBootstrapCommand } from "../adapters/agent-kernel/command.js";
+import { testAgentIntegration } from "../services/harness-service.js";
 import { printError } from "./common.js";
 
 export function registerAgentCommands(program: Command): void {

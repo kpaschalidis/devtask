@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -41,6 +41,221 @@ function writeLaunchScript(command: string, artifactPrefix: string): string {
     mode: 0o700,
   });
   return `bash ${shellEscape(scriptPath)}`;
+}
+
+export function isTmuxAvailable(): boolean {
+  const result = spawnSync('tmux', ['-V'], { stdio: 'ignore' });
+  return !result.error && result.status === 0;
+}
+
+export function tmuxSessionExists(session: string): boolean {
+  const result = spawnSync('tmux', ['has-session', '-t', session], { stdio: 'ignore' });
+  return result.status === 0;
+}
+
+export function waitForTmuxSession(session: string, options: { attempts?: number; intervalMs?: number } = {}): boolean {
+  const attempts = options.attempts ?? 5;
+  const intervalMs = options.intervalMs ?? 200;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (tmuxSessionExists(session)) return true;
+    sleepSync(intervalMs);
+  }
+  return false;
+}
+
+export function attachTmuxSession(session: string): void {
+  assertTmuxAvailable();
+  if (!tmuxSessionExists(session)) {
+    throw new Error(`tmux session ${session} does not exist`);
+  }
+  const result = spawnSync('tmux', ['attach-session', '-t', session], { stdio: 'inherit' });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Failed to attach tmux session ${session}`);
+  }
+}
+
+export function createBareTmuxSession(session: string, cwd: string): void {
+  assertTmuxAvailable();
+  if (tmuxSessionExists(session)) {
+    throw new Error(`tmux session ${session} already exists`);
+  }
+  const result = spawnSync('tmux', ['new-session', '-d', '-s', session, '-c', cwd], { stdio: 'inherit' });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Failed to create bare tmux session ${session}`);
+  }
+}
+
+export function startTmuxSession(session: string, command: string[], cwd: string): void {
+  assertTmuxAvailable();
+  if (tmuxSessionExists(session)) {
+    throw new Error(`tmux session ${session} already exists`);
+  }
+  const result = spawnSync('tmux', ['new-session', '-d', '-s', session, ...command], {
+    cwd,
+    stdio: 'inherit',
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Failed to start tmux session ${session}`);
+  }
+}
+
+export function killTmuxSession(session: string): void {
+  assertTmuxAvailable();
+  if (!tmuxSessionExists(session)) return;
+  const result = spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Failed to kill tmux session ${session}`);
+  }
+}
+
+export function captureTmuxSession(session: string, lines = 30): string {
+  assertTmuxAvailable();
+  if (!tmuxSessionExists(session)) {
+    throw new Error(`tmux session ${session} does not exist`);
+  }
+  const result = spawnSync('tmux', ['capture-pane', '-t', session, '-p', '-S', `-${lines}`], {
+    encoding: 'utf8',
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Failed to capture tmux session ${session}`);
+  }
+  return result.stdout;
+}
+
+export function sendToTmuxSession(session: string, message: string): void {
+  assertTmuxAvailable();
+  if (!tmuxSessionExists(session)) {
+    throw new Error(`tmux session ${session} does not exist`);
+  }
+  runTmux(['send-keys', '-t', session, 'C-u'], `Failed to clear tmux session ${session}`);
+  if (message.includes('\n') || message.length > 200) {
+    const bufferName = `agent-${crypto.randomUUID()}`;
+    const tmpPath = join(tmpdir(), `agent-send-${crypto.randomUUID()}.txt`);
+    fs.writeFileSync(tmpPath, message, { encoding: 'utf8', mode: 0o600 });
+    try {
+      runTmux(['load-buffer', '-b', bufferName, tmpPath], `Failed to load tmux buffer for ${session}`);
+      runTmux(['paste-buffer', '-b', bufferName, '-t', session, '-d'], `Failed to paste tmux buffer into ${session}`);
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      runTmuxBestEffort(['delete-buffer', '-b', bufferName]);
+    }
+  } else {
+    runTmux(['send-keys', '-t', session, '-l', message], `Failed to send message to tmux session ${session}`);
+  }
+  runTmux(['send-keys', '-t', session, 'Enter'], `Failed to submit message to tmux session ${session}`);
+}
+
+export function sendToTmuxSessionWithConfirmation(
+  session: string,
+  message: string,
+  options: { lines?: number; attempts?: number; intervalMs?: number } = {},
+): { confirmed: boolean; output: string } {
+  const lines = options.lines ?? 30;
+  const attempts = options.attempts ?? 6;
+  const intervalMs = options.intervalMs ?? 500;
+  const before = captureTmuxSession(session, lines);
+  sendToTmuxSession(session, message);
+  let output = captureTmuxSession(session, lines);
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (output !== before || output.includes('Press up to edit queued messages')) {
+      return { confirmed: true, output };
+    }
+    sleepSync(intervalMs);
+    output = captureTmuxSession(session, lines);
+  }
+  return { confirmed: false, output };
+}
+
+export function writeTmuxLaunchScript(content: string, artifactPrefix = 'agent'): string {
+  const scriptPath = join(tmpdir(), `${artifactPrefix}-launch-${crypto.randomUUID()}.sh`);
+  fs.writeFileSync(scriptPath, `#!/usr/bin/env bash\nrm -- "$0" 2>/dev/null || true\n${content}\n`, {
+    encoding: 'utf8',
+    mode: 0o700,
+  });
+  return scriptPath;
+}
+
+export function sendTmuxLaunchCommand(session: string, command: string): void {
+  assertTmuxAvailable();
+  runTmux(['send-keys', '-t', session, '-l', command], `Failed to send launch command to ${session}`);
+  runTmux(['send-keys', '-t', session, 'Enter'], `Failed to submit launch command to ${session}`);
+}
+
+export async function isTmuxSessionAlive(session: string): Promise<boolean> {
+  try {
+    await tmux('has-session', '-t', session);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function captureTmuxOutput(session: string, lines = 50): Promise<string> {
+  try {
+    return await tmux('capture-pane', '-t', session, '-p', '-S', `-${lines}`);
+  } catch {
+    return '';
+  }
+}
+
+export async function getTmuxForegroundCommand(session: string): Promise<string | null> {
+  try {
+    const output = await tmux('display-message', '-p', '-t', session, '#{pane_current_command}');
+    return output.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function sendTmuxMessage(session: string, message: string): Promise<void> {
+  await tmux('send-keys', '-t', session, 'C-u');
+  if (message.includes('\n') || message.length > 200) {
+    const bufferName = `agent-${crypto.randomUUID()}`;
+    const tmpPath = join(tmpdir(), `agent-send-${crypto.randomUUID()}.txt`);
+    fs.writeFileSync(tmpPath, message, { encoding: 'utf8', mode: 0o600 });
+    try {
+      await tmux('load-buffer', '-b', bufferName, tmpPath);
+      await tmux('paste-buffer', '-p', '-b', bufferName, '-t', session, '-d');
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      try { await tmux('delete-buffer', '-b', bufferName); } catch { /* ignore */ }
+    }
+    await sleep(500);
+  } else {
+    await tmux('send-keys', '-t', session, '-l', message);
+    await sleep(300);
+  }
+  await tmux('send-keys', '-t', session, 'Enter');
+}
+
+export async function startPipePane(session: string, logPath: string): Promise<void> {
+  try {
+    const quotedPath = `'${logPath}'`;
+    await tmux('pipe-pane', '-t', session, '-o', `cat >> ${quotedPath}`);
+  } catch {
+    // best effort
+  }
+}
+
+function assertTmuxAvailable(): void {
+  if (!isTmuxAvailable()) {
+    throw new Error('tmux is not available on this system');
+  }
+}
+
+function runTmux(args: string[], errorMessage: string): void {
+  const result = spawnSync('tmux', args, { stdio: 'ignore' });
+  if (result.error || result.status !== 0) {
+    throw new Error(errorMessage);
+  }
+}
+
+function runTmuxBestEffort(args: string[]): void {
+  spawnSync('tmux', args, { stdio: 'ignore' });
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 // ─── TmuxSession ──────────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
-import { buildCodexCommand } from "../src/adapters/codex/command.js";
-import { buildCursorCommand } from "../src/adapters/cursor/command.js";
+import { buildCodexExecCommand, buildCursorCommand } from "@devtask/agent-kernel";
 import { hasRuntimeConfig, readConfig, writeConfig } from "../src/infra/config.js";
 import { resolvePaths } from "../src/infra/paths.js";
 import { makeTempRepo } from "./helpers.js";
@@ -201,11 +200,11 @@ describe("config", () => {
   });
 
   it("can build Codex commands for non-git workspace execution", () => {
-    expect(buildCodexCommand({ skipGitRepoCheck: true })).toContain("--skip-git-repo-check");
+    expect(buildCodexExecCommand({ skipGitRepoCheck: true })).toContain("--skip-git-repo-check");
   });
 
   it("can add explicit Codex sandbox directories", () => {
-    const command = buildCodexCommand({ addDirs: ["/tmp/repo task/.devtask/tasks/example"] });
+    const command = buildCodexExecCommand({ addDirs: ["/tmp/repo task/.devtask/tasks/example"] });
 
     expect(command).toContain("--add-dir \"$DEVTASK_TASK_DIR\"");
     expect(command).toContain("--add-dir '/tmp/repo task/.devtask/tasks/example'");

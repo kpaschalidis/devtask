@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentSessionRef } from "../agent-session.js";
 import { readConfig } from "../infra/config.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import {
@@ -19,7 +18,6 @@ import {
   phaseRunDir,
   resultJsonPath
 } from "../infra/paths.js";
-import { createDefaultAgentRunner, runAgentPrompt } from "../agent.js";
 import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun, type SessionRun } from "../infra/session-run.js";
 import { newRunId } from "../infra/run-record.js";
 import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
@@ -37,17 +35,11 @@ import { fetchJiraIssue, writeJiraSourceArtifacts } from "../adapters/jira.js";
 import { updateRecentWork } from "../storage/global-index.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { runCommand, runCommandOrThrow } from "../infra/process-runner.js";
-import { killTmuxSession, tmuxSessionExists } from "../infra/tmux.js";
+import { killTmuxSession, tmuxSessionExists } from "../adapters/agent-kernel/tmux-control.js";
 import { DevtaskError } from "../infra/errors.js";
-import { launchPhaseFresh } from "../roles/runner.js";
-import type { RoleConfig } from "../roles/types.js";
-import { orchestratorPhase } from "../roles/orchestrator.js";
-import { reviewPhase } from "../roles/validator.js";
 import { collectPhaseMemory } from "../improvement-memory.js";
 import { loadInstruction } from "../instructions/loader.js";
 import { buildCompoundPrompt } from "../prompts/compound.js";
-import { getWorkspaceRepo } from "../storage/workspace-repos.js";
-import type { WorkspaceRepo } from "../storage/workspace-repos.js";
 import {
   executePhase,
   freshExecuteWork,
@@ -65,7 +57,18 @@ import {
   pushBranchUpdate,
   type CiCheckResult
 } from "../adapters/scm/index.js";
-import { runDevtaskCodexOneShot } from "../adapters/agent-kernel/run-once.js";
+import { runWorkAgentPrompt } from "./agent-prompt-service.js";
+export { runRepoPlanWorker } from "./repo-plan-work-service.js";
+export {
+  attachWorkPhase,
+  runManagedPhaseHookFinalizer,
+  runValidateWorker,
+  sendWorkPhaseFeedback,
+  startOrchestrateWork,
+  startReviewScope,
+  startReviewWork,
+} from "./phase-work-service.js";
+export type { PhaseLaunchResult } from "./phase-work-service.js";
 
 export interface VerifyCommandResult {
   command: string;
@@ -178,17 +181,6 @@ export interface ReviewWorkResult {
   generatedAt: string;
 }
 
-export interface PhaseLaunchResult {
-  phase: string;
-  workId: string;
-  repoId: string | null;
-  taskId: string | null;
-  status: "started" | "running";
-  tmuxSession: string;
-  promptPath: string;
-  outputPath: string;
-}
-
 export type { ExecuteTaskResult, ExecuteWorkResult };
 
 export interface CompoundWorkResult {
@@ -232,60 +224,6 @@ export function getWork(paths: DevtaskPaths, workId: string): WorkItem {
   return getWorkItem(paths, workId);
 }
 
-export function attachWorkPhase(paths: DevtaskPaths, phase: "orchestrate", workId: string): Promise<void>;
-export function attachWorkPhase(paths: DevtaskPaths, phase: "review" | "execute", workId: string, repoId: string): Promise<void>;
-export async function attachWorkPhase(
-  paths: DevtaskPaths,
-  phase: "orchestrate" | "review" | "execute",
-  workId: string,
-  repoId?: string
-): Promise<void> {
-  const scopeRepoId = repoId ?? null;
-  switch (phase) {
-    case "orchestrate": return orchestratorPhase.attach(paths, workId, null);
-    case "review": return reviewPhase.attach(paths, workId, scopeRepoId);
-    case "execute": return executePhase.attach(paths, workId, scopeRepoId);
-  }
-}
-
-export function sendWorkPhaseFeedback(
-  paths: DevtaskPaths,
-  phase: "orchestrate",
-  workId: string,
-  message: string
-): Promise<PhaseLaunchResult>;
-export function sendWorkPhaseFeedback(
-  paths: DevtaskPaths,
-  phase: "review",
-  workId: string,
-  repoId: string,
-  message: string
-): Promise<PhaseLaunchResult>;
-export function sendWorkPhaseFeedback(
-  paths: DevtaskPaths,
-  phase: "execute",
-  workId: string,
-  repoId: string,
-  message: string
-): { confirmed: boolean; output: string };
-export function sendWorkPhaseFeedback(
-  paths: DevtaskPaths,
-  phase: "orchestrate" | "review" | "execute",
-  workId: string,
-  repoOrMessage: string,
-  maybeMessage?: string
-): Promise<PhaseLaunchResult> | { confirmed: boolean; output: string } {
-  const repoId = maybeMessage === undefined ? null : repoOrMessage;
-  const message = maybeMessage === undefined ? repoOrMessage : maybeMessage;
-  if (phase === "execute") {
-    return sendRawExecuteFeedback(paths, workId, repoId!, message);
-  }
-  switch (phase) {
-    case "orchestrate": return orchestratorPhase.sendFeedback(paths, workId, null, message);
-    case "review": return reviewPhase.sendFeedback(paths, workId, repoId, message);
-  }
-}
-
 export { approveWorkGate } from "../mission/approve.js";
 export { freshExecuteWork };
 export { watchWorkPullRequests } from "./pr-watch-service.js";
@@ -296,157 +234,6 @@ export async function executeWork(paths: DevtaskPaths, workId: string): Promise<
   updateWorkItemStatus(paths, workId, summarizeExecuteWorkStatus(result.tasks));
   await updateRecentWork(paths, item);
   return result;
-}
-
-type InteractivePhase = "orchestrate" | "review";
-
-const PHASE_CONFIGS: Record<InteractivePhase, RoleConfig> = {
-  orchestrate: orchestratorPhase,
-  review: reviewPhase
-};
-
-export async function startOrchestrateWork(
-  paths: DevtaskPaths,
-  workId: string,
-  opts?: { acceptRecommended?: boolean }
-): Promise<PhaseLaunchResult> {
-  return launchPhaseFresh(orchestratorPhase, paths, workId, "orchestrate", null, opts);
-}
-
-export async function runRepoPlanWorker(paths: DevtaskPaths, workId: string, repoId: string): Promise<void> {
-  const config = readConfig(paths);
-  const graph = readWorkGraph(paths, workId);
-  const graphTask = graph.tasks.find((t) => t.repoId === repoId);
-  if (!graphTask) {
-    throw new DevtaskError(`No task found in graph for repo ${repoId} in work item ${workId}`);
-  }
-  const repo = getWorkspaceRepo(paths, repoId);
-  const runId = newRunId();
-  const phaseDir = phaseRunDir(paths, workId, "repo-plan", repoId);
-  fs.mkdirSync(phaseDir, { recursive: true });
-  const promptPath = path.join(phaseDir, `${runId}.prompt.md`);
-  const outputPath = path.join(phaseDir, `${runId}.md`);
-  const runtimePrefix = path.join(repo.repoPath, `.devtask_repo_plan_${runId}`);
-  const runtimePlanPath = `${runtimePrefix}.md`;
-  const runtimeStatePath = `${runtimePrefix}.state.md`;
-  const resultPath = `${runtimePrefix}.result.json`;
-  const finalPlanPath = workItemRepoPlanPath(paths, workId, repoId);
-  const task = buildWorkerTaskDescription(workId, graphTask, repo);
-  const state = `# State: ${graphTask.id}\n\n## Progress\n- Repo-plan phase for work ${workId}\n`;
-  const memory = collectPhaseMemory(paths, "planning", { repoId });
-  const contextPath = workItemRepoContextPath(paths, workId, repoId);
-  const contextContent = fs.existsSync(contextPath) ? fs.readFileSync(contextPath, "utf8").trim() : null;
-  const prompt = loadInstruction("repo-plan", {
-    TASK_ID: graphTask.id,
-    TASK_CONTENT: task,
-    STATE_CONTENT: state,
-    PLAN_PATH: runtimePlanPath,
-    CONTEXT: contextContent ? `## Orchestrator Context\n\n${contextContent}\n\n` : "",
-    MEMORY: memory ? `${memory}\n\n` : ""
-  });
-  fs.writeFileSync(promptPath, `${prompt}\n`);
-  const startedAt = new Date().toISOString();
-  const result =
-    config.agent.provider === "codex"
-      ? await runDevtaskCodexOneShot(
-          config,
-          {
-            workspacePath: repo.repoPath,
-            model: config.codex.model,
-            fullAuto: config.codex.fullAuto,
-            skipGitRepoCheck: true,
-            addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
-            env: {
-              ...process.env,
-              DEVTASK_TASK_DIR: workItemDir(paths, workId),
-              DEVTASK_TASK_PATH: promptPath,
-              DEVTASK_PLAN_PATH: runtimePlanPath,
-              DEVTASK_STATE_PATH: runtimeStatePath,
-              DEVTASK_RESULT_PATH: resultPath
-            }
-          },
-          prompt,
-          { outputPath }
-        )
-      : await runAgentPrompt(
-          createDefaultAgentRunner(config),
-          {
-            workspacePath: repo.repoPath,
-            model: config.codex.model,
-            fullAuto: config.codex.fullAuto,
-            skipGitRepoCheck: true,
-            addDirs: [workItemDir(paths, workId), repo.scope ? path.join(repo.repoPath, repo.scope) : repo.repoPath],
-            env: {
-              ...process.env,
-              DEVTASK_TASK_DIR: workItemDir(paths, workId),
-              DEVTASK_TASK_PATH: promptPath,
-              DEVTASK_PLAN_PATH: runtimePlanPath,
-              DEVTASK_STATE_PATH: runtimeStatePath,
-              DEVTASK_RESULT_PATH: resultPath
-            }
-          },
-          prompt,
-          { outputPath }
-        );
-  const finishedAt = new Date().toISOString();
-  persistSharedRepoPlan(runtimePlanPath, finalPlanPath);
-  const blocked = readResultStatus(resultPath) === "blocked";
-  removeIfExists(runtimePlanPath);
-  removeIfExists(runtimeStatePath);
-  removeIfExists(resultPath);
-  const planExists = fs.existsSync(finalPlanPath) && fs.readFileSync(finalPlanPath, "utf8").trim().length > 0;
-  const status = planExists ? (blocked ? "blocked" : "planned") : "failed";
-  writePhaseRunRecord(phaseDir, {
-    schemaVersion: 1,
-    phase: "repo-plan",
-    runId,
-    workId,
-    repoId,
-    taskId: graphTask.id,
-    status,
-    promptPath,
-    outputPath,
-    startedAt,
-    finishedAt,
-    session: result.session,
-    artifacts: { planPath: finalPlanPath },
-    exitCode: status !== "failed" ? 0 : null
-  });
-  if (status === "failed") {
-    throw new DevtaskError(`Repo-plan worker failed for ${repoId}`);
-  }
-}
-
-export async function startReviewWork(paths: DevtaskPaths, workId: string): Promise<PhaseLaunchResult[]> {
-  const materialization = requireMaterialization(paths, workId);
-  const launches: PhaseLaunchResult[] = [];
-  for (const task of materialization.tasks) {
-    launches.push(await startReviewScope(paths, workId, task.repoId));
-  }
-  return launches;
-}
-
-export async function startReviewScope(paths: DevtaskPaths, workId: string, repoId: string): Promise<PhaseLaunchResult> {
-  return launchPhaseFresh(reviewPhase, paths, workId, "review", repoId);
-}
-
-export async function runValidateWorker(paths: DevtaskPaths, workId: string, featureId: string): Promise<void> {
-  const graph = readWorkGraph(paths, workId);
-  const feature = graph.features.find((f) => f.id === featureId);
-  if (!feature) {
-    throw new DevtaskError(`No feature "${featureId}" found in graph for work item ${workId}`);
-  }
-  if (!feature.validationRequired) {
-    return;
-  }
-  const featureTasks = graph.tasks.filter((t) => feature.taskIds.includes(t.id));
-  if (featureTasks.length === 0) {
-    throw new DevtaskError(`Feature "${featureId}" has no tasks in graph for work item ${workId}`);
-  }
-  const repoIds = [...new Set(featureTasks.map((t) => t.repoId))];
-  for (const repoId of repoIds) {
-    await startReviewScope(paths, workId, repoId);
-  }
 }
 
 export async function materializeWork(paths: DevtaskPaths, workId: string): Promise<WorkMaterialization> {
@@ -488,42 +275,23 @@ export async function compoundWork(paths: DevtaskPaths, workId: string): Promise
   fs.writeFileSync(promptPath, `${prompt}\n`);
 
   const startedAt = new Date().toISOString();
-  const result =
-    config.agent.provider === "codex"
-      ? await runDevtaskCodexOneShot(
-          config,
-          {
-            workspacePath: paths.root,
-            model: config.codex.model,
-            fullAuto: config.codex.fullAuto,
-            skipGitRepoCheck: true,
-            addDirs: [workItemDir(paths, workId)],
-            env: {
-              ...process.env,
-              DEVTASK_TASK_DIR: workItemDir(paths, workId),
-              DEVTASK_TASK_PATH: promptPath
-            }
-          },
-          prompt,
-          { outputPath }
-        )
-      : await runAgentPrompt(
-          createDefaultAgentRunner(config),
-          {
-            workspacePath: paths.root,
-            model: config.codex.model,
-            fullAuto: config.codex.fullAuto,
-            skipGitRepoCheck: true,
-            addDirs: [workItemDir(paths, workId)],
-            env: {
-              ...process.env,
-              DEVTASK_TASK_DIR: workItemDir(paths, workId),
-              DEVTASK_TASK_PATH: promptPath
-            }
-          },
-          prompt,
-          { outputPath }
-        );
+  const result = await runWorkAgentPrompt(
+    config,
+    {
+      workspacePath: paths.root,
+      model: config.codex.model,
+      fullAuto: config.codex.fullAuto,
+      skipGitRepoCheck: true,
+      addDirs: [workItemDir(paths, workId)],
+      env: {
+        ...process.env,
+        DEVTASK_TASK_DIR: workItemDir(paths, workId),
+        DEVTASK_TASK_PATH: promptPath
+      }
+    },
+    prompt,
+    { outputPath }
+  );
   const finishedAt = new Date().toISOString();
   const status: CompoundWorkResult["status"] =
     result.status === "completed" && isFreshNonEmptyFile(learningsPath, startedAt) ? "completed" : "failed";
@@ -611,23 +379,6 @@ export async function checkWork(paths: DevtaskPaths, workId: string): Promise<Ve
   return result;
 }
 
-export async function runManagedPhaseHookFinalizer(
-  paths: DevtaskPaths,
-  phase: InteractivePhase,
-  workId: string,
-  runId: string,
-  repoId: string | null
-): Promise<void> {
-  const current = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId));
-  if (!current || current.runId !== runId || current.status !== "running") {
-    return;
-  }
-  const { status } = await finalizeInteractivePhase(paths, phase, workId, repoId, current);
-  if (status !== "failed" && current.tmuxSession && tmuxSessionExists(current.tmuxSession)) {
-    killTmuxSession(current.tmuxSession);
-  }
-}
-
 async function runDeterministicChecks(
   paths: DevtaskPaths,
   workId: string,
@@ -701,75 +452,6 @@ async function runDeterministicChecksForRepo(paths: DevtaskPaths, workId: string
   }
   return task;
 }
-
-async function hydratePhaseSession(
-  paths: DevtaskPaths,
-  session: AgentSessionRef,
-  workspacePath: string,
-  tmuxSession: string
-): Promise<AgentSessionRef> {
-  const runner = createDefaultAgentRunner(readConfig(paths));
-  const hydrated = runner.hydrateSessionRef ? await runner.hydrateSessionRef(session, workspacePath) : session;
-  return {
-    ...hydrated,
-    transportId: tmuxSession
-  };
-}
-
-
-function phaseWorkItemStatus(phase: InteractivePhase, status: string): WorkItemStatus | null {
-  switch (phase) {
-    case "orchestrate": return status === "planned" ? "planned" : "failed";
-    case "review": return null;
-  }
-}
-
-async function finalizeInteractivePhase(
-  paths: DevtaskPaths,
-  phase: InteractivePhase,
-  workId: string,
-  repoId: string | null,
-  sessionRecord: SessionRun
-): Promise<{ status: string }> {
-  const cfg = PHASE_CONFIGS[phase];
-  const workspacePath = cfg.workspacePath(paths, workId, repoId);
-  const session = await hydratePhaseSession(paths, sessionRecord.session, workspacePath, sessionRecord.tmuxSession ?? "");
-  const finishedAt = new Date().toISOString();
-  const { status, artifacts } = await cfg.finalize(paths, workId, repoId, sessionRecord);
-  const itemStatus = phaseWorkItemStatus(phase, status);
-  if (itemStatus !== null) {
-    updateWorkItemStatus(paths, workId, itemStatus);
-    await updateRecentWork(paths, getWorkItem(paths, workId));
-  }
-  writePhaseRunRecord(phaseRunDir(paths, workId, phase, repoId), {
-    schemaVersion: 1,
-    phase,
-    runId: sessionRecord.runId,
-    workId,
-    repoId: repoId ?? null,
-    taskId: sessionRecord.taskId,
-    status,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    startedAt: sessionRecord.startedAt,
-    finishedAt,
-    session,
-    artifacts,
-    exitCode: status === "failed" ? null : 0
-  });
-  updateRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
-    status: status === "blocked" ? "blocked" : status === "failed" ? "failed" : "completed",
-    updatedAt: finishedAt,
-    promptPath: sessionRecord.promptPath,
-    outputPath: sessionRecord.outputPath,
-    artifacts,
-    session,
-    taskId: sessionRecord.taskId,
-    runId: sessionRecord.runId
-  });
-  return { status };
-}
-
 
 export async function createWorkPullRequests(
   paths: DevtaskPaths,
@@ -1210,46 +892,25 @@ async function runCiFixAttempt(
   fs.writeFileSync(statePath, `# State: ${options.taskId} ci-fix\n\n## Progress\n- Attempt ${options.attempt} started ${startedAt}\n`);
   fs.writeFileSync(resultPath, "{\n  \"status\": \"pending\"\n}\n");
 
-  const result =
-    config.agent.provider === "codex"
-      ? await runDevtaskCodexOneShot(
-          config,
-          {
-            workspacePath: options.worktreePath,
-            model: config.codex.model,
-            fullAuto: config.codex.fullAuto,
-            skipGitRepoCheck: true,
-            addDirs: [workItemDir(paths, workId), options.worktreePath],
-            env: {
-              ...process.env,
-              DEVTASK_TASK_DIR: attemptDir,
-              DEVTASK_TASK_PATH: promptPath,
-              DEVTASK_STATE_PATH: statePath,
-              DEVTASK_RESULT_PATH: resultPath
-            }
-          },
-          prompt,
-          { outputPath }
-        )
-      : await runAgentPrompt(
-          createDefaultAgentRunner(config),
-          {
-            workspacePath: options.worktreePath,
-            model: config.codex.model,
-            fullAuto: config.codex.fullAuto,
-            skipGitRepoCheck: true,
-            addDirs: [workItemDir(paths, workId), options.worktreePath],
-            env: {
-              ...process.env,
-              DEVTASK_TASK_DIR: attemptDir,
-              DEVTASK_TASK_PATH: promptPath,
-              DEVTASK_STATE_PATH: statePath,
-              DEVTASK_RESULT_PATH: resultPath
-            }
-          },
-          prompt,
-          { outputPath }
-        );
+  const result = await runWorkAgentPrompt(
+    config,
+    {
+      workspacePath: options.worktreePath,
+      model: config.codex.model,
+      fullAuto: config.codex.fullAuto,
+      skipGitRepoCheck: true,
+      addDirs: [workItemDir(paths, workId), options.worktreePath],
+      env: {
+        ...process.env,
+        DEVTASK_TASK_DIR: attemptDir,
+        DEVTASK_TASK_PATH: promptPath,
+        DEVTASK_STATE_PATH: statePath,
+        DEVTASK_RESULT_PATH: resultPath
+      }
+    },
+    prompt,
+    { outputPath }
+  );
 
   const finishedAt = new Date().toISOString();
   const resultStatus = readResultStatus(resultPath);
@@ -1511,40 +1172,6 @@ function buildPullRequestBody(item: WorkItem, repoId: string): string {
   ].join("\n");
 }
 
-function buildWorkerTaskDescription(workId: string, graphTask: WorkGraphTask, repo: WorkspaceRepo): string {
-  return [
-    `# Task ${graphTask.id}`,
-    "",
-    "## Goal",
-    graphTask.goal,
-    "",
-    "## Work Item",
-    `- id: ${workId}`,
-    `- repo id: ${repo.id}`,
-    `- repo path: ${repo.repoPath}`,
-    `- repo scope: ${repo.scope ?? "."}`,
-    "",
-    "## Ownership",
-    ...(graphTask.owns.length > 0 ? graphTask.owns.map((e) => `- ${e}`) : ["- none"]),
-    "",
-    "## Dependencies",
-    ...(graphTask.dependencies.length > 0
-      ? graphTask.dependencies.map((d) => `- ${d.task} (${d.type})${d.reason != null ? `: ${d.reason}` : ""}`)
-      : ["- none"])
-  ].join("\n");
-}
-
-function persistSharedRepoPlan(runtimePlanPath: string, finalPlanPath: string): void {
-  try {
-    const plan = fs.readFileSync(runtimePlanPath, "utf8").trim();
-    if (!plan) return;
-    fs.mkdirSync(path.dirname(finalPlanPath), { recursive: true });
-    fs.writeFileSync(finalPlanPath, `${plan}\n`);
-  } catch {
-    // no runtime plan to persist
-  }
-}
-
 function readResultStatus(resultPath: string): string {
   try {
     const value = JSON.parse(fs.readFileSync(resultPath, "utf8")) as { status?: unknown };
@@ -1557,8 +1184,8 @@ function readResultStatus(resultPath: string): string {
 function removeIfExists(filePath: string): void {
   try {
     fs.unlinkSync(filePath);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 }
 

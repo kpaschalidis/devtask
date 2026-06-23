@@ -14,7 +14,7 @@ import {
   workItemResultsDir
 } from "../infra/paths.js";
 import { readRunningPhaseRun, updateRunningPhaseRun } from "../infra/session-run.js";
-import { tmuxSessionExists, tmuxSessionName } from "../infra/tmux.js";
+import { tmuxSessionExists, tmuxSessionName } from "../adapters/agent-kernel/tmux-control.js";
 import { loadInstruction } from "../instructions/loader.js";
 import { copySkillsToDir } from "../skills/loader.js";
 import { collectPhaseMemory } from "../improvement-memory.js";

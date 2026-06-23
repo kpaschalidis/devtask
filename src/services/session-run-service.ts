@@ -2,8 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { GLOBAL_PHASES, phaseRunDir, workItemLocalDir } from "../infra/paths.js";
-import { readRunningPhaseRun, type SessionRun, type SessionPhase, type SessionRunRecord } from "../infra/session-run.js";
-import { tmuxSessionExists } from "../infra/tmux.js";
+import {
+  readRunningPhaseRun,
+  resolveSessionRef,
+  type SessionRun,
+  type SessionPhase,
+  type SessionRunRecord,
+} from "../infra/session-run.js";
+import { tmuxSessionExists } from "../adapters/agent-kernel/tmux-control.js";
 
 export interface PhaseRunSummary extends SessionRunRecord {
   filePath: string;
@@ -148,8 +154,10 @@ function readRunFiles(dir: string): PhaseRunSummary[] {
     .sort()
     .map((entry) => {
       const filePath = path.join(dir, entry);
+      const run = JSON.parse(fs.readFileSync(filePath, "utf8")) as SessionRunRecord;
       return {
-        ...(JSON.parse(fs.readFileSync(filePath, "utf8")) as SessionRunRecord),
+        ...run,
+        session: resolveSessionRef(run),
         filePath
       };
     });

@@ -1,13 +1,14 @@
-import type { AgentSessionRef } from "../../agent-session.js";
-import { configureManagedHooks } from "../codex/index.js";
 import { readConfig } from "../../infra/config.js";
 import type { DevtaskPaths } from "../../infra/paths.js";
 import type { KernelSessionRef, SessionPhase } from "../../infra/session-run.js";
 import { createDevtaskKernel } from "./kernel.js";
-import { InteractiveCodexAgent } from "./codex-interactive.js";
-import { InteractiveClaudeCodeAgent } from "./claude-code-interactive.js";
-import type { RuntimeHandle } from "@devtask/agent-kernel";
-import type { SessionOwner } from "@devtask/agent-kernel";
+import {
+  configureManagedHooks,
+  InteractiveClaudeCodeAgent,
+  InteractiveCodexAgent,
+  type RuntimeHandle,
+  type SessionOwner,
+} from "@devtask/agent-kernel";
 
 interface InteractiveLaunchAgent {
   createLaunchCommand(
@@ -47,7 +48,6 @@ export interface ResumeKernelPhaseSessionInput {
 export interface KernelPhaseSessionLaunch {
   tmuxSession: string;
   kernelSession: KernelSessionRef;
-  session: AgentSessionRef;
 }
 
 export async function startKernelPhaseSession(input: StartKernelPhaseSessionInput): Promise<KernelPhaseSessionLaunch> {
@@ -81,7 +81,6 @@ export async function startKernelPhaseSession(input: StartKernelPhaseSessionInpu
     return {
       tmuxSession: resolveTmuxSession(kernel, handle),
       kernelSession: kernelSessionFromHandle(handle),
-      session: sessionRefFromHandle(handle),
     };
   } finally {
     kernel.close();
@@ -116,7 +115,6 @@ export async function resumeKernelPhaseSession(input: ResumeKernelPhaseSessionIn
     return {
       tmuxSession: resolveTmuxSession(kernel, restored),
       kernelSession: kernelSessionFromHandle(restored),
-      session: sessionRefFromHandle(restored),
     };
   } finally {
     kernel.close();
@@ -128,27 +126,6 @@ export function runtimeHandleFromKernelSession(session: KernelSessionRef): Runti
     id: session.runtimeSessionId,
     runtimeName: session.runtimeName,
     data: { ...session.data },
-  };
-}
-
-function sessionRefFromHandle(handle: RuntimeHandle): AgentSessionRef {
-  const threadId = typeof handle.data["threadId"] === "string" ? handle.data["threadId"] : null;
-  const codexHome = typeof handle.data["codexHome"] === "string" ? handle.data["codexHome"] : null;
-  const transcriptPath = typeof handle.data["transcriptPath"] === "string" ? handle.data["transcriptPath"] : null;
-  const agentName = typeof handle.data["agentName"] === "string" ? handle.data["agentName"] : null;
-  const provider = agentName === "cursor" ? "cursor" : agentName === "claude-code" ? "claude-code" : "codex";
-  return {
-    provider,
-    transportId: handle.id,
-    resumeContext: {
-      providerSessionId: threadId,
-      conversationId: threadId,
-      resumeTarget: threadId,
-      storageRoot: codexHome,
-      transcriptPath,
-    },
-    summary: null,
-    summaryIsFallback: null,
   };
 }
 

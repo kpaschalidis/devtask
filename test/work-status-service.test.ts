@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/infra/tmux.js", () => ({
+vi.mock("../src/adapters/agent-kernel/tmux-control.js", () => ({
   tmuxSessionExists: vi.fn(() => false)
 }));
 

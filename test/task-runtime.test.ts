@@ -6,7 +6,7 @@ vi.mock("../src/infra/processes.js", () => ({
   isProcessAlive: vi.fn(() => false)
 }));
 
-vi.mock("../src/infra/tmux.js", () => ({
+vi.mock("../src/adapters/agent-kernel/tmux-control.js", () => ({
   tmuxSessionExists: vi.fn(() => false)
 }));
 

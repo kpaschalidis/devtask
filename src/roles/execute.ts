@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentSessionRef } from "../agent-session.js";
 import { readConfig } from "../infra/config.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import {
@@ -10,7 +9,7 @@ import {
   taskStoragePaths,
   workItemResultsDir
 } from "../infra/paths.js";
-import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun, type SessionRun } from "../infra/session-run.js";
+import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun } from "../infra/session-run.js";
 import { newRunId } from "../infra/run-record.js";
 import { collectPhaseMemory } from "../improvement-memory.js";
 import { readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
@@ -18,16 +17,16 @@ import { getWorkItem } from "../storage/work-item.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import {
   createBareSession,
+  launchExecutionTmuxSession,
   sendLaunchCommand,
   sendToTmuxSessionWithConfirmation,
   tmuxSessionExists,
   tmuxSessionName,
   waitForTmuxSession,
   writeLaunchScript
-} from "../infra/tmux.js";
+} from "../adapters/agent-kernel/tmux-control.js";
 import { DevtaskError } from "../infra/errors.js";
 import type { KernelSessionRef } from "../infra/session-run.js";
-import { launchExecutionTmuxSession } from "../adapters/agent-kernel/tmux-runtime.js";
 import type { TaskMeta } from "../types.js";
 import type { RoleConfig, RoleFreshScope, RoleResult, RoleScope } from "./types.js";
 
@@ -209,12 +208,7 @@ async function executeMaterializedTask(
     if (existingRun) {
       updateRunningPhaseRun(phaseRunDir(workspacePaths, workId, "execute", task.repoId), {
         status: current.status === "blocked" ? "blocked" : current.status === "failed" ? "failed" : "completed",
-        updatedAt: meta.updatedAt,
-        session: {
-          ...existingRun.session,
-          summary: meta.resultSummary,
-          summaryIsFallback: true
-        }
+        updatedAt: meta.updatedAt
       });
     }
     return {
@@ -244,10 +238,7 @@ async function executeMaterializedTask(
       outputPath: meta.statePath,
       resultPath: meta.resultPath,
       updatedAt: meta.updatedAt,
-      summary: meta.resultSummary,
-      provider: readConfig(workspacePaths).agent.provider,
-      providerSessionId: meta.agentSessionId,
-      conversationId: meta.agentThreadId
+      kernelSession: buildExecuteKernelSession(meta, readConfig(workspacePaths).agent.provider)
     });
     return {
       repoId: task.repoId,
@@ -283,10 +274,6 @@ async function executeMaterializedTask(
     outputPath: meta.statePath,
     resultPath: meta.resultPath,
     updatedAt: meta.updatedAt,
-    summary: meta.resultSummary,
-    provider: readConfig(workspacePaths).agent.provider,
-    providerSessionId: meta.agentSessionId,
-    conversationId: meta.agentThreadId,
     kernelSession
   });
   return {
@@ -389,19 +376,7 @@ function writeExecutePhaseRun(
     outputPath: meta.statePath,
     startedAt: meta.updatedAt,
     finishedAt: meta.updatedAt,
-    session: {
-      provider,
-      transportId: meta.tmuxSession,
-      resumeContext: {
-        providerSessionId: meta.agentSessionId ?? null,
-        conversationId: meta.agentThreadId ?? null,
-        resumeTarget: meta.agentSessionId ?? null,
-        storageRoot: null,
-        transcriptPath: null
-      },
-      summary: meta.resultSummary,
-      summaryIsFallback: true
-    },
+    kernelSession: buildExecuteKernelSession(meta, provider),
     artifacts: {
       taskPath: meta.taskPath,
       statePath: meta.statePath,
@@ -422,30 +397,13 @@ function recordExecutePhaseSession(
     outputPath: string;
     resultPath: string;
     updatedAt: string;
-    summary: string | null;
-    provider: AgentSessionRef["provider"];
-    providerSessionId: string | null;
-    conversationId: string | null;
     kernelSession?: KernelSessionRef | null;
   }
 ): void {
   const dir = phaseRunDir(paths, workId, "execute", repoId);
   const current = readRunningPhaseRun(dir);
-  const sessionRef: AgentSessionRef = {
-    provider: meta.provider,
-    transportId: tmuxSession,
-    resumeContext: {
-      providerSessionId: meta.providerSessionId,
-      conversationId: meta.conversationId,
-      resumeTarget: meta.providerSessionId,
-      storageRoot: null,
-      transcriptPath: null
-    },
-    summary: meta.summary,
-    summaryIsFallback: true
-  };
   const now = meta.updatedAt;
-  const updated: SessionRun = {
+  const updated = {
     ...(current ?? {
       schemaVersion: 1 as const,
       phase: "execute" as const,
@@ -463,11 +421,30 @@ function recordExecutePhaseSession(
     promptPath: meta.promptPath,
     outputPath: meta.outputPath,
     artifacts: { taskPath: meta.promptPath, statePath: meta.outputPath, resultPath: meta.resultPath },
-    session: sessionRef,
     kernelSession: meta.kernelSession ?? current?.kernelSession ?? null
   };
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "running.json"), `${JSON.stringify(updated, null, 2)}\n`);
+}
+
+function buildExecuteKernelSession(
+  meta: TaskMeta,
+  provider: "codex" | "cursor" | "claude-code"
+): KernelSessionRef | null {
+  if (!meta.tmuxSession) {
+    return null;
+  }
+  return {
+    runtimeSessionId: meta.tmuxSession,
+    runtimeName: "tmux",
+    threadId: meta.agentSessionId ?? meta.agentThreadId ?? null,
+    data: {
+      agentName: provider,
+      threadId: meta.agentSessionId ?? meta.agentThreadId ?? null,
+      sessionName: meta.tmuxSession,
+      workspacePath: meta.worktreePath
+    }
+  };
 }
 
 function shellEscape(value: string): string {

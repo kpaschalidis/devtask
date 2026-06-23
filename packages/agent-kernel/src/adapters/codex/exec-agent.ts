@@ -406,7 +406,7 @@ function copyCodexHomeFileIfPresent(sourceHome: string, targetHome: string, rela
   fs.copyFileSync(source, target);
 }
 
-function prepareIsolatedCodexHome(taskDir: string | null, sessionName: string, sourceRoot?: string | null): string {
+export function prepareIsolatedCodexHome(taskDir: string | null, sessionName: string, sourceRoot?: string | null): string {
   const sourceHome = defaultCodexHome(sourceRoot);
   const targetRoot = taskDir
     ? join(taskDir, 'codex-sessions', sessionName)
@@ -426,7 +426,7 @@ function buildSessionCacheKey(sessionsDir: string, workspacePath: string, starte
   return `${sessionsDir}::${workspacePath}::${startedAtMs ?? 'none'}`;
 }
 
-async function findSessionFileCached(sessionsDir: string, workspacePath: string, startedAtMs?: number): Promise<string | null> {
+export async function findSessionFileCached(sessionsDir: string, workspacePath: string, startedAtMs?: number): Promise<string | null> {
   const cacheKey = buildSessionCacheKey(sessionsDir, workspacePath, startedAtMs);
   const cached = sessionFileCache.get(cacheKey);
   if (cached && Date.now() < cached.expiry) {
@@ -441,7 +441,7 @@ async function findSessionFileCached(sessionsDir: string, workspacePath: string,
   return found;
 }
 
-function updateSessionActivity(
+export function updateSessionActivity(
   current: SessionActivityState,
   sessionMtimeMs: number,
   now: number,
@@ -586,7 +586,7 @@ async function findCodexSessionFileInDir(sessionsDir: string, workspacePath: str
   return best?.path ?? null;
 }
 
-async function extractThreadId(filePath: string): Promise<string | null> {
+export async function extractThreadId(filePath: string): Promise<string | null> {
   try {
     const reader = createInterface({
       input: createReadStream(filePath, { encoding: 'utf8' }),
@@ -641,7 +641,7 @@ function extractAssistantText(entry: CodexJsonlLine, payload: CodexJsonlPayload)
   return null;
 }
 
-async function extractAssistantSummary(filePath: string): Promise<string | null> {
+export async function extractAssistantSummary(filePath: string): Promise<string | null> {
   try {
     const lines = await readJsonlTailLines(filePath, 200);
     for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -658,4 +658,70 @@ async function extractAssistantSummary(filePath: string): Promise<string | null>
     return null;
   }
   return null;
+}
+
+export function configureManagedHooks(codexHomePath: string | null, command: string | null): void {
+  if (!codexHomePath?.trim()) {
+    return;
+  }
+
+  const hooksPath = join(codexHomePath, 'hooks.json');
+  const completionScriptPath = join(codexHomePath, 'completion-cmd.sh');
+
+  if (!command?.trim()) {
+    for (const targetPath of [hooksPath, completionScriptPath]) {
+      try {
+        fs.unlinkSync(targetPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+      }
+    }
+    return;
+  }
+
+  fs.mkdirSync(codexHomePath, { recursive: true });
+  fs.writeFileSync(completionScriptPath, `#!/bin/bash\nset -e\n${command}\n`);
+  fs.chmodSync(completionScriptPath, 0o755);
+
+  const stopScriptPath = ensureGlobalStopScript();
+  fs.writeFileSync(
+    hooksPath,
+    `${JSON.stringify({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: `bash ${stopScriptPath}`,
+                timeout: 30,
+                statusMessage: 'Finalizing devtask phase run',
+              },
+            ],
+          },
+        ],
+      },
+    }, null, 2)}\n`,
+  );
+}
+
+function ensureGlobalStopScript(): string {
+  const hooksDir = join(homedir(), '.devtask', 'hooks');
+  const scriptPath = join(hooksDir, 'stop.sh');
+  fs.mkdirSync(hooksDir, { recursive: true });
+  fs.writeFileSync(
+    scriptPath,
+    [
+      '#!/bin/bash',
+      'set -e',
+      'script="${CODEX_HOME}/completion-cmd.sh"',
+      'if [ -f "$script" ]; then',
+      '  exec bash "$script"',
+      'fi',
+    ].join('\n') + '\n',
+  );
+  fs.chmodSync(scriptPath, 0o755);
+  return scriptPath;
 }

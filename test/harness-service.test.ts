@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentRunner } from "../src/agent.js";
-import { testAgentIntegration } from "../src/services/agent-service.js";
+import { testAgentIntegration } from "../src/services/harness-service.js";
 import { resolvePaths } from "../src/infra/paths.js";
 import { initializeStore } from "../src/storage/task-store.js";
 import { writeConfig } from "../src/infra/config.js";
@@ -18,7 +17,7 @@ describe("agent service", () => {
     const result = await testAgentIntegration(
       paths,
       { message: "Say hello", onOutput: (chunk) => outputs.push(chunk) },
-      () => createFakeRunner("fake-agent --test"),
+      () => "fake-agent --test",
       async (_command, options) => {
         options.onStdout?.("hello\n");
         return { stdout: "hello\n", stderr: "", exitCode: 0 };
@@ -41,7 +40,7 @@ describe("agent service", () => {
       testAgentIntegration(
         paths,
         {},
-        () => createFakeRunner("agent --model test"),
+        () => "agent --model test",
         async () => ({ stdout: "", stderr: "spawn agent ENOENT", exitCode: 127 })
       )
     ).rejects.toThrow(DevtaskError);
@@ -50,7 +49,7 @@ describe("agent service", () => {
       testAgentIntegration(
         paths,
         {},
-        () => createFakeRunner("agent --model test"),
+        () => "agent --model test",
         async () => ({ stdout: "", stderr: "spawn agent ENOENT", exitCode: 127 })
       )
     ).rejects.toThrow("The cursor CLI does not appear to be available on PATH");
@@ -66,7 +65,7 @@ describe("agent service", () => {
       testAgentIntegration(
         paths,
         {},
-        () => createFakeRunner("fake-agent --test"),
+        () => "fake-agent --test",
         async () => ({ stdout: "thinking...\n", stderr: "Approval required", exitCode: 1 })
       )
     ).rejects.toThrow("Captured output:\nthinking...");
@@ -84,7 +83,7 @@ describe("agent service", () => {
     const error = await testAgentIntegration(
       paths,
       {},
-      () => createFakeRunner("codex exec - < \"$DEVTASK_TASK_PATH\""),
+      () => "codex exec - < \"$DEVTASK_TASK_PATH\"",
       async () => ({ stdout: `${repeatedError}\n`, stderr: `${repeatedError}\n`, exitCode: 1 })
     ).catch((caught) => caught);
 
@@ -103,7 +102,7 @@ describe("agent service", () => {
       testAgentIntegration(
         paths,
         {},
-        () => createFakeRunner("fake-agent --test"),
+        () => "fake-agent --test",
         async () => ({ stdout: "", stderr: "", exitCode: 0 })
       )
     ).rejects.toThrow("completed without emitting an assistant response");
@@ -128,14 +127,4 @@ function writeDefaultConfig(paths: ReturnType<typeof resolvePaths>, provider: "c
     jira: { baseUrl: null, email: null, cloudId: null },
     verify: []
   });
-}
-
-function createFakeRunner(command: string): AgentRunner {
-  return {
-    buildStartCommand: () => command,
-    start: async () => ({ id: "session-1" }),
-    run: async function* () {
-      return;
-    }
-  };
 }

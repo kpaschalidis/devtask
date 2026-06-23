@@ -9,7 +9,7 @@ import {
   workItemValidationContractPath
 } from "../infra/paths.js";
 import { readRunningPhaseRun, updateRunningPhaseRun } from "../infra/session-run.js";
-import { tmuxSessionExists, tmuxSessionName } from "../infra/tmux.js";
+import { tmuxSessionExists, tmuxSessionName } from "../adapters/agent-kernel/tmux-control.js";
 import { loadInstruction } from "../instructions/loader.js";
 import { readWorkMaterialization } from "../work-materializer.js";
 import { DevtaskError } from "../infra/errors.js";

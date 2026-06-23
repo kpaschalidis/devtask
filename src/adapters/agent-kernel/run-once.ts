@@ -9,7 +9,28 @@ import {
   type Runtime,
 } from "@devtask/agent-kernel";
 import type { DevtaskConfig } from "../../infra/config.js";
-import type { AgentPromptResult, AgentStartOptions, RunOptions } from "../../agent.js";
+import type { AgentSessionRef } from "../../infra/session-ref.js";
+
+export interface AgentStartOptions {
+  workspacePath: string;
+  model?: string | null;
+  fullAuto?: boolean;
+  skipGitRepoCheck?: boolean;
+  addDirs?: readonly string[];
+  env?: Record<string, string>;
+  managedCompletionCommand?: string | null;
+}
+
+export interface RunOptions {
+  stallMs?: number;
+  maxTurnMs?: number;
+}
+
+export interface AgentPromptResult {
+  status: "completed" | "failed" | "input_required" | "stalled";
+  error: string | null;
+  session: AgentSessionRef;
+}
 
 const NOOP_RUNTIME: Runtime = {
   name: "noop-runtime",
@@ -21,7 +42,7 @@ const NOOP_RUNTIME: Runtime = {
   isAlive: async () => true,
 };
 
-export async function runDevtaskCodexOneShot(
+export async function runKernelOneShot(
   config: DevtaskConfig,
   startOptions: AgentStartOptions,
   prompt: string,
@@ -30,7 +51,11 @@ export async function runDevtaskCodexOneShot(
     runOptions?: RunOptions;
     onOutput?: (chunk: string) => void;
   },
-): Promise<AgentPromptResult> {
+): Promise<AgentPromptResult | null> {
+  if (config.agent.provider !== "codex") {
+    return null;
+  }
+
   const output = fs.createWriteStream(options.outputPath, { flags: "w" });
   const agent = new CodexExecAgent({
     model: startOptions.model ?? config.codex.model ?? undefined,

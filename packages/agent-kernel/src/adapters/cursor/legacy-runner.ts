@@ -5,9 +5,17 @@ import { constants } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { ActivityState, AgentRunner, AgentStartOptions, RunEvent, RunOptions, SessionHandle } from "../../agent.js";
-import { emptyAgentSessionRef, type AgentSessionRef } from "../../agent-session.js";
-import { captureOutputAsync, createBareSession, getForegroundCommand, isSessionAliveAsync, killTmuxSession, sendLaunchCommand, sendMessageAsync, writeLaunchScript } from "../../infra/tmux.js";
+import type { ActivityState, RunEvent, RunOptions } from "../../agent/agent.js";
+import {
+  captureTmuxOutput,
+  createBareTmuxSession,
+  getTmuxForegroundCommand,
+  isTmuxSessionAlive,
+  killTmuxSession,
+  sendTmuxLaunchCommand,
+  sendTmuxMessage,
+  writeTmuxLaunchScript,
+} from "../tmux/index.js";
 import { buildCursorCommand } from "./command.js";
 
 const execFileAsync = promisify(execFile);
@@ -29,6 +37,45 @@ interface CursorSessionState {
   lastOutput: string;
 }
 
+export interface AgentSessionRef {
+  provider: "cursor";
+  transportId: string | null;
+  resumeContext: Record<string, string | null>;
+  summary: string | null;
+  summaryIsFallback: boolean | null;
+}
+
+export interface SessionHandle {
+  id: string;
+  provider: "cursor";
+  providerSessionId?: string | null;
+  conversationId?: string | null;
+  resumeTarget?: string | null;
+  storageRoot?: string | null;
+  transcriptPath?: string | null;
+}
+
+export interface AgentStartOptions {
+  workspacePath: string;
+  model?: string | null;
+  fullAuto?: boolean;
+  skipGitRepoCheck?: boolean;
+  addDirs?: readonly string[];
+  env?: Record<string, string>;
+  managedCompletionCommand?: string | null;
+}
+
+export interface AgentRunner {
+  start(options: AgentStartOptions): Promise<SessionHandle>;
+  run(session: SessionHandle, prompt: string, options?: RunOptions): AsyncIterable<RunEvent>;
+  sendInput?(session: SessionHandle, message: string): Promise<void>;
+  getActivityState?(session: SessionHandle): Promise<ActivityState>;
+  getSessionInfo?(session: SessionHandle): Promise<{ summary: string; summaryIsFallback: boolean } | null>;
+  stop?(session: SessionHandle): Promise<void>;
+  buildStartCommand?(options: AgentStartOptions): string;
+  buildInteractiveStartCommand?(options: AgentStartOptions, prompt: string): { command: string; session: AgentSessionRef };
+}
+
 export interface CursorAgentRunnerConfig {
   model?: string;
 }
@@ -48,14 +95,14 @@ export class CursorAgentRunner implements AgentRunner {
   buildInteractiveStartCommand(options: AgentStartOptions, _prompt: string): { command: string; session: AgentSessionRef } {
     return {
       command: buildCursorLaunchCommand(options, this.config.model),
-      session: emptyAgentSessionRef("cursor")
+      session: emptyCursorSessionRef()
     };
   }
 
   async start(options: AgentStartOptions): Promise<SessionHandle> {
     const sessionName = `devtask-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
-    createBareSession(sessionName, options.workspacePath);
+    createBareTmuxSession(sessionName, options.workspacePath);
 
     const envLines = Object.entries({
       ...options.env,
@@ -66,8 +113,8 @@ export class CursorAgentRunner implements AgentRunner {
       .join("\n");
 
     const launchCommand = buildCursorLaunchCommand(options, this.config.model);
-    const scriptPath = writeLaunchScript(`${buildAgentEnvResetCommand()}\n${envLines}\n${launchCommand}`);
-    sendLaunchCommand(sessionName, `bash ${shellEscape(scriptPath)}`);
+    const scriptPath = writeTmuxLaunchScript(`${buildAgentEnvResetCommand()}\n${envLines}\n${launchCommand}`, "devtask");
+    sendTmuxLaunchCommand(sessionName, `bash ${shellEscape(scriptPath)}`);
 
     const ready = await waitForCursorReady(sessionName);
     if (!ready) {
@@ -75,7 +122,7 @@ export class CursorAgentRunner implements AgentRunner {
       throw new Error("Cursor agent did not become ready in time");
     }
 
-    const initialOutput = await captureOutputAsync(sessionName, OUTPUT_LINES);
+    const initialOutput = await captureTmuxOutput(sessionName, OUTPUT_LINES);
     this.sessionStates.set(sessionName, {
       workspacePath: options.workspacePath,
       lastOutput: initialOutput
@@ -102,7 +149,7 @@ export class CursorAgentRunner implements AgentRunner {
       return;
     }
 
-    await sendMessageAsync(session.id, prompt);
+    await sendTmuxMessage(session.id, prompt);
 
     const startedAt = Date.now();
     let lastActivityAt = startedAt;
@@ -113,7 +160,7 @@ export class CursorAgentRunner implements AgentRunner {
       await sleep(POLL_INTERVAL_MS);
 
       const now = Date.now();
-      if (!(await isSessionAliveAsync(session.id))) {
+      if (!(await isTmuxSessionAlive(session.id))) {
         yield { kind: "failed", error: "Agent tmux session died unexpectedly" };
         return;
       }
@@ -123,7 +170,7 @@ export class CursorAgentRunner implements AgentRunner {
         return;
       }
 
-      const output = await captureOutputAsync(session.id, OUTPUT_LINES);
+      const output = await captureTmuxOutput(session.id, OUTPUT_LINES);
       const delta = diffOutput(state.lastOutput, output);
       if (delta) {
         state.lastOutput = output;
@@ -166,7 +213,7 @@ export class CursorAgentRunner implements AgentRunner {
   }
 
   async sendInput(session: SessionHandle, message: string): Promise<void> {
-    await sendMessageAsync(session.id, message);
+    await sendTmuxMessage(session.id, message);
   }
 
   async stop(session: SessionHandle): Promise<void> {
@@ -180,11 +227,11 @@ export class CursorAgentRunner implements AgentRunner {
       return "unknown";
     }
 
-    if (!(await isSessionAliveAsync(session.id))) {
+    if (!(await isTmuxSessionAlive(session.id))) {
       return "unknown";
     }
 
-    const output = await captureOutputAsync(session.id, OUTPUT_LINES);
+    const output = await captureTmuxOutput(session.id, OUTPUT_LINES);
     const activity = detectActivity(output);
     if (activity !== "idle") {
       return activity;
@@ -224,6 +271,16 @@ function buildCursorLaunchCommand(options: AgentStartOptions, fallbackModel?: st
   return parts.join(" ");
 }
 
+function emptyCursorSessionRef(): AgentSessionRef {
+  return {
+    provider: "cursor",
+    transportId: null,
+    resumeContext: {},
+    summary: null,
+    summaryIsFallback: null
+  };
+}
+
 
 function buildAgentEnvResetCommand(): string {
   return "unset CODEX_THREAD_ID CODEX_INTERNAL_ORIGINATOR_OVERRIDE CODEX_CI CODEX_SHELL";
@@ -236,9 +293,9 @@ async function waitForCursorReady(sessionName: string): Promise<boolean> {
 
   while (Date.now() < deadline) {
     const [alive, foreground, output] = await Promise.all([
-      isSessionAliveAsync(sessionName),
-      getForegroundCommand(sessionName),
-      captureOutputAsync(sessionName, 20)
+      isTmuxSessionAlive(sessionName),
+      getTmuxForegroundCommand(sessionName),
+      captureTmuxOutput(sessionName, 20)
     ]);
 
     if (!alive) {
