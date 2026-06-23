@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import type { Agent, AgentSessionInfo, RunEvent, RunOptions } from "../../kernel/agent/agent.js";
-import type { PreparedSessionInstructions } from "../../kernel/instructions/instruction-payload.js";
-import type { Runtime, RuntimeHandle } from "../../kernel/runtime/runtime.js";
+import type { Agent, AgentSessionInfo, RunEvent, RunOptions } from "@devtask/agent-kernel";
+import type { PreparedSessionInstructions } from "@devtask/agent-kernel";
+import type { Runtime, RuntimeHandle } from "@devtask/agent-kernel";
 import { buildCodexInteractiveResumeCommand, buildCodexInteractiveStartCommand } from "../codex/command.js";
 import {
   configureManagedHooks,

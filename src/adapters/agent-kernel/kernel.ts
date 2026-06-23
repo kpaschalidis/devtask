@@ -3,13 +3,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { DevtaskConfig } from "../../infra/config.js";
 import type { DevtaskPaths } from "../../infra/paths.js";
-import type { Agent } from "../../kernel/agent/agent.js";
-import type { Runtime } from "../../kernel/runtime/runtime.js";
-import { SessionCoordinator } from "../../kernel/sessions/session-coordinator.js";
-import { SqliteSessionHistoryStore } from "../../kernel/storage/sqlite/session-history-store.js";
-import { SessionHistoryCaptureService } from "../../kernel/trace/session-history-capture-service.js";
-import type { SessionHistoryEvent } from "../../kernel/trace/session-history.js";
-import { NoopWorkspaceSetup } from "../../kernel/workspace/workspace-setup.js";
+import type { Agent } from "@devtask/agent-kernel";
+import type { Runtime } from "@devtask/agent-kernel";
+import { SessionCoordinator, SqliteSessionHistoryStore, SessionHistoryCaptureService, NoopWorkspaceSetup } from "@devtask/agent-kernel";
+import type { SessionHistoryEvent } from "@devtask/agent-kernel";
 import { InteractiveCodexAgent } from "./codex-interactive.js";
 import { InteractiveClaudeCodeAgent } from "./claude-code-interactive.js";
 import { DevtaskTmuxRuntime } from "./tmux-runtime.js";
@@ -49,7 +46,7 @@ export function createDevtaskKernel(
     options.onSessionHistoryEvent,
   );
   const agent = createKernelAgent(config);
-  const runtime = createKernelRuntime();
+  const runtime = createKernelRuntime(config);
   const coordinator = new SessionCoordinator({
     agent,
     runtime,
@@ -68,10 +65,6 @@ export function createDevtaskKernel(
       db.close();
     },
   };
-}
-
-export function kernelSessionHistoryPath(paths: DevtaskPaths): string {
-  return path.join(paths.localDir, "kernel", "session-history.sqlite");
 }
 
 function createKernelAgent(config: DevtaskConfig): Agent {
@@ -93,8 +86,12 @@ function createKernelAgent(config: DevtaskConfig): Agent {
   });
 }
 
-function createKernelRuntime(): Runtime {
+function createKernelRuntime(_config: DevtaskConfig): Runtime {
   return new DevtaskTmuxRuntime();
+}
+
+function kernelSessionHistoryPath(paths: DevtaskPaths): string {
+  return path.join(paths.localDir, "kernel", "session-history.sqlite");
 }
 
 function normalizeLogger(logger: DevtaskKernelLogger | undefined): Required<DevtaskKernelLogger> {

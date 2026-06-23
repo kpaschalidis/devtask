@@ -8,8 +8,6 @@ import {
   type TranscriptMessage,
 } from "../adapters/agent-kernel/session-history.js";
 
-export type { SessionHistoryEvent, TimelineBlock, TranscriptMessage };
-
 export interface WorkSessionThreadSummary {
   threadId: string;
   owner: SessionThread["owner"];

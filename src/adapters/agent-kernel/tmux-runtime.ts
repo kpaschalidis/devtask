@@ -1,4 +1,4 @@
-import type { AttachInfo, Runtime, RuntimeCreateConfig, RuntimeHandle } from "../../kernel/runtime/runtime.js";
+import type { AttachInfo, Runtime, RuntimeCreateConfig, RuntimeHandle } from "@devtask/agent-kernel";
 import type { KernelSessionRef } from "../../infra/session-run.js";
 import {
   captureOutputAsync,
@@ -9,6 +9,16 @@ import {
   sendMessageAsync,
   tmuxSessionExists,
 } from "../../infra/tmux.js";
+
+export async function launchExecutionTmuxSession(config: {
+  sessionId: string;
+  workspacePath: string;
+  launchCommand: string;
+}): Promise<KernelSessionRef> {
+  const runtime = new DevtaskTmuxRuntime();
+  const handle = await runtime.create({ sessionId: config.sessionId, workspacePath: config.workspacePath, launchCommand: config.launchCommand, environment: {} });
+  return { runtimeSessionId: handle.id, runtimeName: handle.runtimeName, threadId: null, data: { ...handle.data } };
+}
 
 export class DevtaskTmuxRuntime implements Runtime {
   readonly name = "tmux";
@@ -53,24 +63,4 @@ export class DevtaskTmuxRuntime implements Runtime {
   private sessionName(handle: RuntimeHandle): string {
     return typeof handle.data["sessionName"] === "string" ? handle.data["sessionName"] : handle.id;
   }
-}
-
-export async function launchExecutionTmuxSession(config: {
-  sessionId: string;
-  workspacePath: string;
-  launchCommand: string;
-}): Promise<KernelSessionRef> {
-  const runtime = new DevtaskTmuxRuntime();
-  const handle = await runtime.create({
-    sessionId: config.sessionId,
-    workspacePath: config.workspacePath,
-    launchCommand: config.launchCommand,
-    environment: {},
-  });
-  return {
-    runtimeSessionId: handle.id,
-    runtimeName: handle.runtimeName,
-    threadId: null,
-    data: { ...handle.data },
-  };
 }

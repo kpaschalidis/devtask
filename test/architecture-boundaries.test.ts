@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const SRC_ROOT = path.resolve(__dirname, "../src");
 const ADAPTER_DIR = path.join(SRC_ROOT, "adapters", "agent-kernel");
-const KERNEL_DIR = path.join(SRC_ROOT, "kernel");
+const KERNEL_PKG = "@devtask/agent-kernel";
 
 function collectTsFiles(dir: string): string[] {
   const results: string[] = [];
@@ -19,62 +19,39 @@ function collectTsFiles(dir: string): string[] {
   return results;
 }
 
+function importSpecifiers(content: string): string[] {
+  const specifiers: string[] = [];
+  for (const line of content.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("import") && !t.startsWith("export")) continue;
+    const m = line.match(/from\s+["']([^"']+)["']/);
+    if (m) specifiers.push(m[1]);
+  }
+  return specifiers;
+}
+
 describe("architecture boundaries", () => {
-  it("no src file outside adapters/agent-kernel imports from src/kernel directly", () => {
-    const violations: string[] = [];
-    const allSrcFiles = collectTsFiles(SRC_ROOT);
-    const outsideAdapter = allSrcFiles.filter((f) => !f.startsWith(ADAPTER_DIR + path.sep));
-
-    for (const file of outsideAdapter) {
-      const content = fs.readFileSync(file, "utf8");
-      const lines = content.split("\n");
-      for (const line of lines) {
-        if (!line.trim().startsWith("import") && !line.trim().startsWith("export")) continue;
-        const match = line.match(/from\s+["']([^"']+)["']/);
-        if (!match) continue;
-        const specifier = match[1];
-        if (specifier.includes("/kernel/") || specifier.endsWith("/kernel")) {
-          violations.push(`${path.relative(SRC_ROOT, file)}: ${line.trim()}`);
-        }
-      }
-    }
-
-    expect(violations, `Direct kernel imports found outside adapters/agent-kernel:\n${violations.join("\n")}`).toHaveLength(0);
-  });
-
   it("no src file outside adapters/agent-kernel imports @devtask/agent-kernel", () => {
     const violations: string[] = [];
-    const allSrcFiles = collectTsFiles(SRC_ROOT);
-    const outsideAdapter = allSrcFiles.filter((f) => !f.startsWith(ADAPTER_DIR + path.sep));
-
-    for (const file of outsideAdapter) {
-      const content = fs.readFileSync(file, "utf8");
-      if (content.includes("@devtask/agent-kernel")) {
+    const outside = collectTsFiles(SRC_ROOT).filter((f) => !f.startsWith(ADAPTER_DIR + path.sep));
+    for (const file of outside) {
+      const specifiers = importSpecifiers(fs.readFileSync(file, "utf8"));
+      if (specifiers.some((s) => s === KERNEL_PKG || s.startsWith(KERNEL_PKG + "/"))) {
         violations.push(path.relative(SRC_ROOT, file));
       }
     }
-
-    expect(violations, `@devtask/agent-kernel imports found outside adapters/agent-kernel:\n${violations.join("\n")}`).toHaveLength(0);
+    expect(violations, `@devtask/agent-kernel imports outside adapters/agent-kernel:\n${violations.join("\n")}`).toHaveLength(0);
   });
 
-  it("kernel package contains no devtask application imports", () => {
+  it("packages/agent-kernel contains no devtask application imports", () => {
+    const pkgSrc = path.resolve(__dirname, "../packages/agent-kernel/src");
     const violations: string[] = [];
-    const kernelFiles = collectTsFiles(KERNEL_DIR);
-
-    for (const file of kernelFiles) {
-      const content = fs.readFileSync(file, "utf8");
-      const lines = content.split("\n");
-      for (const line of lines) {
-        if (!line.trim().startsWith("import") && !line.trim().startsWith("export")) continue;
-        const match = line.match(/from\s+["']([^"']+)["']/);
-        if (!match) continue;
-        const specifier = match[1];
-        if (specifier === "devtask" || specifier.startsWith("devtask/")) {
-          violations.push(`${path.relative(KERNEL_DIR, file)}: ${line.trim()}`);
-        }
+    for (const file of collectTsFiles(pkgSrc)) {
+      const specifiers = importSpecifiers(fs.readFileSync(file, "utf8"));
+      if (specifiers.some((s) => s === "devtask" || s.startsWith("devtask/"))) {
+        violations.push(path.relative(pkgSrc, file));
       }
     }
-
-    expect(violations, `Devtask imports found in kernel:\n${violations.join("\n")}`).toHaveLength(0);
+    expect(violations, `Devtask imports found in agent-kernel package:\n${violations.join("\n")}`).toHaveLength(0);
   });
 });
