@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { registerAgentCommands } from "./cli/agent.js";
 import { registerBoardCommands } from "./cli/board.js";
 import { registerConfigCommands } from "./cli/config.js";
+import { registerDoctorCommands } from "./cli/doctor.js";
 import { registerRepoCommands } from "./cli/repo.js";
 import { registerServeCommands } from "./cli/serve.js";
 import { registerWorkCommands } from "./cli/work.js";
@@ -24,6 +25,7 @@ export function createCli(): Command {
   registerBoardCommands(program);
   registerWorktreeCommands(program);
   registerConfigCommands(program);
+  registerDoctorCommands(program);
 
   return program;
 }
