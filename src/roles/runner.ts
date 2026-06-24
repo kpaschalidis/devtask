@@ -1,9 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentSessionRef } from "../infra/session-ref.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { phaseRunDir } from "../infra/paths.js";
-import { readRunningPhaseRun, writeRunningPhaseRun, type SessionRun, type SessionPhase } from "../infra/session-run.js";
+import { readRunningPhaseRun, resolveSessionRef, writeRunningPhaseRun, type SessionRun, type SessionPhase } from "../infra/session-run.js";
 import { newRunId } from "../infra/run-record.js";
 import {
   attachTmuxSession,
@@ -112,7 +111,7 @@ export async function launchPhaseResume(
     );
   }
   const startedAt = new Date().toISOString();
-  const resolvedPrompt = prompt ?? buildResumePrompt(phase, previous.session);
+  const resolvedPrompt = prompt ?? buildResumePrompt(phase, previous.provider);
   fs.mkdirSync(path.dirname(scope.promptPath), { recursive: true });
   fs.writeFileSync(scope.promptPath, `${resolvedPrompt}\n`);
   const launch = await resumeKernelPhaseSession({
@@ -158,14 +157,22 @@ export function readPreviousSession(
   workId: string,
   phase: SessionPhase,
   repoId: string | null
-): { session: AgentSessionRef; taskId: string | null; kernelSession: NonNullable<SessionRun["kernelSession"]> | null } {
+) : { provider: "codex" | "cursor" | "claude-code"; taskId: string | null; kernelSession: NonNullable<SessionRun["kernelSession"]> | null } {
   const current = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId));
-  if (current && hasResumeContext(current.session)) {
-    return { session: current.session, taskId: current.taskId, kernelSession: current.kernelSession ?? null };
+  if (current?.kernelSession) {
+    return {
+      provider: resolveSessionRef(current).provider,
+      taskId: current.taskId,
+      kernelSession: current.kernelSession,
+    };
   }
   const latest = getLatestWorkPhaseRun(paths, workId, phase, repoId ?? undefined);
-  if (latest && hasResumeContext(latest.session)) {
-    return { session: latest.session, taskId: latest.taskId, kernelSession: latest.kernelSession ?? null };
+  if (latest?.kernelSession) {
+    return {
+      provider: resolveSessionRef(latest).provider,
+      taskId: latest.taskId,
+      kernelSession: latest.kernelSession,
+    };
   }
   throw new DevtaskError(
     `No resumable ${phase} session exists for ${repoId ? `${workId}/${repoId}` : workId}`
@@ -193,9 +200,9 @@ export function ensureNoLiveSession(
   }
 }
 
-export function buildFeedbackPrompt(phase: string, feedback: string, session: AgentSessionRef): string {
+export function buildFeedbackPrompt(phase: string, feedback: string, provider: "codex" | "cursor" | "claude-code"): string {
   return [
-    `Continue the ${phase} task using the existing ${session.provider} session context.`,
+    `Continue the ${phase} task using the existing ${provider} session context.`,
     "",
     "Update the existing artifact based on this feedback:",
     "",
@@ -212,16 +219,12 @@ export function killLiveSession(paths: DevtaskPaths, workId: string, phase: Sess
 
 export { attachTmuxSession };
 
-function buildResumePrompt(phase: string, session: AgentSessionRef): string {
+function buildResumePrompt(phase: string, provider: "codex" | "cursor" | "claude-code"): string {
   return [
-    `Continue the ${phase} task using the existing ${session.provider} session context.`,
+    `Continue the ${phase} task using the existing ${provider} session context.`,
     "",
     "Review the current phase artifacts and continue the session from where it left off."
   ].join("\n");
-}
-
-function hasResumeContext(session: AgentSessionRef): boolean {
-  return Object.values(session.resumeContext).some((v) => v !== null);
 }
 
 function buildDevtaskCommand(args: string[]): string {

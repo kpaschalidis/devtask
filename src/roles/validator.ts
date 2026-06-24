@@ -129,7 +129,7 @@ export const reviewPhase: RoleConfig = {
   async sendFeedback(paths, workId, repoId, message) {
     if (!repoId) throw new DevtaskError("review feedback requires a repo id");
     const previous = readPreviousSession(paths, workId, "review", repoId);
-    const prompt = buildFeedbackPrompt("review", message, previous.session);
+    const prompt = buildFeedbackPrompt("review", message, previous.provider);
     return launchPhaseResume(reviewPhase, paths, workId, "review", repoId, prompt, true);
   },
 

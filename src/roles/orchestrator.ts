@@ -164,7 +164,7 @@ export const orchestratorPhase: RoleConfig = {
 
   async sendFeedback(paths, workId, _repoId, message) {
     const previous = readPreviousSession(paths, workId, "orchestrate", null);
-    const prompt = buildFeedbackPrompt("orchestrate", message, previous.session);
+    const prompt = buildFeedbackPrompt("orchestrate", message, previous.provider);
     return launchPhaseResume(orchestratorPhase, paths, workId, "orchestrate", null, prompt, true);
   },
 
