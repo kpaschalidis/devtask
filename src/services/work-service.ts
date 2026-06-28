@@ -7,8 +7,8 @@ import {
   resultJsonPath
 } from "../infra/paths.js";
 import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun, type SessionRun } from "../infra/session-run.js";
-import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "../work-cleanup.js";
-import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
+import { cleanupWorkItem, type WorkCleanupOptions, type WorkCleanupResult } from "./work-cleanup-service.js";
+import { materializeWorkPlan, readWorkMaterialization, type WorkMaterialization } from "./work-materialization-service.js";
 import {
   createJiraWorkItem,
   createManualWorkItem,

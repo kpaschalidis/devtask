@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildPlanPromptForTest, hasTaskPlan, readLatestPlan } from "../src/repo-plan.js";
+import { hasTaskPlan, readLatestPlan } from "../src/services/repo-plan-record-service.js";
 import { resolvePaths, planMarkdownPath } from "../src/infra/paths.js";
 import { createTask } from "../src/storage/task-store.js";
+import { loadInstruction } from "../src/instructions/loader.js";
 import { makeTempRepo } from "./helpers.js";
 
 describe("planner artifacts", () => {
@@ -35,11 +36,13 @@ describe("planner artifacts", () => {
       session: {
         provider: "codex",
         transportId: "session-1",
-        providerSessionId: "agent-session-1",
-        conversationId: "thread-1",
-        resumeTarget: "agent-session-1",
-        storageRoot: null,
-        transcriptPath: null,
+        resumeContext: {
+          providerSessionId: "agent-session-1",
+          conversationId: "thread-1",
+          resumeTarget: "agent-session-1",
+          storageRoot: null,
+          transcriptPath: null,
+        },
         summary: "planned successfully",
         summaryIsFallback: false
       }
@@ -58,7 +61,7 @@ describe("planner artifacts", () => {
 
     const writablePlanPath = path.join(meta.worktreePath, ".devtask_plan.md");
     const finalPlanPath = planMarkdownPath(paths, meta.id);
-    const prompt = buildPlanPromptForTest(meta, writablePlanPath, finalPlanPath);
+    const prompt = buildPlanPromptForTest(meta, writablePlanPath);
 
     expect(prompt).toContain("You are in the devtask planning stage.");
     expect(prompt).toContain("The only file you may write is this worktree-local devtask plan artifact");
@@ -75,3 +78,18 @@ describe("planner artifacts", () => {
     expect(prompt).toContain("Add health-check endpoint");
   });
 });
+
+function buildPlanPromptForTest(
+  meta: Awaited<ReturnType<typeof createTask>>,
+  writablePlanPath: string,
+): string {
+  const task = fs.readFileSync(meta.taskPath, "utf8").trim();
+  const state = fs.readFileSync(meta.statePath, "utf8").trim();
+  return loadInstruction("repo-plan", {
+    TASK_ID: meta.id,
+    TASK_CONTENT: task || "(task file is empty)",
+    STATE_CONTENT: state || "(state file is empty)",
+    PLAN_PATH: writablePlanPath,
+    MEMORY: "",
+  });
+}

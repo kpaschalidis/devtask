@@ -18,7 +18,7 @@ import { writeConfig } from "../src/infra/config.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
-import { materializeWorkPlan } from "../src/work-materializer.js";
+import { materializeWorkPlan } from "../src/services/work-materialization-service.js";
 import { workItemGraphPath } from "../src/infra/paths.js";
 import { getLatestWorkPhaseRun } from "../src/services/session-run-service.js";
 import { executeWork } from "../src/services/work-service.js";

@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import { Command, InvalidArgumentError } from "commander";
-import { resolveWorkspacePaths } from "../infra/paths.js";
-import { readConfig } from "../infra/config.js";
-import { buildAgentBootstrapCommand } from "../adapters/agent-kernel/command.js";
-import { testAgentIntegration } from "../services/harness-service.js";
-import { printError } from "./common.js";
+import { buildAgentBootstrapCommand } from "devtask/adapters/agent-kernel/command";
+import { readConfig } from "devtask/infra/config";
+import { resolveWorkspacePaths } from "devtask/infra/paths";
+import { testAgentIntegration } from "devtask/services/harness-service";
+import { printError } from "../common.js";
 
 export function registerAgentCommands(program: Command): void {
   const agent = program
@@ -48,7 +48,7 @@ export function registerAgentCommands(program: Command): void {
           message,
           model: options.model ?? null,
           maxTurnMs: options.maxTurnMs,
-          onOutput: (chunk) => process.stdout.write(chunk)
+          onOutput: (chunk: string) => process.stdout.write(chunk)
         });
 
         console.log("");

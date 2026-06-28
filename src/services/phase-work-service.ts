@@ -1,4 +1,4 @@
-import { readRunningPhaseRun, updateRunningPhaseRun, writePhaseRunRecord, type SessionPhase, type SessionRun } from "../infra/session-run.js";
+import { readRunningPhaseRun, resolveSessionRef, updateRunningPhaseRun, writePhaseRunRecord, type SessionPhase, type SessionRun } from "../infra/session-run.js";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { phaseRunDir } from "../infra/paths.js";
 import { killTmuxSession, tmuxSessionExists } from "../adapters/agent-kernel/tmux-control.js";
@@ -9,7 +9,7 @@ import { reviewPhase } from "../roles/validator.js";
 import { executePhase, sendRawExecuteFeedback } from "../roles/execute.js";
 import type { RoleConfig } from "../roles/types.js";
 import { getLatestWorkPhaseRun } from "./session-run-service.js";
-import { readWorkGraph, readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
+import { readWorkGraph, readWorkMaterialization, type WorkMaterialization } from "./work-materialization-service.js";
 import { getWorkItem, updateWorkItemStatus, type WorkItemStatus } from "../storage/work-store.js";
 import { updateRecentWork } from "../storage/global-index.js";
 
@@ -152,6 +152,7 @@ async function finalizeInteractivePhase(
   const cfg = PHASE_CONFIGS[phase];
   const finishedAt = new Date().toISOString();
   const { status, artifacts } = await cfg.finalize(paths, workId, repoId, sessionRecord);
+  const normalizedSession = normalizeSessionRecord(sessionRecord);
   const itemStatus = phaseWorkItemStatus(phase, status);
   if (itemStatus !== null) {
     updateWorkItemStatus(paths, workId, itemStatus);
@@ -170,7 +171,8 @@ async function finalizeInteractivePhase(
     startedAt: sessionRecord.startedAt,
     finishedAt,
     artifacts,
-    kernelSession: sessionRecord.kernelSession,
+    session: normalizedSession.session,
+    kernelSession: normalizedSession.kernelSession,
     exitCode: status === "failed" ? null : 0,
   });
   updateRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId), {
@@ -181,8 +183,41 @@ async function finalizeInteractivePhase(
     artifacts,
     taskId: sessionRecord.taskId,
     runId: sessionRecord.runId,
+    session: normalizedSession.session,
+    kernelSession: normalizedSession.kernelSession,
   });
   return { status };
+}
+
+function normalizeSessionRecord(sessionRecord: SessionRun): Pick<SessionRun, "session" | "kernelSession"> {
+  const kernelSession = sessionRecord.kernelSession ?? synthesizeKernelSession(sessionRecord);
+  return {
+    session: kernelSession
+      ? resolveSessionRef({ tmuxSession: sessionRecord.tmuxSession, kernelSession })
+      : sessionRecord.session,
+    kernelSession,
+  };
+}
+
+function synthesizeKernelSession(sessionRecord: SessionRun): SessionRun["kernelSession"] {
+  const resume = sessionRecord.session.resumeContext;
+  const threadId = resume.providerSessionId ?? resume.conversationId ?? resume.resumeTarget ?? null;
+  const transportId = sessionRecord.tmuxSession ?? sessionRecord.session.transportId ?? null;
+  if (!threadId && !transportId && !resume.storageRoot && !resume.transcriptPath) {
+    return null;
+  }
+  return {
+    runtimeSessionId: transportId ?? "unknown",
+    runtimeName: "tmux",
+    threadId,
+    data: {
+      sessionName: transportId,
+      threadId,
+      codexHome: resume.storageRoot ?? null,
+      transcriptPath: resume.transcriptPath ?? null,
+      agentName: sessionRecord.session.provider,
+    },
+  };
 }
 
 function phaseWorkItemStatus(phase: InteractivePhase, status: string): WorkItemStatus | null {
@@ -199,4 +234,3 @@ function requireMaterialization(paths: DevtaskPaths, workId: string): WorkMateri
   }
   return materialization;
 }
-

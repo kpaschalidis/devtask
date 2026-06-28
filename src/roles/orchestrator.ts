@@ -17,8 +17,8 @@ import { readRunningPhaseRun, updateRunningPhaseRun } from "../infra/session-run
 import { tmuxSessionExists, tmuxSessionName } from "../adapters/agent-kernel/tmux-control.js";
 import { loadInstruction } from "../instructions/loader.js";
 import { copySkillsToDir } from "../skills/loader.js";
-import { collectPhaseMemory } from "../improvement-memory.js";
-import { getWorkItem } from "../storage/work-item.js";
+import { collectPhaseMemory } from "../services/improvement-memory-service.js";
+import { getWorkItem } from "../storage/work-store.js";
 import {
   launchPhaseFresh,
   launchPhaseResume,

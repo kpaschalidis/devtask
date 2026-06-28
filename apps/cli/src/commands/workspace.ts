@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { resolveWorkspacePaths } from "../infra/paths.js";
+import { resolveWorkspacePaths } from "devtask/infra/paths";
 import {
   createWorkspace,
   exportWorkspaceBundle,
@@ -11,8 +11,8 @@ import {
   pruneRegisteredWorkspaces,
   registerWorkspacePath,
   removeRegisteredWorkspace
-} from "../services/workspace-service.js";
-import { printError, printTable, shellQuote } from "./common.js";
+} from "devtask/services/workspace-service";
+import { printError, printTable, shellQuote } from "../common.js";
 
 export function registerWorkspaceCommands(program: Command): void {
   program

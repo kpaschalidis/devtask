@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { resolveWorkspacePaths } from "../infra/paths.js";
+import { resolveWorkspacePaths } from "devtask/infra/paths";
 import {
   addRepo,
   bindRepo,
@@ -8,8 +8,8 @@ import {
   listRepoBindings,
   listRepos,
   removeRepo
-} from "../services/repo-service.js";
-import { printError, printTable } from "./common.js";
+} from "devtask/services/repo-service";
+import { printError, printTable } from "../common.js";
 
 export function registerRepoCommands(program: Command): void {
   const repo = program.command("repo").description("Manage repos inside a workspace.");

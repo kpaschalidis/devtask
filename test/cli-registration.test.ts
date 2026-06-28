@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCli } from "../src/cli.js";
+import { createCli } from "../apps/cli/src/cli.js";
 
 describe("cli registration", () => {
   it("does not register the generic session command", () => {

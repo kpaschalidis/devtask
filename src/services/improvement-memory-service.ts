@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { DevtaskPaths } from "./infra/paths.js";
+import type { DevtaskPaths } from "../infra/paths.js";
 
 export type MemoryPhase = "planning" | "implementation" | "review";
 

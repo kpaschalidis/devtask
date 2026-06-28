@@ -14,7 +14,7 @@ import {
   workItemSpecPath
 } from "../infra/paths.js";
 import { listWorkPhaseRuns, listWorkPhaseSessions } from "./session-run-service.js";
-import { readWorkMaterialization } from "../work-materializer.js";
+import { readWorkMaterialization } from "./work-materialization-service.js";
 import { getTask } from "../storage/task-store.js";
 import { getWorkItem } from "../storage/work-store.js";
 

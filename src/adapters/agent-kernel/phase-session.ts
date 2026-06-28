@@ -2,6 +2,7 @@ import { readConfig } from "../../infra/config.js";
 import type { DevtaskPaths } from "../../infra/paths.js";
 import type { KernelSessionRef, SessionPhase } from "../../infra/session-run.js";
 import { createDevtaskKernel } from "./kernel.js";
+import { startTmuxSession } from "./tmux-control.js";
 import {
   configureManagedHooks,
   InteractiveClaudeCodeAgent,
@@ -16,6 +17,7 @@ interface InteractiveLaunchAgent {
     handleId: string,
     options: { taskDir?: string | null; addDirs?: readonly string[]; managedCompletionCommand?: string | null }
   ): { command: string; metadata: Record<string, unknown> };
+  getRestoreCommand?(handle: RuntimeHandle): Promise<string | null>;
 }
 
 export interface StartKernelPhaseSessionInput {
@@ -95,6 +97,26 @@ export async function resumeKernelPhaseSession(input: ResumeKernelPhaseSessionIn
     const previousHandle = runtimeHandleFromKernelSession(input.kernelSession);
     if (input.prompt?.trim()) {
       previousHandle.data["resumePrompt"] = input.prompt.trim();
+    }
+    const agent = assertInteractiveAgent(kernel.agent);
+    if (typeof agent.getRestoreCommand === "function") {
+      const restoreCommand = await agent.getRestoreCommand(previousHandle);
+      if (restoreCommand) {
+        startTmuxSession(input.tmuxSession, ["bash", "-lc", restoreCommand], input.workspacePath);
+        return {
+          tmuxSession: input.tmuxSession,
+          kernelSession: {
+            ...input.kernelSession,
+            runtimeSessionId: input.tmuxSession,
+            runtimeName: "tmux",
+            data: {
+              ...input.kernelSession.data,
+              sessionName: input.tmuxSession,
+              workspacePath: input.workspacePath,
+            },
+          },
+        };
+      }
     }
     const restored = await kernel.coordinator.restoreSession({
       sessionId: input.tmuxSession,

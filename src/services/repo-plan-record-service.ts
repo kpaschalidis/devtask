@@ -1,10 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { DevtaskPaths } from "./infra/paths.js";
-import { planMarkdownPath, taskDir } from "./infra/paths.js";
-import type { AgentSessionRef } from "./infra/session-ref.js";
-import type { TaskMeta } from "./types.js";
-import { loadInstruction } from "./instructions/loader.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { planMarkdownPath, taskDir } from "../infra/paths.js";
+import type { AgentSessionRef } from "../infra/session-ref.js";
 
 export interface PlanRecord {
   schemaVersion: 1;
@@ -44,22 +42,6 @@ export function readLatestPlan(paths: DevtaskPaths, id: string): PlanRecord | nu
 
 export function hasTaskPlan(paths: DevtaskPaths, id: string): boolean {
   return readTextIfExists(planMarkdownPath(paths, id)).trim().length > 0;
-}
-
-export function buildPlanPromptForTest(
-  meta: TaskMeta,
-  writablePlanPath: string,
-  _finalPlanPath = writablePlanPath,
-): string {
-  const task = readTextIfExists(meta.taskPath).trim();
-  const state = readTextIfExists(meta.statePath).trim();
-  return loadInstruction("repo-plan", {
-    TASK_ID: meta.id,
-    TASK_CONTENT: task || "(task file is empty)",
-    STATE_CONTENT: state || "(state file is empty)",
-    PLAN_PATH: writablePlanPath,
-    MEMORY: "",
-  });
 }
 
 function readTextIfExists(filePath: string): string {

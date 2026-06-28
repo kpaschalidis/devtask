@@ -1,20 +1,28 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { DevtaskConfig } from "../../infra/config.js";
 import type { DevtaskPaths } from "../../infra/paths.js";
 import type { Agent } from "@devtask/agent-kernel";
-import type { Runtime } from "@devtask/agent-kernel";
+import type { AttachInfo, Runtime, RuntimeHandle } from "@devtask/agent-kernel";
 import {
   InteractiveClaudeCodeAgent,
   InteractiveCodexAgent,
   NoopWorkspaceSetup,
+  openPersistentSessionHistoryStore,
   SessionCoordinator,
   SessionHistoryCaptureService,
-  SqliteSessionHistoryStore,
-  TmuxRuntime,
 } from "@devtask/agent-kernel";
 import type { SessionHistoryEvent } from "@devtask/agent-kernel";
+import type { KernelSessionRef } from "../../infra/session-run.js";
+import {
+  attachTmuxSession,
+  captureOutputAsync,
+  createBareSession,
+  killTmuxSession,
+  sendLaunchCommand,
+  sendMessageAsync,
+  tmuxSessionExists,
+} from "./tmux-control.js";
 
 export interface DevtaskKernelLogger {
   info?(meta: Record<string, unknown>, message: string): void;
@@ -27,6 +35,7 @@ export interface DevtaskKernelHandle {
   runtime: Runtime;
   coordinator: SessionCoordinator;
   sessionHistory: SessionHistoryCaptureService;
+  sessionHistoryBackend: "sqlite" | "file";
   close(): void;
 }
 
@@ -43,11 +52,9 @@ export function createDevtaskKernel(
   const logger = normalizeLogger(options.logger);
   const dbPath = kernelSessionHistoryPath(paths);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const db = new DatabaseSync(dbPath);
-
-  const sessionHistoryStore = new SqliteSessionHistoryStore(db);
+  const sessionHistoryHandle = openPersistentSessionHistoryStore(dbPath);
   const sessionHistory = new SessionHistoryCaptureService(
-    sessionHistoryStore,
+    sessionHistoryHandle.store,
     options.onSessionHistoryEvent,
   );
   const agent = createKernelAgent(config);
@@ -66,9 +73,30 @@ export function createDevtaskKernel(
     runtime,
     coordinator,
     sessionHistory,
+    sessionHistoryBackend: sessionHistoryHandle.backend,
     close() {
-      db.close();
+      sessionHistoryHandle.close();
     },
+  };
+}
+
+export async function launchDevtaskRuntimeSession(config: {
+  sessionId: string;
+  workspacePath: string;
+  launchCommand: string;
+}): Promise<KernelSessionRef> {
+  const runtime = createKernelRuntime();
+  const handle = await runtime.create({
+    sessionId: config.sessionId,
+    workspacePath: config.workspacePath,
+    launchCommand: config.launchCommand,
+    environment: {},
+  });
+  return {
+    runtimeSessionId: handle.id,
+    runtimeName: handle.runtimeName,
+    threadId: null,
+    data: { ...handle.data },
   };
 }
 
@@ -91,8 +119,8 @@ function createKernelAgent(config: DevtaskConfig): Agent {
   });
 }
 
-function createKernelRuntime(_config: DevtaskConfig): Runtime {
-  return new TmuxRuntime({ artifactPrefix: "devtask" });
+function createKernelRuntime(_config?: DevtaskConfig): Runtime {
+  return new DevtaskTmuxRuntime();
 }
 
 function kernelSessionHistoryPath(paths: DevtaskPaths): string {
@@ -105,4 +133,44 @@ function normalizeLogger(logger: DevtaskKernelLogger | undefined): Required<Devt
     warn: logger?.warn ?? (() => {}),
     error: logger?.error ?? (() => {}),
   };
+}
+
+class DevtaskTmuxRuntime implements Runtime {
+  readonly name = "tmux";
+
+  async create(config: { sessionId: string; workspacePath: string; launchCommand: string }): Promise<RuntimeHandle> {
+    createBareSession(config.sessionId, config.workspacePath);
+    sendLaunchCommand(config.sessionId, config.launchCommand);
+    return {
+      id: config.sessionId,
+      runtimeName: this.name,
+      data: {
+        sessionName: config.sessionId,
+        workspacePath: config.workspacePath,
+      },
+    };
+  }
+
+  async destroy(handle: RuntimeHandle): Promise<void> {
+    killTmuxSession(handle.id);
+  }
+
+  async sendMessage(handle: RuntimeHandle, message: string): Promise<void> {
+    await sendMessageAsync(handle.id, message);
+  }
+
+  async isAlive(handle: RuntimeHandle): Promise<boolean> {
+    return tmuxSessionExists(handle.id);
+  }
+
+  async captureOutput(handle: RuntimeHandle, lines?: number): Promise<string> {
+    return captureOutputAsync(handle.id, lines);
+  }
+
+  getAttachInfo(handle: RuntimeHandle): AttachInfo {
+    return {
+      command: `tmux attach -t ${handle.id}`,
+      description: `Attach to tmux session ${handle.id}`,
+    };
+  }
 }

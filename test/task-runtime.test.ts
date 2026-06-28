@@ -10,7 +10,7 @@ vi.mock("../src/adapters/agent-kernel/tmux-control.js", () => ({
   tmuxSessionExists: vi.fn(() => false)
 }));
 
-import { reconcileTaskRuntime } from "../src/task-runtime.js";
+import { reconcileTaskRuntime } from "../src/services/task-runtime-service.js";
 import { resolvePaths, taskMetaPath } from "../src/infra/paths.js";
 import { createTask } from "../src/storage/task-store.js";
 import { readTaskMeta, writeTaskMeta } from "../src/storage/meta.js";

@@ -159,24 +159,53 @@ export function readPreviousSession(
   repoId: string | null
 ) : { provider: "codex" | "cursor" | "claude-code"; taskId: string | null; kernelSession: NonNullable<SessionRun["kernelSession"]> | null } {
   const current = readRunningPhaseRun(phaseRunDir(paths, workId, phase, repoId));
-  if (current?.kernelSession) {
-    return {
-      provider: resolveSessionRef(current).provider,
-      taskId: current.taskId,
-      kernelSession: current.kernelSession,
-    };
+  if (current) {
+    const kernelSession = current.kernelSession ?? synthesizeKernelSession(current);
+    if (kernelSession) {
+      return {
+        provider: resolveSessionRef({ session: current.session, kernelSession }).provider,
+        taskId: current.taskId,
+        kernelSession,
+      };
+    }
   }
   const latest = getLatestWorkPhaseRun(paths, workId, phase, repoId ?? undefined);
-  if (latest?.kernelSession) {
-    return {
-      provider: resolveSessionRef(latest).provider,
-      taskId: latest.taskId,
-      kernelSession: latest.kernelSession,
-    };
+  if (latest) {
+    const kernelSession = latest.kernelSession ?? synthesizeKernelSession(latest);
+    if (kernelSession) {
+      return {
+        provider: resolveSessionRef({ session: latest.session, kernelSession }).provider,
+        taskId: latest.taskId,
+        kernelSession,
+      };
+    }
   }
   throw new DevtaskError(
     `No resumable ${phase} session exists for ${repoId ? `${workId}/${repoId}` : workId}`
   );
+}
+
+function synthesizeKernelSession(
+  run: { tmuxSession?: string | null; session: SessionRun["session"] },
+): NonNullable<SessionRun["kernelSession"]> | null {
+  const resume = run.session.resumeContext;
+  const threadId = resume.providerSessionId ?? resume.conversationId ?? resume.resumeTarget ?? null;
+  const transportId = run.tmuxSession ?? run.session.transportId ?? null;
+  if (!threadId && !transportId && !resume.storageRoot && !resume.transcriptPath) {
+    return null;
+  }
+  return {
+    runtimeSessionId: transportId ?? "unknown",
+    runtimeName: "tmux",
+    threadId,
+    data: {
+      sessionName: transportId,
+      threadId,
+      codexHome: resume.storageRoot ?? null,
+      transcriptPath: resume.transcriptPath ?? null,
+      agentName: run.session.provider,
+    },
+  };
 }
 
 export function ensureNoLiveSession(

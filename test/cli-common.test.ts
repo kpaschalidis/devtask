@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { printTable } from "../src/cli/common.js";
+import { printTable } from "../apps/cli/src/common.js";
 
 describe("cli common", () => {
   it("prints rows with missing trailing cells without crashing", () => {

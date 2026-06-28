@@ -66,7 +66,7 @@ Do not reintroduce a model where the workspace root `.devtask/` becomes the main
 ## Architecture Expectations
 
 Respect the current boundaries:
-- `src/cli/`
+- `apps/cli/`
   - command surface only
 - `src/services/`
   - orchestration and use-case logic

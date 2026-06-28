@@ -18,7 +18,7 @@ import { assertValidTaskId } from "../task-id.js";
 import { readTaskMeta, writeTaskMeta } from "./meta.js";
 import { createTaskWorktree } from "../infra/git.js";
 import { DevtaskError } from "../infra/errors.js";
-import { reconcileTaskRuntime } from "../task-runtime.js";
+import { reconcileTaskRuntime } from "../services/task-runtime-service.js";
 import type { TaskMeta, TaskSummary } from "../types.js";
 import { writeConfig, DEFAULT_CONFIG } from "../infra/config.js";
 

@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { Command } from "commander";
-import { DevtaskError } from "../infra/errors.js";
-import { resolveWorkspacePaths } from "../infra/paths.js";
+import { DevtaskError } from "devtask/infra/errors";
+import { resolveWorkspacePaths } from "devtask/infra/paths";
 import {
   checkWork,
   checkWorkCi,
@@ -30,15 +30,15 @@ import {
   watchWorkPullRequests,
   runValidateWorker,
   resetTaskForFix
-} from "../services/work-service.js";
-import { killLiveSession, attachTmuxSession } from "../roles/runner.js";
-import type { GateName } from "../mission/gates.js";
-import { watchAndAutoApprove, isAutoApproveWatcherAlive, writeAutoApprovePid, clearAutoApprovePid } from "../mission/auto-approve.js";
-import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "../services/session-run-service.js";
-import { getWorkDiagnostics } from "../services/work-diagnostics-service.js";
-import { inspectWork } from "../services/work-inspection-service.js";
-import { getWorkStatus } from "../services/work-status-service.js";
-import { printError, printTable } from "./common.js";
+} from "devtask/services/work-service";
+import { watchAndAutoApprove, isAutoApproveWatcherAlive, writeAutoApprovePid, clearAutoApprovePid } from "devtask/mission/auto-approve";
+import type { GateName } from "devtask/mission/gates";
+import { killLiveSession, attachTmuxSession } from "devtask/roles/runner";
+import { getWorkDiagnostics } from "devtask/services/work-diagnostics-service";
+import { inspectWork } from "devtask/services/work-inspection-service";
+import { getLatestWorkPhaseRun, hasWorkPhaseRuns, listWorkPhaseRuns, listWorkPhaseSessions } from "devtask/services/session-run-service";
+import { getWorkStatus } from "devtask/services/work-status-service";
+import { printError, printTable } from "../common.js";
 
 export function registerWorkCommands(program: Command): void {
   const work = program.command("work").description("Manage work items across multiple repos.");

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCli } from "../src/cli.js";
+import { createCli } from "../apps/cli/src/cli.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
 import { registerWorkspace } from "../src/storage/global-index.js";

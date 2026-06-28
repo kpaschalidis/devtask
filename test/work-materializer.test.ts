@@ -13,7 +13,7 @@ import { resolvePaths, resolveWorkspacePathsForInit } from "../src/infra/paths.j
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { addWorkspaceRepo } from "../src/storage/workspace-repos.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
-import { materializeWorkPlan, readWorkGraph } from "../src/work-materializer.js";
+import { materializeWorkPlan, readWorkGraph } from "../src/services/work-materialization-service.js";
 import { workItemGraphPath } from "../src/infra/paths.js";
 import { readTaskMeta } from "../src/storage/meta.js";
 import { makeTempRepo } from "./helpers.js";

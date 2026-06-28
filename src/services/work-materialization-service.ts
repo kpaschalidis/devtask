@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { buildAgentBootstrapCommand } from "./adapters/agent-kernel/command.js";
-import { DevtaskError } from "./infra/errors.js";
-import { readConfig } from "./infra/config.js";
-import type { DevtaskPaths } from "./infra/paths.js";
+import { buildAgentBootstrapCommand } from "../adapters/agent-kernel/command.js";
+import { DevtaskError } from "../infra/errors.js";
+import { readConfig } from "../infra/config.js";
+import type { DevtaskPaths } from "../infra/paths.js";
 import {
   planMarkdownPath,
   taskMetaPath,
@@ -14,14 +14,14 @@ import {
   workItemMaterializationPath,
   workItemPlanPath,
   workItemRepoContextPath
-} from "./infra/paths.js";
-import { assertValidTaskId } from "./task-id.js";
-import { createTask, initializeStore } from "./storage/task-store.js";
-import { writeTaskMeta } from "./storage/meta.js";
-import type { TaskMeta } from "./types.js";
-import { getWorkspaceRepo, type WorkspaceRepo } from "./storage/workspace-repos.js";
-import type { WorkItem } from "./storage/work-store.js";
-import { resolvePaths } from "./infra/paths.js";
+} from "../infra/paths.js";
+import { assertValidTaskId } from "../task-id.js";
+import { createTask, initializeStore } from "../storage/task-store.js";
+import { writeTaskMeta } from "../storage/meta.js";
+import type { TaskMeta } from "../types.js";
+import { getWorkspaceRepo, type WorkspaceRepo } from "../storage/workspace-repos.js";
+import type { WorkItem } from "../storage/work-store.js";
+import { resolvePaths } from "../infra/paths.js";
 
 export const WORK_DEPENDENCY_TYPES = ["run", "review", "validation"] as const;
 export type WorkDependencyType = (typeof WORK_DEPENDENCY_TYPES)[number];
@@ -222,7 +222,8 @@ function parseWorkGraph(value: unknown, expectedWorkId: string): WorkGraph {
     validation: parseStringArray(value.validation, "validation"),
     openQuestions: parseStringArray(value.openQuestions, "openQuestions")
   };
-  validateGraphReferences(graph);
+
+  validateGraph(graph);
   return graph;
 }
 
@@ -230,15 +231,14 @@ function parseWorkGraphTask(value: unknown): WorkGraphTask {
   if (!isRecord(value)) {
     throw new DevtaskError("Invalid work graph: task must be an object");
   }
-  const id = requireString(value, "id", "work graph");
-  assertValidTaskId(id);
+
   return {
-    id,
-    repoId: requireString(value, "repoId", "work graph"),
+    id: requireString(value, "id", "work graph task"),
+    repoId: requireString(value, "repoId", "work graph task"),
     featureId: parseNullableString(value.featureId, "featureId"),
-    goal: requireString(value, "goal", "work graph"),
+    goal: requireString(value, "goal", "work graph task"),
     owns: parseStringArray(value.owns, "owns"),
-    dependencies: parseWorkGraphDependencies(value.dependencies)
+    dependencies: parseDependencies(value.dependencies)
   };
 }
 
@@ -246,26 +246,77 @@ function parseWorkGraphFeature(value: unknown): WorkGraphFeature {
   if (!isRecord(value)) {
     throw new DevtaskError("Invalid work graph: feature must be an object");
   }
+
   return {
     id: requireString(value, "id", "work graph feature"),
     title: requireString(value, "title", "work graph feature"),
     taskIds: parseStringArray(value.taskIds, "taskIds"),
-    validationRequired: typeof value.validationRequired === "boolean" ? value.validationRequired : true
+    validationRequired: Boolean(value.validationRequired)
   };
 }
 
-function validateGraphReferences(graph: WorkGraph): void {
+function parseDependencies(value: unknown): WorkGraphDependency[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      throw new DevtaskError("Invalid work graph dependency: must be an object");
+    }
+    const type = requireString(entry, "type", "work graph dependency");
+    if (!WORK_DEPENDENCY_TYPES.includes(type as WorkDependencyType)) {
+      throw new DevtaskError(`Invalid work graph dependency type: ${type}; dependency type must be one of ${WORK_DEPENDENCY_TYPES.join(", ")}`);
+    }
+    return {
+      task: requireString(entry, "task", "work graph dependency"),
+      type: type as WorkDependencyType,
+      reason: parseNullableString(entry.reason, "reason")
+    };
+  });
+}
+
+function validateGraph(graph: WorkGraph): void {
   const taskIds = new Set<string>();
+  const repoTaskIds = new Set<string>();
+  const featureIds = new Set<string>();
+
+  for (const feature of graph.features) {
+    if (featureIds.has(feature.id)) {
+      throw new DevtaskError(`Duplicate feature id in work graph: ${feature.id}`);
+    }
+    featureIds.add(feature.id);
+  }
+
   for (const task of graph.tasks) {
     if (taskIds.has(task.id)) {
-      throw new DevtaskError(`Invalid work graph: duplicate task id ${task.id}`);
+      throw new DevtaskError(`Duplicate task id in work graph: ${task.id}`);
     }
     taskIds.add(task.id);
+
+    const repoTaskKey = `${task.repoId}:${task.id}`;
+    if (repoTaskIds.has(repoTaskKey)) {
+      throw new DevtaskError(`Duplicate repo task in work graph: ${repoTaskKey}`);
+    }
+    repoTaskIds.add(repoTaskKey);
+
+    if (task.featureId && !featureIds.has(task.featureId)) {
+      throw new DevtaskError(`Task ${task.id} references unknown feature ${task.featureId}`);
+    }
   }
+
   for (const task of graph.tasks) {
     for (const dependency of task.dependencies) {
       if (!taskIds.has(dependency.task)) {
-        throw new DevtaskError(`Invalid work graph: task ${task.id} depends on unknown task ${dependency.task}`);
+        throw new DevtaskError(`Task ${task.id} depends on unknown task ${dependency.task}`);
+      }
+    }
+  }
+
+  for (const feature of graph.features) {
+    for (const taskId of feature.taskIds) {
+      if (!taskIds.has(taskId)) {
+        throw new DevtaskError(`Feature ${feature.id} references unknown task ${taskId}`);
       }
     }
   }
@@ -282,72 +333,93 @@ function resolveGraphRepos(paths: DevtaskPaths, graph: WorkGraph): Map<string, W
 }
 
 function preflightMaterialization(paths: DevtaskPaths, repos: Map<string, WorkspaceRepo>, graph: WorkGraph): void {
+  const branchCollisions = new Set<string>();
   for (const task of graph.tasks) {
-    const repo = repos.get(task.repoId);
-    if (!repo) {
-      throw new DevtaskError(`Workspace repo ${task.repoId} does not exist`);
+    const branch = buildMaterializedTaskBranch(graph.kind, graph.workId, task.id);
+    const key = `${task.repoId}:${branch}`;
+    if (branchCollisions.has(key)) {
+      throw new DevtaskError(`Duplicate task branch during materialization: ${key}`);
     }
-    const storagePaths = taskStoragePaths(paths, repo.repoPath);
-    if (fs.existsSync(taskMetaPath(storagePaths, task.id))) {
-      throw new DevtaskError(`Task ${task.id} already exists in task storage ${storagePaths.tasksDir}`);
+    branchCollisions.add(key);
+  }
+
+  for (const repo of repos.values()) {
+    const repoPaths = resolveRepoPaths(repo);
+    if (!fs.existsSync(repoPaths.root)) {
+      throw new DevtaskError(`Workspace repo path does not exist: ${repoPaths.root}`);
     }
+  }
+
+  const materializationPath = workItemMaterializationPath(paths, graph.workId);
+  if (fs.existsSync(materializationPath)) {
+    throw new DevtaskError(`Work item ${graph.workId} has already been materialized`);
   }
 }
 
-function resolveRepoPaths(repo: WorkspaceRepo): DevtaskPaths {
-  return resolvePaths(repo.repoPath);
+function resolveRepoPaths(repo: WorkspaceRepo): { root: string; scopePath: string } {
+  const root = resolvePaths(repo.repoPath).root;
+  const scopePath = repo.scope ? path.join(root, repo.scope) : root;
+  return { root, scopePath };
 }
 
 function buildRepoTaskGoal(
   paths: DevtaskPaths,
   workItem: WorkItem,
   graph: WorkGraph,
-  task: WorkGraphTask,
+  graphTask: WorkGraphTask,
   repo: WorkspaceRepo
 ): string {
+  const dependencyLines = graphTask.dependencies.length === 0
+    ? ["- none"]
+    : graphTask.dependencies.map((dependency) => {
+        const reasonSuffix = dependency.reason ? `: ${dependency.reason}` : "";
+        return `- ${dependency.task} (${dependency.type})${reasonSuffix}`;
+      });
+  const ownershipLines = graphTask.owns.length === 0 ? ["- none"] : graphTask.owns.map((entry) => `- ${entry}`);
+  const repoContextPath = workItemRepoContextPath(paths, workItem.id, graphTask.repoId);
+  const repoContext = fs.existsSync(repoContextPath)
+    ? fs.readFileSync(repoContextPath, "utf8").trim()
+    : "";
+
   return [
-    `Implement work item ${workItem.id}: ${workItem.source.title}`,
-    "",
-    `Work source artifact: ${workItem.source.artifact}`,
-    `Work plan artifact: ${workItemPlanPath(paths, workItem.id)}`,
-    `Work graph artifact: ${workItemGraphPath(paths, workItem.id)}`,
-    `Graph task: ${task.id}`,
-    `Repo: ${task.repoId}`,
-    `Repo path: ${repo.repoPath}`,
-    `Repo scope: ${repo.scope ?? "."}`,
+    `# Task ${graphTask.id}`,
     "",
     "## Goal",
-    task.goal,
+    graphTask.goal,
+    "",
+    "## Work Item",
+    `- id: ${workItem.id}`,
+    `- title: ${workItem.source.title}`,
+    `- source artifact: ${workItem.source.artifact}`,
+    "",
+    "## Repository",
+    `- repo id: ${repo.id}`,
+    `- repo path: ${repo.repoPath}`,
+    `- repo scope: ${repo.scope ?? "."}`,
     "",
     "## Ownership",
-    ...task.owns.map((item) => `- ${item}`),
+    ...ownershipLines,
     "",
     "## Dependencies",
-    ...(task.dependencies.length
-      ? task.dependencies.map((dependency) => `- ${dependency.task} (${dependency.type})${dependency.reason ? `: ${dependency.reason}` : ""}`)
-      : ["- none"]),
+    ...dependencyLines,
+    ...(repoContext ? ["", "## Orchestrator Context", repoContext] : []),
     "",
-    "## Work Graph Context",
-    "",
-    JSON.stringify(
-      {
-        workId: graph.workId,
-        validation: graph.validation,
-        openQuestions: graph.openQuestions
-      },
-      null,
-      2
-    )
+    "## Graph Snapshot",
+    `- graph path: ${workItemGraphPath(paths, workItem.id)}`,
+    `- feature id: ${graphTask.featureId ?? "none"}`,
+    `- graph kind: ${graph.kind}`
   ].join("\n");
 }
 
-function buildMaterializedTaskCommand(paths: DevtaskPaths, repoPaths: DevtaskPaths, workItem: WorkItem): string {
-  const config = readConfig(repoPaths);
+function buildMaterializedTaskCommand(
+  paths: DevtaskPaths,
+  repoPaths: { root: string; scopePath: string },
+  workItem: WorkItem
+): string {
+  const config = readConfig(paths);
   return buildAgentBootstrapCommand(config, {
     workspacePath: repoPaths.root,
-    model: config.codex.model,
-    fullAuto: config.codex.fullAuto,
-    addDirs: [workItemDir(paths, workItem.id), path.dirname(workItem.source.artifact)]
+    addDirs: [workItemDir(paths, workItem.id), repoPaths.scopePath],
   });
 }
 
@@ -358,36 +430,26 @@ function hydrateMaterializedTaskPlan(
   storagePaths: DevtaskPaths,
   meta: TaskMeta
 ): TaskMeta {
-  const sharedRepoPlanPath = path.join(paths.workDir, workId, "repo-plans", `${repoId}.md`);
-  if (!fs.existsSync(sharedRepoPlanPath)) {
-    return meta;
+  const finalPlanPath = planMarkdownPath(storagePaths, meta.id);
+  const repoPlanPath = path.join(workItemDir(paths, workId), "repo-plans", `${repoId}.md`);
+  if (fs.existsSync(repoPlanPath) && fs.readFileSync(repoPlanPath, "utf8").trim()) {
+    const repoContextPath = workItemRepoContextPath(paths, workId, repoId);
+    const repoContext = fs.existsSync(repoContextPath) ? fs.readFileSync(repoContextPath, "utf8").trim() : "";
+    const repoPlan = fs.readFileSync(repoPlanPath, "utf8").trimEnd();
+    fs.mkdirSync(path.dirname(finalPlanPath), { recursive: true });
+    fs.writeFileSync(
+      finalPlanPath,
+      `${repoPlan}${repoContext ? `\n\n## Orchestrator Context\n${repoContext}\n` : "\n"}`
+    );
   }
-
-  const plan = fs.readFileSync(sharedRepoPlanPath, "utf8").trim();
-  if (!plan) {
-    return meta;
-  }
-
-  const contextPath = workItemRepoContextPath(paths, workId, repoId);
-  const contextContent = fs.existsSync(contextPath) ? fs.readFileSync(contextPath, "utf8").trim() : null;
-  const planWithContext = contextContent
-    ? `${plan}\n\n---\n\n## Orchestrator Context\n\n${contextContent}\n`
-    : `${plan}\n`;
-
-  fs.writeFileSync(planMarkdownPath(storagePaths, meta.id), planWithContext);
-  const next: TaskMeta = {
-    ...meta,
-    status: "ready",
-    updatedAt: new Date().toISOString()
-  };
-  writeTaskMeta(taskMetaPath(storagePaths, meta.id), next);
-  return next;
+  writeTaskMeta(taskMetaPath(storagePaths, meta.id), meta);
+  return meta;
 }
 
-function toMaterializedTask(task: WorkGraphTask, repo: WorkspaceRepo, meta: TaskMeta): MaterializedWorkTask {
+function toMaterializedTask(graphTask: WorkGraphTask, repo: WorkspaceRepo, meta: TaskMeta): MaterializedWorkTask {
   return {
-    graphTaskId: task.id,
-    repoId: task.repoId,
+    graphTaskId: graphTask.id,
+    repoId: graphTask.repoId,
     repoPath: repo.repoPath,
     scope: repo.scope,
     taskId: meta.id,
@@ -396,82 +458,36 @@ function toMaterializedTask(task: WorkGraphTask, repo: WorkspaceRepo, meta: Task
   };
 }
 
-function parseStringArray(value: unknown, field: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new DevtaskError(`Invalid work graph: ${field} must be an array`);
-  }
-  return value.map((item) => {
-    if (typeof item !== "string" || !item.trim()) {
-      throw new DevtaskError(`Invalid work graph: ${field} must contain only non-empty strings`);
-    }
-    return item.trim();
-  });
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseWorkGraphDependencies(dependencies: unknown): WorkGraphDependency[] {
-  const parsed: WorkGraphDependency[] = [];
-  const seen = new Set<string>();
-
-  if (!Array.isArray(dependencies)) {
-    throw new DevtaskError("Invalid work graph: dependencies must be an array");
+function requireString(value: Record<string, unknown>, key: string, scope: string): string {
+  const raw = value[key];
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new DevtaskError(`Invalid ${scope}: ${key} must be a non-empty string`);
   }
-
-  for (const value of dependencies) {
-    if (!isRecord(value)) {
-      throw new DevtaskError("Invalid work graph: dependency must be an object");
-    }
-    const task = requireString(value, "task", "work graph dependency");
-    const type = parseWorkDependencyType(value.type);
-    const key = `${task}:${type}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    parsed.push({
-      task,
-      type,
-      reason: parseOptionalReason(value.reason)
-    });
-  }
-
-  return parsed;
+  return raw;
 }
 
-function parseWorkDependencyType(value: unknown): WorkDependencyType {
-  if (typeof value !== "string" || !WORK_DEPENDENCY_TYPES.includes(value as WorkDependencyType)) {
-    throw new DevtaskError(`Invalid work graph: dependency type must be one of ${WORK_DEPENDENCY_TYPES.join(", ")}`);
-  }
-  return value as WorkDependencyType;
-}
-
-function parseOptionalReason(value: unknown): string | null {
-  if (value === undefined || value === null) {
+function parseNullableString(value: unknown, key: string): string | null {
+  if (value === null || value === undefined || value === "") {
     return null;
   }
   if (typeof value !== "string") {
-    throw new DevtaskError("Invalid work graph dependency: reason must be a string or null");
-  }
-  return value.trim() || null;
-}
-
-function parseNullableString(value: unknown, field: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    throw new DevtaskError(`Invalid work materialization: ${field} must be a string or null`);
+    throw new DevtaskError(`Invalid value for ${key}: expected string or null`);
   }
   return value;
 }
 
-function requireString(record: Record<string, unknown>, field: string, artifact = "work graph"): string {
-  const value = record[field];
-  if (typeof value !== "string" || !value.trim()) {
-    throw new DevtaskError(`Invalid ${artifact}: ${field} must be a non-empty string`);
+function parseStringArray(value: unknown, key: string): string[] {
+  if (!Array.isArray(value)) {
+    return [];
   }
-  return value.trim();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return value.map((entry) => {
+    if (typeof entry !== "string") {
+      throw new DevtaskError(`Invalid ${key}: expected string[]`);
+    }
+    return entry;
+  });
 }

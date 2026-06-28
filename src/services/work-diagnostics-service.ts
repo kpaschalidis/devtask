@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import type { DevtaskPaths } from "../infra/paths.js";
 import { taskStoragePaths, workItemDir, workItemRepoPlansDir, workItemResultsDir, workItemSpecPath } from "../infra/paths.js";
-import { hasTaskPlan } from "../repo-plan.js";
-import { readWorkMaterialization } from "../work-materializer.js";
+import { hasTaskPlan } from "./repo-plan-record-service.js";
+import { readWorkMaterialization } from "./work-materialization-service.js";
 import { getTask } from "../storage/task-store.js";
 import { getWorkItem } from "../storage/work-store.js";
 

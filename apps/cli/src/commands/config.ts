@@ -1,7 +1,7 @@
 import { Command } from "commander";
-import { readConfig, writeConfig } from "../infra/config.js";
-import { resolveWorkspacePaths } from "../infra/paths.js";
-import { printError } from "./common.js";
+import { readConfig, writeConfig } from "devtask/infra/config";
+import { resolveWorkspacePaths } from "devtask/infra/paths";
+import { printError } from "../common.js";
 
 export function registerConfigCommands(program: Command): void {
   const config = program.command("config").description("Manage workspace-level devtask configuration.");

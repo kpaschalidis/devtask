@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { taskDir, workItemDir, workItemMaterializationPath, resolvePaths, resolveWorkspacePathsForInit } from "../src/infra/paths.js";
 import { createTask } from "../src/storage/task-store.js";
-import { cleanupWorkItem } from "../src/work-cleanup.js";
+import { cleanupWorkItem } from "../src/services/work-cleanup-service.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { makeTempRepo } from "./helpers.js";

@@ -1,12 +1,12 @@
 import { Command } from "commander";
-import { registerAgentCommands } from "./cli/agent.js";
-import { registerConfigCommands } from "./cli/config.js";
-import { registerDoctorCommands } from "./cli/doctor.js";
-import { registerRepoCommands } from "./cli/repo.js";
-import { registerServeCommands } from "./cli/serve.js";
-import { registerWorkCommands } from "./cli/work.js";
-import { registerWorkspaceCommands } from "./cli/workspace.js";
-import { registerWorktreeCommands } from "./cli/worktree.js";
+import { registerAgentCommands } from "./commands/agent.js";
+import { registerConfigCommands } from "./commands/config.js";
+import { registerDoctorCommands } from "./commands/doctor.js";
+import { registerRepoCommands } from "./commands/repo.js";
+import { registerServeCommands } from "./commands/serve.js";
+import { registerWorkCommands } from "./commands/work.js";
+import { registerWorkspaceCommands } from "./commands/workspace.js";
+import { registerWorktreeCommands } from "./commands/worktree.js";
 
 export function createCli(): Command {
   const program = new Command();

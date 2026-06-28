@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectPhaseMemory } from "../src/improvement-memory.js";
+import { collectPhaseMemory } from "../src/services/improvement-memory-service.js";
 import { resolveWorkspacePathsForInit } from "../src/infra/paths.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 

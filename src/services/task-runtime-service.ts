@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { writeTaskMeta, readTaskMeta } from "./storage/meta.js";
-import { isProcessAlive } from "./infra/processes.js";
-import type { DevtaskPaths } from "./infra/paths.js";
-import { taskMetaPath } from "./infra/paths.js";
-import { tmuxSessionExists } from "./adapters/agent-kernel/tmux-control.js";
-import type { TaskMeta } from "./types.js";
+import { writeTaskMeta, readTaskMeta } from "../storage/meta.js";
+import { isProcessAlive } from "../infra/processes.js";
+import type { DevtaskPaths } from "../infra/paths.js";
+import { taskMetaPath } from "../infra/paths.js";
+import { tmuxSessionExists } from "../adapters/agent-kernel/tmux-control.js";
+import type { TaskMeta } from "../types.js";
 
 export function reconcileTaskRuntime(paths: DevtaskPaths, meta: TaskMeta): TaskMeta {
   if (meta.status !== "running") {
@@ -51,7 +51,7 @@ function staleRuntimeReason(meta: TaskMeta): string {
     return `recorded tmux session ${meta.tmuxSession} is not running${findStartupLogSuffix(meta)}`;
   }
   if (meta.supervisorPid || meta.childPid) {
-    return `recorded worker process is not running`;
+    return "recorded worker process is not running";
   }
   return "task was marked running but no live worker session exists";
 }

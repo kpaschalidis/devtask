@@ -199,7 +199,7 @@ describe("work phase feedback", () => {
 
     expect(getLatestWorkPhaseRun(paths, item.id, "orchestrate")?.status).toBe("planned");
     expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.status).toBe("completed");
-    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.session.resumeContext.providerSessionId).toBe("agent-123");
+    expect(readRunningPhaseRun(phaseRunDir(paths, item.id, "orchestrate", null))?.session.resumeContext.providerSessionId).toBeNull();
     expect(tmux.killTmuxSession).toHaveBeenCalledWith("devtask-test-orchestrate-WORK-123");
   });
 

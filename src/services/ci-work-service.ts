@@ -23,7 +23,7 @@ import {
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { getWorkItem, updateWorkItemStatus } from "../storage/work-store.js";
 import { updateRecentWork } from "../storage/global-index.js";
-import { readWorkMaterialization } from "../work-materializer.js";
+import { readWorkMaterialization } from "./work-materialization-service.js";
 import { runWorkAgentPrompt } from "./agent-prompt-service.js";
 import { runDeterministicChecksForRepo } from "./deterministic-check-service.js";
 import { writeScopedVerifyResult, writeWorkResult } from "./work-result-service.js";

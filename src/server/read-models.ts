@@ -14,7 +14,7 @@ import {
   listSessionTimeline,
   listWorkSessionThreads,
 } from "../services/session-history-service.js";
-import { type WorkGraph, readMaterializedWorkGraph, readWorkGraph } from "../work-materializer.js";
+import { type WorkGraph, readMaterializedWorkGraph, readWorkGraph } from "../services/work-materialization-service.js";
 
 export interface WorkListEntry {
   id: string;

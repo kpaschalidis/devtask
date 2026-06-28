@@ -7,7 +7,7 @@ import {
 } from "../adapters/scm/index.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import { getWorkItem, updateWorkItemStatus } from "../storage/work-store.js";
-import { readWorkMaterialization } from "../work-materializer.js";
+import { readWorkMaterialization } from "./work-materialization-service.js";
 import { DevtaskError } from "../infra/errors.js";
 import { writeWorkResult } from "./work-result-service.js";
 import type { PullRequestTaskResult, PullRequestWorkResult } from "./work-service.js";

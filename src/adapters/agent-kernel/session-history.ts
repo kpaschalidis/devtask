@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { buildTranscript, SqliteSessionHistoryStore } from "@devtask/agent-kernel";
+import { buildTranscript, openPersistentSessionHistoryStore } from "@devtask/agent-kernel";
 import type {
   SessionHistoryEvent,
+  SessionHistoryStore,
   SessionThread,
+  SessionThreadQuery,
   TimelineBlock,
   TranscriptMessage,
 } from "@devtask/agent-kernel";
@@ -17,12 +18,14 @@ export function sessionHistoryPath(paths: DevtaskPaths): string {
 }
 
 export function hasSessionHistory(paths: DevtaskPaths): boolean {
-  return fs.existsSync(sessionHistoryPath(paths));
+  const sqlitePath = sessionHistoryPath(paths);
+  const filePath = sqlitePath.replace(/\.sqlite$/, ".json");
+  return fs.existsSync(sqlitePath) || fs.existsSync(filePath);
 }
 
 export function listKernelSessionThreads(
   paths: DevtaskPaths,
-  query: Parameters<SqliteSessionHistoryStore["listThreads"]>[0] = {},
+  query: SessionThreadQuery = {},
 ): SessionThread[] {
   return readSessionHistory(paths, (store) => store.listThreads(query));
 }
@@ -55,12 +58,12 @@ export function listKernelSessionTranscript(paths: DevtaskPaths, threadId: strin
   });
 }
 
-function readSessionHistory<T>(paths: DevtaskPaths, fn: (store: SqliteSessionHistoryStore) => T): T {
+function readSessionHistory<T>(paths: DevtaskPaths, fn: (store: SessionHistoryStore) => T): T {
   const dbPath = sessionHistoryPath(paths);
-  const db = new DatabaseSync(dbPath);
+  const handle = openPersistentSessionHistoryStore(dbPath);
   try {
-    return fn(new SqliteSessionHistoryStore(db));
+    return fn(handle.store);
   } finally {
-    db.close();
+    handle.close();
   }
 }

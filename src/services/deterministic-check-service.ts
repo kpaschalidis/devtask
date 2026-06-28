@@ -3,7 +3,7 @@ import type { DevtaskPaths } from "../infra/paths.js";
 import { resolvePaths } from "../infra/paths.js";
 import { runCommand } from "../infra/process-runner.js";
 import { DevtaskError } from "../infra/errors.js";
-import { readWorkMaterialization } from "../work-materializer.js";
+import { readWorkMaterialization } from "./work-materialization-service.js";
 import type { VerifyCommandResult, VerifyTaskResult, VerifyWorkResult } from "./work-service.js";
 
 export async function runDeterministicChecks(

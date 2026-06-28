@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { Command } from "commander";
-import { findWorkspaceRoot } from "../infra/paths.js";
+import { findWorkspaceRoot } from "devtask/infra/paths";
 
 interface Check {
   label: string;

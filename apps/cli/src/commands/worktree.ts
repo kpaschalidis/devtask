@@ -1,7 +1,7 @@
 import { Command } from "commander";
-import { resolveWorkspacePaths } from "../infra/paths.js";
-import { cleanupWorktrees, listWorktrees } from "../services/worktree-service.js";
-import { printError, printTable } from "./common.js";
+import { resolveWorkspacePaths } from "devtask/infra/paths";
+import { cleanupWorktrees, listWorktrees } from "devtask/services/worktree-service";
+import { printError, printTable } from "../common.js";
 
 export function registerWorktreeCommands(program: Command): void {
   const worktree = program.command("worktree").description("Inspect and clean up repo-local worktrees.");

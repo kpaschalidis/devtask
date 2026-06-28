@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const binPath = path.join(process.cwd(), "dist", "bin", "devtask.js");
+const binPath = path.join(process.cwd(), "dist", "apps", "cli", "bin", "devtask.js");
 const templateSourceDir = path.join(process.cwd(), "scripts");
 const templateTargetDir = path.join(process.cwd(), "dist", "templates", "scripts");
 const smokeScripts = ["smoke-regular.sh", "smoke-polyrepo.sh"];

@@ -67,7 +67,7 @@ Do not write new features against the older “workspace-root `.devtask` as main
 ## Code Organization
 
 Important directories:
-- `src/cli/`
+- `apps/cli/`
 - `src/services/`
 - `src/board/`
 - `src/adapters/`
@@ -77,9 +77,9 @@ Important directories:
 Important root modules:
 - `src/agent.ts`
 - `src/global-plan.ts`
-- `src/repo-plan.ts`
-- `src/work-materializer.ts`
-- `src/work-cleanup.ts`
+- `src/services/repo-plan-record-service.ts`
+- `src/services/work-materialization-service.ts`
+- `src/services/work-cleanup-service.ts`
 
 Prompt definitions live under:
 - `src/prompts/`

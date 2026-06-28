@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { resolveWorkspacePathsForInit, workItemGraphPath } from "../src/infra/paths.js";
 import { initializeWorkspace } from "../src/storage/task-store.js";
 import { createManualWorkItem } from "../src/storage/work-store.js";
-import { readWorkGraph } from "../src/work-materializer.js";
+import { readWorkGraph } from "../src/services/work-materialization-service.js";
 
 describe("readWorkGraph features backward compatibility", () => {
   it("returns features: [] when graph.json has no features field", () => {

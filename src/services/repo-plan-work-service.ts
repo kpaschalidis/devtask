@@ -6,10 +6,10 @@ import { phaseRunDir, workItemDir, workItemRepoContextPath, workItemRepoPlanPath
 import { writePhaseRunRecord } from "../infra/session-run.js";
 import { newRunId } from "../infra/run-record.js";
 import { DevtaskError } from "../infra/errors.js";
-import { collectPhaseMemory } from "../improvement-memory.js";
+import { collectPhaseMemory } from "./improvement-memory-service.js";
 import { loadInstruction } from "../instructions/loader.js";
 import { getWorkspaceRepo } from "../storage/workspace-repos.js";
-import { readWorkGraph, type WorkGraphTask } from "../work-materializer.js";
+import { readWorkGraph, type WorkGraphTask } from "./work-materialization-service.js";
 import type { WorkspaceRepo } from "../storage/workspace-repos.js";
 import { runWorkAgentPrompt } from "./agent-prompt-service.js";
 

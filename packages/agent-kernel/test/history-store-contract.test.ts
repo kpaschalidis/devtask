@@ -1,24 +1,35 @@
-import { DatabaseSync } from 'node:sqlite';
+import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InMemorySessionHistoryStore } from '../src/trace/in-memory-session-history-store.js';
 import { SqliteSessionHistoryStore } from '../src/storage/sqlite/session-history-store.js';
 import type { SessionHistoryStore } from '../src/trace/session-history-store.js';
 import type { SessionThread } from '../src/trace/session-history.js';
 
-const databases: DatabaseSync[] = [];
+interface DatabaseSyncLike {
+  close(): void;
+}
+
+const databases: DatabaseSyncLike[] = [];
+const require = createRequire(import.meta.url);
 
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
 
-describe.each([
+const cases: Array<[string, () => SessionHistoryStore]> = [
   ['memory', () => new InMemorySessionHistoryStore()],
-  ['sqlite', () => {
+];
+
+const DatabaseSync = loadDatabaseSync();
+if (DatabaseSync) {
+  cases.push(['sqlite', () => {
     const db = new DatabaseSync(':memory:');
     databases.push(db);
     return new SqliteSessionHistoryStore(db);
-  }],
-])('SessionHistoryStore contract: %s', (_name, createStore) => {
+  }]);
+}
+
+describe.each(cases)('SessionHistoryStore contract: %s', (_name, createStore) => {
   it('projects equivalent queries, transcripts, delivery state, and timelines', () => {
     const store = createStore();
     seedStore(store);
@@ -45,6 +56,15 @@ describe.each([
     ]);
   });
 });
+
+function loadDatabaseSync(): (new (path: string) => DatabaseSyncLike) | null {
+  try {
+    const sqlite = require('node:sqlite') as { DatabaseSync: new (path: string) => DatabaseSyncLike };
+    return sqlite.DatabaseSync;
+  } catch {
+    return null;
+  }
+}
 
 function seedStore(store: SessionHistoryStore): void {
   const thread: SessionThread = {

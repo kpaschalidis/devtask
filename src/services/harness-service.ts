@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
-import { buildClaudeCodeCommand, buildCodexExecCommand, buildCursorCommand } from "@devtask/agent-kernel";
+import { buildAgentBootstrapCommand } from "../adapters/agent-kernel/command.js";
 import { readConfig } from "../infra/config.js";
 import type { DevtaskConfig } from "../infra/config.js";
 import { DevtaskError } from "../infra/errors.js";
@@ -48,7 +48,10 @@ type ShellCommandExecutor = (
   }
 ) => Promise<ShellCommandResult>;
 
-type AgentCommandBuilder = (config: DevtaskConfig, options: { model: string | null; fullAuto: boolean; skipGitRepoCheck: boolean }) => string;
+type AgentCommandBuilder = (
+  config: DevtaskConfig,
+  options: { model: string | null; fullAuto: boolean; skipGitRepoCheck: boolean },
+) => string;
 
 export async function testAgentIntegration(
   paths: DevtaskPaths,
@@ -128,19 +131,8 @@ function buildAgentTestCommand(
   config: DevtaskConfig,
   options: { model: string | null; fullAuto: boolean; skipGitRepoCheck: boolean },
 ): string {
-  if (config.agent.provider === "cursor") {
-    return buildCursorCommand({
-      model: options.model,
-      fullAuto: options.fullAuto,
-    });
-  }
-  if (config.agent.provider === "claude-code") {
-    return buildClaudeCodeCommand({
-      model: options.model,
-      dangerouslySkipPermissions: config.codex.fullAuto !== false,
-    });
-  }
-  return buildCodexExecCommand({
+  return buildAgentBootstrapCommand(config, {
+    workspacePath: "",
     model: options.model,
     fullAuto: options.fullAuto,
     skipGitRepoCheck: options.skipGitRepoCheck,

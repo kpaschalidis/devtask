@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { describe, expect, it } from "vitest";
-import { registerWorkCommands } from "../src/cli/work.js";
-import { createCli } from "../src/cli.js";
+import { createCli } from "../apps/cli/src/cli.js";
+import { registerWorkCommands } from "../apps/cli/src/commands/work.js";
 
 describe("work mission commands", () => {
   it("registers approve, stop, and _validate-worker commands", () => {

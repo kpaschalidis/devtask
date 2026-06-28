@@ -16,11 +16,9 @@ import {
   startPipePane,
   startTmuxSession as kernelStartTmuxSession,
   tmuxSessionExists,
-  TmuxRuntime,
   waitForTmuxSession,
   writeTmuxLaunchScript,
 } from "@devtask/agent-kernel";
-import type { KernelSessionRef } from "../../infra/session-run.js";
 import type { DevtaskPaths } from "../../infra/paths.js";
 import { DevtaskError } from "../../infra/errors.js";
 
@@ -75,21 +73,6 @@ export function sendToTmuxSessionWithConfirmation(
   options: { lines?: number; attempts?: number; intervalMs?: number } = {},
 ): { confirmed: boolean; output: string } {
   return translateTmuxError(() => kernelSendToTmuxSessionWithConfirmation(session, message, options));
-}
-
-export async function launchExecutionTmuxSession(config: {
-  sessionId: string;
-  workspacePath: string;
-  launchCommand: string;
-}): Promise<KernelSessionRef> {
-  const runtime = new TmuxRuntime({ artifactPrefix: "devtask" });
-  const handle = await runtime.create({
-    sessionId: config.sessionId,
-    workspacePath: config.workspacePath,
-    launchCommand: config.launchCommand,
-    environment: {},
-  });
-  return { runtimeSessionId: handle.id, runtimeName: handle.runtimeName, threadId: null, data: { ...handle.data } };
 }
 
 function translateTmuxError<T>(fn: () => T): T {

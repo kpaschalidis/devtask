@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { describe, expect, it } from "vitest";
-import { registerWorkCommands } from "../src/cli/work.js";
+import { registerWorkCommands } from "../apps/cli/src/commands/work.js";
 
 describe("work CLI", () => {
   it("registers materialize, pr-watch, ci-watch, runs, diagnose, inspect, and removes implement", () => {

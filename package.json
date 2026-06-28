@@ -3,8 +3,20 @@
   "version": "1.0.0",
   "description": "Local persistent task workers for agent-driven development.",
   "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./adapters/*": "./dist/adapters/*.js",
+    "./infra/*": "./dist/infra/*.js",
+    "./mission/*": "./dist/mission/*.js",
+    "./roles/*": "./dist/roles/*.js",
+    "./server/*": "./dist/server/*.js",
+    "./services/*": "./dist/services/*.js",
+    "./storage/*": "./dist/storage/*.js",
+    "./task-id": "./dist/task-id.js",
+    "./types": "./dist/types.js"
+  },
   "bin": {
-    "devtask": "./dist/bin/devtask.js"
+    "devtask": "./dist/apps/cli/bin/devtask.js"
   },
   "main": "./dist/index.js",
   "engines": {
@@ -24,8 +36,10 @@
     "test:kernel": "npm test --workspace packages/agent-kernel",
     "build:mission": "npm run build --workspace packages/mission",
     "test:mission": "npm test --workspace packages/mission",
-    "build": "npm run build:kernel && npm run build:mission && node scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/chmod-bin.mjs && cp src/instructions/*.md dist/instructions/ && cp -r src/skills/* dist/skills/",
-    "check": "npm run build:kernel && npm run build:mission && tsc -p tsconfig.json --noEmit",
+    "build:cli": "tsc -p apps/cli/tsconfig.json",
+    "check:cli": "tsc -p apps/cli/tsconfig.json --noEmit",
+    "build": "npm run build:kernel && npm run build:mission && node scripts/clean-dist.mjs && tsc -p tsconfig.json && npm run build:cli && node scripts/chmod-bin.mjs && cp src/instructions/*.md dist/instructions/ && cp -r src/skills/* dist/skills/",
+    "check": "npm run build:kernel && npm run build:mission && node scripts/clean-dist.mjs && tsc -p tsconfig.json && npm run check:cli",
     "test": "npm run build:kernel && npm run test:kernel && npm run build:mission && npm run test:mission && vitest run",
     "prepack": "npm run build"
   },

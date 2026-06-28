@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import { startApiServer } from "../server/api.js";
-import { printError } from "./common.js";
+import { startApiServer } from "devtask/server/api";
+import { printError } from "../common.js";
 
 export function registerServeCommands(program: Command): void {
   program

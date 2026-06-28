@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
 import type {
   NewSessionHistoryEvent,
   SessionLabels,
@@ -17,6 +16,17 @@ import type {
 import type { SessionHistoryStore } from '../../trace/session-history-store.js';
 import { now } from '../../shared/time.js';
 import { buildTimelineBlocks, buildTranscript } from '../../trace/history-projection.js';
+
+interface SqliteStatement {
+  run(...params: unknown[]): unknown;
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown;
+}
+
+interface SqliteDatabaseLike {
+  exec(sql: string): void;
+  prepare(sql: string): SqliteStatement;
+}
 
 interface ThreadRow {
   id: string;
@@ -65,7 +75,7 @@ interface TimelineBlockRow {
 export class SqliteSessionHistoryStore implements SessionHistoryStore {
   private savepointSeq = 0;
 
-  constructor(private readonly db: DatabaseSync) {
+  constructor(private readonly db: SqliteDatabaseLike) {
     this.ensureThreadSchema();
     db.exec(`
       CREATE TABLE IF NOT EXISTS session_history_events (

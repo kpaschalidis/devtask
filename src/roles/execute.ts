@@ -11,13 +11,12 @@ import {
 } from "../infra/paths.js";
 import { writePhaseRunRecord, readRunningPhaseRun, updateRunningPhaseRun } from "../infra/session-run.js";
 import { newRunId } from "../infra/run-record.js";
-import { collectPhaseMemory } from "../improvement-memory.js";
-import { readWorkMaterialization, type WorkMaterialization } from "../work-materializer.js";
-import { getWorkItem } from "../storage/work-item.js";
+import { collectPhaseMemory } from "../services/improvement-memory-service.js";
+import { readWorkMaterialization, type WorkMaterialization } from "../services/work-materialization-service.js";
+import { getWorkItem } from "../storage/work-store.js";
 import { readTaskMeta, writeTaskMeta } from "../storage/meta.js";
 import {
   createBareSession,
-  launchExecutionTmuxSession,
   sendLaunchCommand,
   sendToTmuxSessionWithConfirmation,
   tmuxSessionExists,
@@ -25,6 +24,7 @@ import {
   waitForTmuxSession,
   writeLaunchScript
 } from "../adapters/agent-kernel/tmux-control.js";
+import { launchDevtaskRuntimeSession } from "../adapters/agent-kernel/kernel.js";
 import { DevtaskError } from "../infra/errors.js";
 import type { KernelSessionRef } from "../infra/session-run.js";
 import type { TaskMeta } from "../types.js";
@@ -294,7 +294,7 @@ async function launchExecutionSession(
   meta: TaskMeta
 ): Promise<KernelSessionRef> {
   const executionTaskPath = buildExecutionTaskPath(workspacePaths, repoId, meta);
-  return launchExecutionTmuxSession({
+  return launchDevtaskRuntimeSession({
     sessionId: sessionName,
     workspacePath: meta.worktreePath,
     launchCommand: buildExecutionLaunchCommand(meta, executionTaskPath),

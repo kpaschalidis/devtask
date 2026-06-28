@@ -1,5 +1,5 @@
 import type { DevtaskPaths } from "../infra/paths.js";
-import { readWorkMaterialization } from "../work-materializer.js";
+import { readWorkMaterialization } from "./work-materialization-service.js";
 import { cleanupWork } from "./work-service.js";
 
 export interface WorktreeSummary {

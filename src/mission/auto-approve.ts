@@ -7,7 +7,7 @@ import { tmuxSessionExists } from "../adapters/agent-kernel/tmux-control.js";
 import { readGateState } from "./gates.js";
 import { approveWorkGate } from "./approve.js";
 import type { GateName } from "./gates.js";
-import { readWorkGraph } from "../work-materializer.js";
+import { readWorkGraph } from "../services/work-materialization-service.js";
 
 const GATE_MARKERS: Array<{ gate: GateName; marker: string }> = [
   { gate: "gate-1", marker: "Gate 1: Awaiting approval" },
